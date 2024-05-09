@@ -1,0 +1,8 @@
+# macOS Rubbish
+.DS_Store
+**/__pycache__
+
+.idea
+captcha.png
+test.py
+.venv

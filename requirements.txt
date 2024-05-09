@@ -1,0 +1,3 @@
+requests~=2.31.0
+fake-useragent~=1.5.0
+pycryptodome~=3.20.0
