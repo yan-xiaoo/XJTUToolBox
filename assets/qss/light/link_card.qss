@@ -1,0 +1,29 @@
+LinkCard {
+    border: none;
+    border-radius: 10px;
+    background-color: rgba(118, 162, 185, 0.95);
+}
+
+LinkCard:hover {
+    background-color: rgba(118, 162, 185, 0.80);
+    border: none;
+}
+
+#titleLabel {
+    font: 18px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC';
+    color: white;
+}
+
+#contentLabel {
+    font: 12px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC';
+    color: white;
+}
+
+LinkCardView {
+    background-color: transparent;
+    border: none;
+}
+
+#view {
+    background-color: transparent;
+}

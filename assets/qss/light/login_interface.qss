@@ -1,0 +1,9 @@
+LoginInterface, #scrollWidget{
+    background-color: transparent;
+    border: none;
+}
+
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}

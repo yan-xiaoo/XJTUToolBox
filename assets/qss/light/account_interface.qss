@@ -1,0 +1,12 @@
+AccountInterface, #scrollWidget{
+    background-color: transparent;
+}
+
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}
+
+AccountInterface, #accountAreaWidget{
+    background-color: transparent;
+}

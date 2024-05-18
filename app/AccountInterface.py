@@ -1,0 +1,277 @@
+from PyQt5.QtCore import Qt, QPoint, pyqtSlot, pyqtSignal
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame
+from qfluentwidgets import ScrollArea, TitleLabel, VBoxLayout, StrongBodyLabel, BodyLabel, SubtitleLabel, LineEdit, \
+    CardWidget, IconWidget, CaptionLabel, PushButton, TransparentToolButton, FluentIcon, RoundMenu, Action, MessageBox, \
+    MessageBoxBase
+from .utils import StyleSheet, cfg
+from .utils.account import Account, AccountManager
+from .sub_interfaces import LoginDialog
+
+
+class AddAccountCard(CardWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.iconWidget = IconWidget(FluentIcon.ADD, self)
+        self.titleLabel = BodyLabel(self.tr("添加账户…"), self)
+        self.contentLabel = CaptionLabel(self.tr("点击添加一个新的账户"), self)
+
+        self.hBoxLayout = QHBoxLayout(self)
+        self.vBoxLayout = QVBoxLayout()
+
+        self.setFixedHeight(73)
+        self.iconWidget.setFixedSize(48, 48)
+        self.contentLabel.setTextColor("#606060", "#d2d2d2")
+
+        self.hBoxLayout.setContentsMargins(20, 11, 11, 11)
+        self.hBoxLayout.setSpacing(15)
+        self.hBoxLayout.addWidget(self.iconWidget)
+
+        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.vBoxLayout.setSpacing(0)
+        self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignVCenter)
+        self.vBoxLayout.addWidget(self.contentLabel, 0, Qt.AlignVCenter)
+        self.vBoxLayout.setAlignment(Qt.AlignVCenter)
+        self.hBoxLayout.addLayout(self.vBoxLayout)
+
+
+class AccountCard(CardWidget):
+    accountChanged = pyqtSignal()
+    accountDeleted = pyqtSignal(Account)
+    accountCurrentChanged = pyqtSignal(Account)
+
+    def __init__(self, account: Account, icon, title, content, parent=None):
+        super().__init__(parent)
+        self.account = account
+        self.iconWidget = IconWidget(icon)
+        self.titleLabel = BodyLabel(title, self)
+        self.contentLabel = CaptionLabel(content, self)
+        self.openButton = PushButton(self.tr('切换'), self)
+        self.moreButton = TransparentToolButton(FluentIcon.MORE, self)
+
+        self.hBoxLayout = QHBoxLayout(self)
+        self.vBoxLayout = QVBoxLayout()
+
+        self.setFixedHeight(73)
+        self.iconWidget.setFixedSize(48, 48)
+        self.contentLabel.setTextColor("#606060", "#d2d2d2")
+        self.openButton.setFixedWidth(120)
+
+        self.hBoxLayout.setContentsMargins(20, 11, 11, 11)
+        self.hBoxLayout.setSpacing(15)
+        self.hBoxLayout.addWidget(self.iconWidget)
+
+        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.vBoxLayout.setSpacing(0)
+        self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignVCenter)
+        self.vBoxLayout.addWidget(self.contentLabel, 0, Qt.AlignVCenter)
+        self.vBoxLayout.setAlignment(Qt.AlignVCenter)
+        self.hBoxLayout.addLayout(self.vBoxLayout)
+
+        self.hBoxLayout.addStretch(1)
+        self.hBoxLayout.addWidget(self.openButton, 0, Qt.AlignRight)
+        self.hBoxLayout.addWidget(self.moreButton, 0, Qt.AlignRight)
+
+        self.editAction = Action(FluentIcon.EDIT, self.tr("编辑名称"), self)
+        self.editPasswordAction = Action(FluentIcon.LABEL, self.tr('修改密码'), self)
+        self.deleteAction = Action(FluentIcon.DELETE, self.tr('删除'), self)
+
+        self.editAction.triggered.connect(self._onEditAccountNameClicked)
+        self.editPasswordAction.triggered.connect(self._onEditAccountPasswordClicked)
+        self.deleteAction.triggered.connect(self._onDeleteAccountClicked)
+
+        self.menu = RoundMenu(parent=self)
+        self.menu.addAction(self.editAction)
+        self.menu.addAction(self.editPasswordAction)
+        self.menu.addAction(self.deleteAction)
+
+        self.moreButton.setFixedSize(32, 32)
+        self.moreButton.clicked.connect(self.onMoreButtonClicked)
+        self.openButton.clicked.connect(self.onOpenButtonClicked)
+
+    def setCurrent(self, is_current: bool):
+        """设置此账户卡包含的是当前账户与否。账户卡的样式与此有关。"""
+        if is_current:
+            self.openButton.setEnabled(False)
+            self.openButton.setText(self.tr('当前账户'))
+        else:
+            self.openButton.setEnabled(True)
+            self.openButton.setText(self.tr('切换'))
+
+    def onOpenButtonClicked(self):
+        self.accountCurrentChanged.emit(self.account)
+
+    def onMoreButtonClicked(self):
+        x = (self.moreButton.width() - self.menu.width()) // 2 + 10
+        pos = self.moreButton.mapToGlobal(QPoint(x, self.moreButton.height()))
+        self.menu.exec(pos)
+
+    def _onEditAccountNameClicked(self):
+        dialog = EditAccountNameBox(self.parent().parent().parent().parent())
+        if dialog.exec():
+            self.account.nickname = dialog.nameEdit.text()
+            self.titleLabel.setText(self.account.nickname)
+            self.accountChanged.emit()
+
+    def _onEditAccountPasswordClicked(self):
+        dialog = LoginDialog(self.parent().parent().parent().parent())
+        dialog.login_interface.userNameEdit.setText(self.account.username)
+        dialog.loginSuccess.connect(self._onLoginFinish)
+        dialog.exec()
+
+    def _onDeleteAccountClicked(self):
+        box = MessageBox(self.tr("删除账户"), self.tr("确定要删除此账户吗？\n账户相关的缓存数据会被一同删除，无法恢复。"),
+                         self.parent().parent().parent().parent())
+        box.yesButton.setText(self.tr("删除"))
+        box.cancelButton.setText(self.tr("取消"))
+        if box.exec():
+            self.accountDeleted.emit(self.account)
+
+    @pyqtSlot(str, str)
+    def _onLoginFinish(self, username, password):
+        self.account.username = username
+        self.account.password = password
+        self.titleLabel.setText(self.account.nickname)
+        self.accountChanged.emit()
+
+    def deleteLater(self):
+        self.accountChanged.disconnect()
+        self.accountDeleted.disconnect()
+        self.accountCurrentChanged.disconnect()
+        super().deleteLater()
+
+
+class EditAccountNameBox(MessageBoxBase):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel(self.tr('设置账户名称'), self)
+        self.bodyLabel = BodyLabel(self.tr('为账户设置一个名称，用于本地显示'), self)
+        self.nameEdit = LineEdit()
+        self.nameEdit.setPlaceholderText(self.tr('账户名称'))
+        self.nameEdit.setClearButtonEnabled(True)
+
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.bodyLabel)
+        self.viewLayout.addWidget(self.nameEdit)
+        self.yesButton.setText(self.tr("确定"))
+        self.cancelButton.setText(self.tr("取消"))
+
+        # 设置对话框的最小宽度
+        self.widget.setMinimumWidth(300)
+
+        self.nameEdit.setFocus()
+
+    def keyReleaseEvent(self, a0):
+        if a0.key() == Qt.Key_Return:
+            self.yesButton.click()
+        else:
+            super().keyReleaseEvent(a0)
+
+
+class AccountInterface(ScrollArea):
+    def __init__(self, accounts: AccountManager, parent=None):
+        super().__init__(parent)
+        self.setObjectName("AccountInterface")
+
+        self.view = QWidget(self)
+        self.vBoxLayout = VBoxLayout(self.view)
+        self.vBoxLayout.setSpacing(5)
+        self.vBoxLayout.setContentsMargins(10, 15, 10, 30)
+        self.view.setObjectName("scrollWidget")
+
+        self.titleLabel = TitleLabel(self.tr("切换账户"), self.view)
+        self.titleLabel.setContentsMargins(10, 15, 0, 0)
+        self.titleLabel.setObjectName("titleLabel")
+        self.vBoxLayout.addWidget(self.titleLabel)
+
+        self.minorLabel = StrongBodyLabel(self.tr("选择要切换的账户或添加一个新账户"), self.view)
+        self.minorLabel.setContentsMargins(15, 5, 0, 0)
+        self.vBoxLayout.addWidget(self.minorLabel)
+        self.vBoxLayout.addSpacing(10)
+
+        self.accountArea = QFrame(self.view)
+        self.accountArea.setObjectName("accountArea")
+        self.accountAreaLayout = VBoxLayout(self.accountArea)
+
+        self.accountAreaLayout.setSpacing(6)
+        self.accountAreaLayout.setContentsMargins(30, 60, 30, 30)
+        self.accountAreaLayout.setAlignment(Qt.AlignTop)
+
+        self.vBoxLayout.addWidget(self.accountArea, stretch=1)
+
+        self.default_icon = QIcon("assets/icons/default_avatar.png")
+
+        self.addAccountWidget = AddAccountCard(self.accountArea)
+        self.accountAreaLayout.addWidget(self.addAccountWidget)
+        self.addAccountWidget.clicked.connect(self._onAddAccountClicked)
+
+        self.accounts = accounts
+        self.account_widgets = {}
+        for index, account in enumerate(self.accounts):
+            self._add_account_widget(account, is_current=index == self.accounts.current)
+
+        if accounts.empty():
+            self.minorLabel.setText("你还没有任何账户。点击下方添加一个账户")
+
+        self.setWidget(self.view)
+        self.setWidgetResizable(True)
+
+        StyleSheet.ACCOUNT_INTERFACE.apply(self)
+
+    def _onAccountChanged(self):
+        self.accounts.save_to()
+
+    @pyqtSlot(Account)
+    def _onAccountDeleted(self, account: Account):
+        self.accounts.remove(account)
+        self.accountAreaLayout.removeWidget(self.account_widgets[account])
+        self.account_widgets[account].deleteLater()
+        self._onAccountChanged()
+
+    def _onAddAccountClicked(self):
+        if not cfg.hasReadLoginTip.value:
+            if not self.show_first_time_tip():
+                return
+        dialog = LoginDialog(self.parent())
+        dialog.loginSuccess.connect(self._onLoginFinish)
+        dialog.exec()
+
+    def add_account(self, account: Account):
+        self.accounts.append(account)
+        self._add_account_widget(account)
+        self.accounts.save_to()
+
+    def _add_account_widget(self, account: Account, is_current=False):
+        """is_current 仅仅影响按钮样式，不会影响账户的切换行为"""
+        widget = AccountCard(account, self.default_icon, account.nickname, account.username, self.accountArea)
+        widget.accountChanged.connect(self._onAccountChanged)
+        widget.accountDeleted.connect(self._onAccountDeleted)
+        widget.accountCurrentChanged.connect(self._onCurrentAccountChanged)
+        self.account_widgets[account] = widget
+        self.accountAreaLayout.addWidget(widget)
+        widget.setCurrent(is_current)
+
+    @pyqtSlot(Account)
+    def _onCurrentAccountChanged(self, account: Account):
+        self.accounts.current = self.accounts.index(account)
+        for a, w in self.account_widgets.items():
+            w.setCurrent(a == account)
+        self._onAccountChanged()
+
+    @pyqtSlot(str, str)
+    def _onLoginFinish(self, username, password):
+        account = Account(username, password, username)
+        self.add_account(account)
+
+    def show_first_time_tip(self) -> bool:
+        """显示第一次使用时的说明"""
+        w = MessageBox(self.tr("登录说明"), self.tr("此程序由交大学生个人开发。\n本程序仅会在本地存储用户名和密码信息，并且仅在与西安交通"
+                                                    "大学服务器通信时使用这些信息。\n继续使用即代表您已知晓并同意此行为。"),
+                       self)
+        w.yesButton.setText(self.tr("同意"))
+        w.cancelButton.setText(self.tr("不同意"))
+        if w.exec():
+            cfg.hasReadLoginTip.value = True
+            return True
+        else:
+            return False
