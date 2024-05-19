@@ -1,5 +1,3 @@
-import time
-
 from PyQt5.QtCore import pyqtSlot, QUrl
 from PyQt5.QtGui import QIcon, QDesktopServices
 from qfluentwidgets import MSFluentWindow, NavigationBarPushButton
@@ -28,7 +26,7 @@ class MainWindow(MSFluentWindow):
 
     def initWindow(self):
         self.setWindowTitle("仙交百宝箱")
-        self.setBaseSize(785, 600)
+        self.setMinimumSize(785, 600)
 
         self.show()
 
