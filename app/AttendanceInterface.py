@@ -19,11 +19,14 @@ class AttendanceFlowWidget(QFrame):
         self.vBoxLayout = VBoxLayout(self)
         self.nothingFrame = self.constructNoAccountFrame()
         self.normalFrame = self.constructWithAccountFrame()
-        # 没有账户的情况下无法展示界面
-        if len(accounts) == 0:
-            self.vBoxLayout.addWidget(self.nothingFrame)
-        else:
-            self.vBoxLayout.addWidget(self.normalFrame)
+
+        self.vBoxLayout.addWidget(self.nothingFrame)
+        self.vBoxLayout.addWidget(self.normalFrame)
+
+        if len(accounts) > 0:
+            self.loadContentCache()
+        # 立刻根据当前账户状态更改显示
+        self.accountAdded()
 
         self.thread_.error.connect(self.onThreadError)
         self.thread_.successMessage.connect(self.onThreadSuccess)
@@ -40,13 +43,9 @@ class AttendanceFlowWidget(QFrame):
         if len(accounts) == 0:
             self.normalFrame.setVisible(False)
             self.nothingFrame.setVisible(True)
-            self.vBoxLayout.removeWidget(self.normalFrame)
-            self.vBoxLayout.addWidget(self.nothingFrame)
         else:
             self.nothingFrame.setVisible(False)
             self.normalFrame.setVisible(True)
-            self.vBoxLayout.removeWidget(self.nothingFrame)
-            self.vBoxLayout.addWidget(self.normalFrame)
 
     def clearTableContent(self):
         for i in range(self.tableWidget.rowCount()):
@@ -222,7 +221,6 @@ class AttendanceFlowWidget(QFrame):
         )
         vBoxLayout.addWidget(self.mentionLabel, alignment=Qt.AlignHCenter)
 
-        self.loadContentCache()
         return frame
 
 
