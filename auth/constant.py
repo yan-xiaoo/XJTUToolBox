@@ -11,6 +11,7 @@ BB_LOGIN_URL = "https://cas.xjtu.edu.cn/login?TARGET=https%3A%2F%2Fbb.xjtu.edu.c
 # 本科生考勤系统登录地址
 # 都 2024 年了，本科考勤系统还是不支持 https，所以这里的地址是 http 的。
 ATTENDANCE_URL = "http://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1372&redirectUri=http://bkkq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
+ATTENDANCE_WEBVPN_URL = "http://bkkq.xjtu.edu.cn"
 
 # 没有 AppId 的考勤系统登录地址
 BASE_URL = "https://org.xjtu.edu.cn/openplatform/login.html"

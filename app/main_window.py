@@ -7,7 +7,8 @@ from qfluentwidgets import NavigationItemPosition, isDarkTheme
 from .HomeInterface import HomeInterface
 from .AccountInterface import AccountInterface
 from .SettingInterface import SettingInterface
-from .utils import cfg, accounts
+from .AttendanceInterface import AttendanceInterface
+from .utils import cfg, accounts, MyFluentIcon
 
 
 class MainWindow(MSFluentWindow):
@@ -32,11 +33,13 @@ class MainWindow(MSFluentWindow):
 
     def initInterface(self):
         self.home_interface = HomeInterface(self, self)
+        self.attendance_interface = AttendanceInterface(self, self)
         self.account_interface = AccountInterface(accounts, self)
         self.setting_interface = SettingInterface(self)
 
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
+        self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
 
         self.navigationInterface.addWidget("GitHub", NavigationBarPushButton(FIF.GITHUB, self.tr("GitHub"), isSelectable=False,
                                                                              parent=self),

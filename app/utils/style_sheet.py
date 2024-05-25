@@ -11,6 +11,7 @@ class StyleSheet(StyleSheetBase, Enum):
     LOGIN_INTERFACE = "login_interface"
     LINK_CARD = "link_card"
     ACCOUNT_INTERFACE = "account_interface"
+    ATTENDANCE_INTERFACE = "attendance_interface"
 
     def path(self, theme=Theme.AUTO):
         theme = cfg.theme if theme == Theme.AUTO else theme

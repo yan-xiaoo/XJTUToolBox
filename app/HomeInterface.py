@@ -32,6 +32,7 @@ class HomeFrame(QWidget):
         self.attendanceCard = LinkCard("assets/icons/attendance.png", self.tr("考勤"),
                                        self.tr("查看你的考勤信息"))
         self.attendanceCard.setBackgroundColor(LinkCard.LinkCardColor.PURPLE)
+        self.attendanceCard.cardClicked.connect(lambda: main_window.switchTo(main_window.attendance_interface))
         self.linkCardView.addCard(self.attendanceCard)
 
 

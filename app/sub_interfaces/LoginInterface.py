@@ -194,16 +194,19 @@ class LoginInterface(ScrollArea):
             self._hide_captcha()
         self._unlock(False)
 
-    @pyqtSlot(str)
-    def __on_login_fail(self, msg: str):
+    @pyqtSlot(bool, str)
+    def __on_login_fail(self, is_recoverable: bool, msg: str):
         InfoBar.error("登录失败", msg,
                       orient=Qt.Horizontal, isClosable=False,
                       position=InfoBarPosition.TOP_RIGHT, duration=3000,
                       parent=self)
-        self.__thread.username = self.__username
-        self.__thread.choice = LoginThread.LoginChoice.GET_SHOW_CAPTCHA
-        self.__thread.isShowCaptcha.connect(self.__on_double_check_isShowCaptcha)
-        self.__thread.start()
+        if is_recoverable:
+            self.__thread.username = self.__username
+            self.__thread.choice = LoginThread.LoginChoice.GET_SHOW_CAPTCHA
+            self.__thread.isShowCaptcha.connect(self.__on_double_check_isShowCaptcha)
+            self.__thread.start()
+        else:
+            self._unlock(False)
 
     @pyqtSlot(bool)
     def __on_isShowCaptcha_finished(self, show: bool):

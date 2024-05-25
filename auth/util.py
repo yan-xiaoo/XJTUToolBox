@@ -77,7 +77,8 @@ def getPlaintext(ciphertext, key=key_, cfb_iv=iv_, size=128):
 
 def getVPNUrl(url):
     """将常规的 url 加密为 webvpn 使用的 url"""
-    parts = url.split('://')
+    # 这里必须指定最多分割一次，防止 url 中包含多个 ://（比如西交登录系统的 returnUrl 里头就有 http:// 这种
+    parts = url.split('://', maxsplit=1)
     pro = parts[0]
     add = parts[1]
 

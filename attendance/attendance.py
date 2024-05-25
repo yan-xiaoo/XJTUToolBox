@@ -1,9 +1,43 @@
 import time
+from enum import Enum
 
 import requests
 
-from auth import Login, ATTENDANCE_URL, ServerError, WebVPNLogin
+from auth import Login, ATTENDANCE_URL, ServerError, WebVPNLogin, ATTENDANCE_WEBVPN_URL, get_session, getVPNUrl, \
+    get_timestamp, WEBVPN_LOGIN_URL
 from schedule import Schedule, WeekSchedule, Lesson
+
+
+class FlowRecordType(Enum):
+    """考勤流水的状态，一共三种。"""
+    INVALID = 0  # 无效：指在某个教室没有课但刷了卡
+    VALID = 1  # 有效：指在有课的教室成功刷卡
+    REPEATED = 2  # 重复：在某个有课的教室多次刷卡
+
+
+class AttendanceFlow:
+    def __init__(self, sbh: str, place: str, water_time: str, type_: FlowRecordType):
+        """
+        创建一个考勤记录信息
+        :param sbh: 此考勤信息的编号，可以在接口中查询到此考勤相关的课程、教师等很多信息
+        :param place: 打卡的地点（教室）
+        :param water_time: 打卡的时间
+        :param type_: 打卡类型，有效/无效/重复
+        """
+        self.sbh = sbh
+        self.place = place
+        self.water_time = water_time
+        self.type_ = type_
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(sbh={self.sbh}, place={self.place}, water_time={self.water_time}, type_={self.type_})"
+
+    @classmethod
+    def from_json(cls, json):
+        return cls(json["sBh"], json["eqno"], json["watertime"], FlowRecordType(int(json["isdone"])))
+
+    def json(self):
+        return {"sBh": self.sbh, "eqno": self.place, "watertime": self.water_time, "isdone": self.type_.value}
 
 
 class AttendanceLogin(Login):
@@ -41,7 +75,17 @@ class AttendanceWebVPNLogin(WebVPNLogin):
     """
 
     def __init__(self, session: requests.Session = None):
-        super().__init__(ATTENDANCE_URL, session)
+        if session is None:
+            session = get_session()
+
+        self.session = session
+        self.session.get(getVPNUrl(ATTENDANCE_WEBVPN_URL))
+        self.session.get(WEBVPN_LOGIN_URL)
+
+        # 如果按照正确的方式调用接口的话，这些成员变量会被用来跨方法传递某些请求需要的数据。
+        self.memberId = None
+        self.userType = None
+        self.personNo = None
 
     def post_login(self) -> requests.Session:
         """
@@ -51,10 +95,9 @@ class AttendanceWebVPNLogin(WebVPNLogin):
         """
         self.getUserIdentity()
         url = self.getRedirectUrl()
-        response = self._get(url, allow_redirects=False)
-        token = response.headers["Location"].split("token=")[1].split('&')[0]
+        response = self._get(url)
+        token = response.url.split("token=")[1].split('&')[0]
         self.session.headers.update({"Synjones-Auth": "bearer " + token})
-        self._get(response.headers["Location"])
         return self.session
 
 
@@ -118,7 +161,7 @@ class Attendance:
     请注意：考勤系统对同一个 session 的连接存在时间限制。因此，不要持久性的存储此类的对象；每次使用时通过 AttendanceLogin 或
     attendance_fast_login 重新得到一个登录的 session，然后重新创建此对象。
     """
-    def __init__(self, session: requests.Session):
+    def __init__(self, session: requests.Session, use_webvpn=False):
         """
         创建一个接口对象
         :param session: 已经登录考勤系统的 session 对象
@@ -126,6 +169,8 @@ class Attendance:
         self.session = session
         # 缓存学期编号
         self._bh = None
+        # 是否使用 WebVPN
+        self.use_vpn = use_webvpn
 
     def getStudentInfo(self):
         """
@@ -390,12 +435,34 @@ class Attendance:
             schedule.set_week_lessons(week, week_schedule.lessons)
         return schedule
 
+    def getFlowRecord(self, current=1, page_size=10):
+        """
+        获得考勤流水信息。
+        :param current: 目前获取第几页
+        :param page_size: 每页包含多少流水信息
+        :return: 考勤流水信息的列表
+        """
+        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/waterList/page", json={
+            "calendarBh": "", "enddate": "", "startdate": "", "pageSize": page_size, "current": current
+        })
+        result = response.json()
+        if not result['success']:
+            raise ServerError(result['code'], result['msg'])
+        else:
+            data = result['data']['list']
+            records = [AttendanceFlow.from_json(one) for one in data]
+            return records
+
     def _get(self, url, **kwargs):
+        if self.use_vpn:
+            url = getVPNUrl(url)
         response = self.session.get(url, **kwargs)
         response.raise_for_status()
         return response
 
     def _post(self, url, **kwargs):
+        if self.use_vpn:
+            url = getVPNUrl(url)
         response = self.session.post(url, **kwargs)
         response.raise_for_status()
         return response

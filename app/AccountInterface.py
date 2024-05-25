@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame
 from qfluentwidgets import ScrollArea, TitleLabel, VBoxLayout, StrongBodyLabel, BodyLabel, SubtitleLabel, LineEdit, \
     CardWidget, IconWidget, CaptionLabel, PushButton, TransparentToolButton, FluentIcon, RoundMenu, Action, MessageBox, \
     MessageBoxBase
-from .utils import StyleSheet, cfg
+from .utils import StyleSheet, cfg, AccountCacheManager
 from .utils.account import Account, AccountManager
 from .sub_interfaces import LoginDialog
 
@@ -89,14 +89,17 @@ class AccountCard(CardWidget):
         self.moreButton.clicked.connect(self.onMoreButtonClicked)
         self.openButton.clicked.connect(self.onOpenButtonClicked)
 
+        self.deleted = False
+
     def setCurrent(self, is_current: bool):
         """设置此账户卡包含的是当前账户与否。账户卡的样式与此有关。"""
-        if is_current:
-            self.openButton.setEnabled(False)
-            self.openButton.setText(self.tr('当前账户'))
-        else:
-            self.openButton.setEnabled(True)
-            self.openButton.setText(self.tr('切换'))
+        if not self.deleted:
+            if is_current:
+                self.openButton.setEnabled(False)
+                self.openButton.setText(self.tr('当前账户'))
+            else:
+                self.openButton.setEnabled(True)
+                self.openButton.setText(self.tr('切换'))
 
     def onOpenButtonClicked(self):
         self.accountCurrentChanged.emit(self.account)
@@ -138,6 +141,7 @@ class AccountCard(CardWidget):
         self.accountChanged.disconnect()
         self.accountDeleted.disconnect()
         self.accountCurrentChanged.disconnect()
+        self.deleted = True
         super().deleteLater()
 
 
@@ -207,8 +211,8 @@ class AccountInterface(ScrollArea):
 
         self.accounts = accounts
         self.account_widgets = {}
-        for index, account in enumerate(self.accounts):
-            self._add_account_widget(account, is_current=index == self.accounts.current)
+        for account in self.accounts:
+            self._add_account_widget(account, is_current=account == self.accounts.current)
 
         if accounts.empty():
             self.minorLabel.setText("你还没有任何账户。点击下方添加一个账户")
@@ -223,7 +227,15 @@ class AccountInterface(ScrollArea):
 
     @pyqtSlot(Account)
     def _onAccountDeleted(self, account: Account):
-        self.accounts.remove(account)
+        if account == self.accounts.current:
+            self.accounts.current = self.accounts[0]
+            self.accounts.remove(account)
+            if len(self.accounts) > 0:
+                self._onCurrentAccountChanged(self.accounts[0])
+        else:
+            self.accounts.remove(account)
+
+        AccountCacheManager(account).remove_all()
         self.accountAreaLayout.removeWidget(self.account_widgets[account])
         self.account_widgets[account].deleteLater()
         self._onAccountChanged()
@@ -239,6 +251,9 @@ class AccountInterface(ScrollArea):
     def add_account(self, account: Account):
         self.accounts.append(account)
         self._add_account_widget(account)
+        if len(self.accounts) == 1:
+            self.accounts.current = account
+            self._onCurrentAccountChanged(account)
         self.accounts.save_to()
 
     def _add_account_widget(self, account: Account, is_current=False):
@@ -253,7 +268,7 @@ class AccountInterface(ScrollArea):
 
     @pyqtSlot(Account)
     def _onCurrentAccountChanged(self, account: Account):
-        self.accounts.current = self.accounts.index(account)
+        self.accounts.current = account
         for a, w in self.account_widgets.items():
             w.setCurrent(a == account)
         self._onAccountChanged()
