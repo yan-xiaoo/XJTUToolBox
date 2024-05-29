@@ -92,6 +92,7 @@ class LoginInterface(ScrollArea):
         self.__thread.loginSuccess.connect(self.__on_login_success)
         self.__thread.loginFailed.connect(self.__on_login_fail)
         self.__thread.captchaCode.connect(self.__on_receive_captcha_code)
+        self.__thread.studentID.connect(self.__on_getID_success)
 
     def _show_captcha(self, refresh=True):
         """显示验证码输入区域，同时标记验证码为必须填写的区域。"""
@@ -147,8 +148,9 @@ class LoginInterface(ScrollArea):
         # 1. 检查是否需要验证码（已经需要则跳过此判断）
         # 2. 如果需要验证码且之前不需要，则获取验证码并中断登录
         # 3. 登录（__on_isShowCaptcha_finished 函数中）
-        # 4. 登录成功处理（发送信号，__on_login_success 函数中）
-        # 5. 登录失败处理：发送信号，检查是否需要验证码（__on_login_fail 与 __on_double_check_isShowCaptcha 函数中）
+        # 4. 登录成功处理（__on_login_success 函数中）
+        # 5. 尝试获得学号，获得成功的处理在 __on_getID_success 函数中
+        # 6. 登录失败处理：发送信号，检查是否需要验证码（__on_login_fail 与 __on_double_check_isShowCaptcha 函数中）
         # 其中所有网络通信部分全部在 QThread 中完成以防止主线程阻塞；逻辑部分分布于其他函数中，通过信号-槽机制与 QThread 中的信号连接而被调用
         if self._captcha_required:
             self.__on_isShowCaptcha_finished(True)
@@ -182,7 +184,12 @@ class LoginInterface(ScrollArea):
 
     @pyqtSlot()
     def __on_login_success(self):
-        self.loginSuccess.emit(self.__username, self.__password)
+        self.__thread.choice = self.__thread.LoginChoice.GET_STUDENT_ID
+        self.__thread.start()
+
+    @pyqtSlot(str)
+    def __on_getID_success(self, id_: str):
+        self.loginSuccess.emit(id_, self.__password)
         self._unlock(True)
 
     @pyqtSlot(bool)

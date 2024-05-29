@@ -180,9 +180,6 @@ class Login:
         self.getUserIdentity()
         url = self.getRedirectUrl()
         self.session.get(url)
-        print(url)
-        print("Cookies: ")
-        print(self.session.cookies.get_dict())
         return self.session
 
     @staticmethod

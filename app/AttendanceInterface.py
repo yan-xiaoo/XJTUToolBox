@@ -58,6 +58,7 @@ class AttendanceFlowWidget(QFrame):
         self.clearTableContent()
         self.thread_.account = accounts.current
         self.thread_.reset()
+        self.loadContentCache()
 
     @pyqtSlot()
     def lock(self):
