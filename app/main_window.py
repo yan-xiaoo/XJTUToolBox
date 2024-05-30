@@ -8,6 +8,7 @@ from .HomeInterface import HomeInterface
 from .AccountInterface import AccountInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
+from .sub_interfaces import LoginInterface
 from .utils import cfg, accounts, MyFluentIcon
 
 
@@ -33,8 +34,9 @@ class MainWindow(MSFluentWindow):
 
     def initInterface(self):
         self.home_interface = HomeInterface(self, self)
+        self.login_interface = LoginInterface(self)
         self.attendance_interface = AttendanceInterface(self, self)
-        self.account_interface = AccountInterface(accounts, self)
+        self.account_interface = AccountInterface(accounts, self, self)
         self.setting_interface = SettingInterface(self)
 
     def initNavigation(self):
@@ -47,6 +49,10 @@ class MainWindow(MSFluentWindow):
                                            NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.account_interface, FIF.EDUCATION, self.tr("账户"), position=NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.setting_interface, FIF.SETTING, self.tr("设置"), position=NavigationItemPosition.BOTTOM)
+
+        # 添加登录界面作为子界面，但是将其隐藏
+        button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"), position=NavigationItemPosition.BOTTOM)
+        button.setVisible(False)
 
     @pyqtSlot()
     def on_theme_changed(self):

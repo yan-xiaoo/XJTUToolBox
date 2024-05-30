@@ -120,8 +120,8 @@ class AttendanceFlowWidget(QFrame):
         self.saveContentCache(record)
 
     def loadContentCache(self):
-        cache = AccountCacheManager(accounts.current)
         try:
+            cache = AccountCacheManager(accounts.current)
             record_list = cache.read_json("attendance_flow.json")
             record = [AttendanceFlow.from_json(one) for one in record_list]
             self.setTableContent(record)

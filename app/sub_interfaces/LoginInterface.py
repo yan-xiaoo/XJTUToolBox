@@ -160,6 +160,12 @@ class LoginInterface(ScrollArea):
             self.__thread.isShowCaptcha.connect(self.__on_isShowCaptcha_finished)
             self.__thread.start()
 
+    def keyReleaseEvent(self, a0):
+        if a0.key() == Qt.Key_Escape:
+            self.on_cancelButton_clicked()
+        if a0.key() == Qt.Key_Return:
+            self.on_loginButton_clicked()
+
     @pyqtSlot()
     def on_cancelButton_clicked(self):
         """处理用户点击取消按钮后的事件"""
@@ -240,7 +246,14 @@ class LoginInterface(ScrollArea):
 
     @pyqtSlot(str, str)
     def on_login_success(self, username: str, password: str):
-        pass
+        self.userNameEdit.clear()
+        self.passwordEdit.clear()
+        self.captchaEdit.clear()
+
+    def clearEdits(self):
+        self.userNameEdit.clear()
+        self.passwordEdit.clear()
+        self.captchaEdit.clear()
 
 
 class LoginDialog(QDialog):

@@ -40,9 +40,13 @@ class AccountCard(CardWidget):
     accountDeleted = pyqtSignal(Account)
     accountCurrentChanged = pyqtSignal(Account)
 
-    def __init__(self, account: Account, icon, title, content, parent=None):
+    def __init__(self, account: Account, icon, title, content, main_window, parent=None):
         super().__init__(parent)
         self.account = account
+        # 获得主窗口的引用，用于切换界面
+        self.main_window = main_window
+        self.parent_ = parent
+
         self.iconWidget = IconWidget(icon)
         self.titleLabel = BodyLabel(title, self)
         self.contentLabel = CaptionLabel(content, self)
@@ -117,10 +121,10 @@ class AccountCard(CardWidget):
             self.accountChanged.emit()
 
     def _onEditAccountPasswordClicked(self):
-        dialog = LoginDialog(self.parent().parent().parent().parent())
-        dialog.login_interface.userNameEdit.setText(self.account.username)
-        dialog.loginSuccess.connect(self._onLoginFinish)
-        dialog.exec()
+        self.main_window.switchTo(self.main_window.login_interface)
+        self.main_window.login_interface.userNameEdit.setText(self.account.username)
+        self.main_window.login_interface.loginSuccess.connect(self._onLoginFinish)
+        self.main_window.login_interface.passwordEdit.setFocus()
 
     def _onDeleteAccountClicked(self):
         box = MessageBox(self.tr("删除账户"), self.tr("确定要删除此账户吗？\n账户相关的缓存数据会被一同删除，无法恢复。"),
@@ -135,7 +139,10 @@ class AccountCard(CardWidget):
         self.account.username = username
         self.account.password = password
         self.titleLabel.setText(self.account.nickname)
+        self.main_window.switchTo(self.main_window.account_interface)
         self.accountChanged.emit()
+        self.main_window.login_interface.loginSuccess.disconnect()
+        self.main_window.login_interface.clearEdits()
 
     def deleteLater(self):
         self.accountChanged.disconnect()
@@ -173,9 +180,12 @@ class EditAccountNameBox(MessageBoxBase):
 
 
 class AccountInterface(ScrollArea):
-    def __init__(self, accounts: AccountManager, parent=None):
+    def __init__(self, accounts: AccountManager, main_window, parent=None):
         super().__init__(parent)
         self.setObjectName("AccountInterface")
+        self.main_window = main_window
+
+        self.main_window.login_interface.cancel.connect(self._onLoginCancel)
 
         self.view = QWidget(self)
         self.vBoxLayout = VBoxLayout(self.view)
@@ -244,9 +254,14 @@ class AccountInterface(ScrollArea):
         if not cfg.hasReadLoginTip.value:
             if not self.show_first_time_tip():
                 return
-        dialog = LoginDialog(self.parent())
-        dialog.loginSuccess.connect(self._onLoginFinish)
-        dialog.exec()
+        self.main_window.login_interface.loginSuccess.connect(self._onLoginFinish)
+        self.main_window.switchTo(self.main_window.login_interface)
+        self.main_window.login_interface.userNameEdit.setFocus()
+
+    def _onLoginCancel(self):
+        self.main_window.switchTo(self)
+        self.main_window.login_interface.clearEdits()
+        self.main_window.login_interface.loginSuccess.disconnect()
 
     def add_account(self, account: Account):
         self.accounts.append(account)
@@ -258,7 +273,8 @@ class AccountInterface(ScrollArea):
 
     def _add_account_widget(self, account: Account, is_current=False):
         """is_current 仅仅影响按钮样式，不会影响账户的切换行为"""
-        widget = AccountCard(account, self.default_icon, account.nickname, account.username, self.accountArea)
+        widget = AccountCard(account, self.default_icon, account.nickname, account.username, self.main_window,
+                             self.accountArea)
         widget.accountChanged.connect(self._onAccountChanged)
         widget.accountDeleted.connect(self._onAccountDeleted)
         widget.accountCurrentChanged.connect(self._onCurrentAccountChanged)
@@ -277,6 +293,9 @@ class AccountInterface(ScrollArea):
     def _onLoginFinish(self, username, password):
         account = Account(username, password, username)
         self.add_account(account)
+        self.main_window.switchTo(self)
+        self.main_window.login_interface.clearEdits()
+        self.main_window.login_interface.loginSuccess.disconnect()
 
     def show_first_time_tip(self) -> bool:
         """显示第一次使用时的说明"""
