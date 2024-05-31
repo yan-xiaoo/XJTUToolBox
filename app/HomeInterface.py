@@ -1,8 +1,9 @@
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, TitleLabel
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
 from .utils import accounts, StyleSheet
 from .cards.link_card import LinkCardView, LinkCard
+from .sub_interfaces.EncryptDialog import DecryptFrame
 
 
 class HomeFrame(QWidget):
@@ -16,6 +17,15 @@ class HomeFrame(QWidget):
         self.vBoxLayout.addWidget(self.title, alignment=Qt.AlignTop)
         self.title.setContentsMargins(10, 15, 0, 0)
         self.vBoxLayout.setSpacing(0)
+
+        self.decrypt_frame = DecryptFrame(main_window, self)
+        self.decrypt_frame.setMaximumWidth(300)
+        if accounts.encrypted:
+            self.decrypt_frame.setVisible(True)
+        else:
+            self.decrypt_frame.setVisible(False)
+        self.vBoxLayout.addWidget(self.decrypt_frame, alignment=Qt.AlignHCenter)
+        accounts.accountDecrypted.connect(self.onAccountDecrypted)
 
         self.linkCardView = LinkCardView(self)
         self.vBoxLayout.addWidget(self.linkCardView, alignment=Qt.AlignTop)
@@ -34,6 +44,10 @@ class HomeFrame(QWidget):
         self.attendanceCard.setBackgroundColor(LinkCard.LinkCardColor.PURPLE)
         self.attendanceCard.cardClicked.connect(lambda: main_window.switchTo(main_window.attendance_interface))
         self.linkCardView.addCard(self.attendanceCard)
+
+    @pyqtSlot()
+    def onAccountDecrypted(self):
+        self.decrypt_frame.setVisible(False)
 
 
 class HomeInterface(ScrollArea):

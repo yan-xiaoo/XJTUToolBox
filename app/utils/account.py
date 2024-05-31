@@ -58,9 +58,17 @@ class AccountManager(QObject):
     accountAdded = pyqtSignal()
     accountDeleted = pyqtSignal()
     currentAccountChanged = pyqtSignal()
+    # 被加密的账户信息被解密了
+    accountDecrypted = pyqtSignal()
+    # 账户变成需要加密的/不需要加密的
+    accountEncryptStateChanged = pyqtSignal()
 
     def __init__(self, *args):
         super().__init__()
+        self.key = None
+        # 是否是加密的（即用户设置了需要加密）
+        # 此标志位为真时，实际的账户数据不一定是被加密的。
+        self.encrypted = self.is_encrypted()
         if len(args) == 1:
             self.accounts = list(args[0])
         else:
@@ -112,9 +120,30 @@ class AccountManager(QObject):
         with open(file, "w", encoding="utf-8") as f:
             f.write(self.save())
 
-    def encrypted_save_to(self, key: bytes, file="config/accounts.json"):
+    def save_suitable(self, file="config/accounts.json"):
+        """如果当前账户是加密状态，加密的保存账户；否则，直接保存账户"""
+        if self.encrypted:
+            self.encrypted_save_to(file=file)
+        else:
+            self.save_to(file)
+
+    def encrypted_save_to(self, key: bytes = None, file="config/accounts.json"):
+        key = key or self.key
         with open(file, "w", encoding="utf-8") as f:
             f.write(self.encrypt_save(key))
+
+    def setEncrypted(self, status, key=None):
+        """设置账户是否需要加密。请注意这个操作本身不会加密或者解密账户。"""
+        if status:
+            self.key = key
+            self.encrypted = True
+            self.accountEncryptStateChanged.emit()
+            self.encrypted_save_to(key=key)
+        else:
+            self.encrypted = False
+            self.accountEncryptStateChanged.emit()
+            self.key = None
+            self.save_to()
 
     @classmethod
     def exists(cls):
@@ -177,6 +206,16 @@ class AccountManager(QObject):
             self.current = self.accounts[current]
         return self
 
+    def extend_from(self, file="config/accounts.json", key: bytes = None):
+        new = self.load_from(file, key)
+        self.accounts.extend(new)
+        if self._current is None:
+            self._current = new._current
+            self.currentAccountChanged.emit()
+        if key is not None:
+            self.accountDecrypted.emit()
+        self.accountAdded.emit()
+
     @classmethod
     def load_from(cls, file="config/accounts.json", key: bytes = None):
         with open(file, "r", encoding="utf-8") as f:
@@ -192,5 +231,8 @@ if __name__ == '__main__':
     am = AccountManager()
     am.append(Account("username", "password", "nickname"))
     am.append(Account("username2", "password2", "nickname2"))
-    print(am)
-    print(am.save())
+    print(am.accounts)
+    print(am._current)
+    am.extend_from("../../config/accounts.json")
+    print(am.accounts)
+    print(am._current)

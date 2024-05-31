@@ -3,10 +3,11 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame
 from qfluentwidgets import ScrollArea, TitleLabel, VBoxLayout, StrongBodyLabel, BodyLabel, SubtitleLabel, LineEdit, \
     CardWidget, IconWidget, CaptionLabel, PushButton, TransparentToolButton, FluentIcon, RoundMenu, Action, MessageBox, \
-    MessageBoxBase
+    MessageBoxBase, InfoBar
+
+from .sub_interfaces.EncryptDialog import DecryptFrame
 from .utils import StyleSheet, cfg, AccountCacheManager
 from .utils.account import Account, AccountManager
-from .sub_interfaces import LoginDialog
 
 
 class AddAccountCard(CardWidget):
@@ -203,6 +204,15 @@ class AccountInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.minorLabel)
         self.vBoxLayout.addSpacing(10)
 
+        self.decryptFrame = DecryptFrame(main_window, self)
+        self.decryptFrame.setMaximumWidth(300)
+
+        self.vBoxLayout.addWidget(self.decryptFrame, alignment=Qt.AlignHCenter)
+        if accounts.encrypted:
+            self.decryptFrame.setVisible(True)
+        else:
+            self.decryptFrame.setVisible(False)
+
         self.accountArea = QFrame(self.view)
         self.accountArea.setObjectName("accountArea")
         self.accountAreaLayout = VBoxLayout(self.accountArea)
@@ -220,6 +230,13 @@ class AccountInterface(ScrollArea):
         self.addAccountWidget.clicked.connect(self._onAddAccountClicked)
 
         self.accounts = accounts
+        if accounts.encrypted:
+            self.accountClickable = False
+        else:
+            self.accountClickable = True
+
+        accounts.accountDecrypted.connect(self._onAccountDecrypted)
+
         self.account_widgets = {}
         for account in self.accounts:
             self._add_account_widget(account, is_current=account == self.accounts.current)
@@ -232,8 +249,18 @@ class AccountInterface(ScrollArea):
 
         StyleSheet.ACCOUNT_INTERFACE.apply(self)
 
+    @pyqtSlot()
+    def _onAccountDecrypted(self):
+        self.decryptFrame.setVisible(False)
+        self.accountClickable = True
+        for account in self.accounts:
+            self._add_account_widget(account, is_current=account == self.accounts.current)
+
     def _onAccountChanged(self):
-        self.accounts.save_to()
+        # 如果没有账户了，则取消加密
+        if len(self.accounts) == 0:
+            self.accounts.setEncrypted(False)
+        self.accounts.save_suitable()
 
     @pyqtSlot(Account)
     def _onAccountDeleted(self, account: Account):
@@ -251,6 +278,9 @@ class AccountInterface(ScrollArea):
         self._onAccountChanged()
 
     def _onAddAccountClicked(self):
+        if not self.accountClickable:
+            InfoBar.error(self.tr("无法添加账户"), self.tr("请先解密账户"), duration=2000, parent=self)
+            return
         if not cfg.hasReadLoginTip.value:
             if not self.show_first_time_tip():
                 return
@@ -269,7 +299,7 @@ class AccountInterface(ScrollArea):
         if len(self.accounts) == 1:
             self.accounts.current = account
             self._onCurrentAccountChanged(account)
-        self.accounts.save_to()
+        self.accounts.save_suitable()
 
     def _add_account_widget(self, account: Account, is_current=False):
         """is_current 仅仅影响按钮样式，不会影响账户的切换行为"""
