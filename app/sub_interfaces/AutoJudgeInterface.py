@@ -280,6 +280,7 @@ class AutoJudgeInterface(ScrollArea):
             if one.questionnaire == questionnaire:
                 self.setQuestionnaireFinished(one)
                 one.unlock()
+                one.setVisible(self.showAllAction.isChecked())
                 break
 
     @pyqtSlot(list, list)

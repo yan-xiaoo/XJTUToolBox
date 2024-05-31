@@ -5,7 +5,7 @@ from enum import Enum
 import requests
 
 from auth import ServerError
-from ..utils import Account
+from ..utils import Account, cfg
 from auth import get_session
 from attendance.attendance import AttendanceWebVPNLogin, AttendanceLogin, Attendance
 from .ProcessWidget import ProcessThread
@@ -30,7 +30,6 @@ class AttendanceFlowThread(ProcessThread):
         self.session = None
         self.expire_duration = 600
         self.choice = choice
-        self.has_login = False
         self.last_login_choice = None
         # 开始时默认为过期状态，以便在实际使用时刷新
         self.expire_time = time.time() - self.expire_duration
@@ -57,7 +56,7 @@ class AttendanceFlowThread(ProcessThread):
     def search(self, session):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在查询考勤流水..."))
-        lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice==AttendanceFlowChoice.WEBVPN_LOGIN)
+        lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN)
         return lookup_wrapper.getFlowRecord(self.page, self.size)
 
     def login_again(self, session):
@@ -70,7 +69,6 @@ class AttendanceFlowThread(ProcessThread):
             self.webvpn_login(session)
         else:
             self.normal_login(session)
-        self.has_login = True
         self.reset_expire_time()
 
     def reset_expire_time(self):
@@ -78,52 +76,42 @@ class AttendanceFlowThread(ProcessThread):
         self.expire_time = time.time()
 
     def run(self):
+        # 根据设置更改登录方式
+        setting = cfg.get(cfg.defaultAttendanceLoginMethod)
+        if setting == cfg.AttendanceLoginMethod.WEBVPN:
+            self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
+        elif setting == cfg.AttendanceLoginMethod.NORMAL:
+            self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
+
         try:
             if self.account is None:
                 raise ValueError(self.tr("账户信息为空"))
 
             if self.choice == AttendanceFlowChoice.WEBVPN_LOGIN:
                 if not self.has_expired():
-                    if self.has_login:
-                        self.successMessage.emit(self.tr("无需重新登录。"))
-                        self.hasFinished.emit()
-                        return
-                    else:
-                        self.webvpn_login(self.session)
-                        self.successMessage.emit(self.tr("WebVPN 登录成功"))
-                        self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
-                        self.hasFinished.emit()
+                    self.successMessage.emit(self.tr("无需重新登录。"))
+                    self.hasFinished.emit()
+                    return
                 else:
                     self.session = get_session()
                     self.webvpn_login(self.session)
-                    self.has_login = True
                     self.reset_expire_time()
                     self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
                     self.successMessage.emit(self.tr("WebVPN 登录成功"))
                     self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.NORMAL_LOGIN:
                 if not self.has_expired():
-                    if self.has_login:
-                        self.successMessage.emit(self.tr("无需重新登录。"))
-                        self.hasFinished.emit()
-                    else:
-                        self.normal_login(self.session)
-                        self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
-                        self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
-                        self.hasFinished.emit()
+                    self.successMessage.emit(self.tr("无需重新登录。"))
+                    self.hasFinished.emit()
                 else:
                     self.session = get_session()
                     self.normal_login(self.session)
-                    self.has_login = True
                     self.reset_expire_time()
                     self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
                     self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
                     self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.SEARCH:
-                if not self.has_login:
-                    self.error.emit(self.tr("请先选择一种方式登录"), "")
-                    self.canceled.emit()
-                elif self.has_expired():
+                if self.has_expired():
                     if self.last_login_choice is not None:
                         self.session = get_session()
                         self.login_again(self.session)

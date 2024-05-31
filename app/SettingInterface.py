@@ -24,11 +24,19 @@ class SettingInterface(ScrollArea):
         self.setWidgetResizable(True)
 
         # 添加设置组
+        # 考勤设置组
+        self.attendanceGroup = SettingCardGroup(self.tr("考勤"), self.view)
+        self.loginMethodCard = ComboBoxSettingCard(cfg.defaultAttendanceLoginMethod, FIF.GLOBE,
+                                                   self.tr("考勤默认连接方式"), self.tr("选择是否默认通过 WebVPN 连接考勤系统"),
+                                                   texts=[self.tr("不设置"), self.tr("直接连接"), self.tr("WebVPN 连接")],
+                                                   parent=self.attendanceGroup)
+        self.attendanceGroup.addSettingCard(self.loginMethodCard)
+
         # 个性化组
         self.personalGroup = SettingCardGroup(self.tr("个性化"), self.view)
         self.themeCard = ComboBoxSettingCard(cfg.themeMode, FIF.BRUSH, self.tr("应用主题"),
                                              self.tr("调整应用程序的外观"),
-                                             texts=["浅色", "深色", "自动"],
+                                             texts=[self.tr("浅色"), self.tr("深色"), self.tr("自动")],
                                              parent=self.personalGroup)
         self.themeColorCard = CustomColorSettingCard(
             cfg.themeColor,
@@ -43,9 +51,12 @@ class SettingInterface(ScrollArea):
 
         # 添加设置组到布局
         self.expandLayout.addWidget(self.personalGroup)
+        self.expandLayout.addWidget(self.attendanceGroup)
 
         StyleSheet.SETTING_INTERFACE.apply(self)
 
         # 连接信号-槽
         self.themeCard.comboBox.currentIndexChanged.connect(lambda: setTheme(cfg.get(cfg.themeMode), lazy=True))
         self.themeColorCard.colorChanged.connect(lambda c: setThemeColor(c, lazy=True))
+        self.loginMethodCard.comboBox.currentIndexChanged.connect(lambda: cfg.set(cfg.defaultAttendanceLoginMethod,
+                                                                                  cfg.AttendanceLoginMethod(self.loginMethodCard.comboBox.currentIndex())))

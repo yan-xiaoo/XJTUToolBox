@@ -1,4 +1,6 @@
-from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme
+from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme, \
+    EnumSerializer
+from enum import Enum
 
 
 class BooleanSerializer(ConfigSerializer):
@@ -9,9 +11,26 @@ class BooleanSerializer(ConfigSerializer):
         return bool(value)
 
 
+class AttendanceLoginMethod(Enum):
+    # 不设置，每次询问
+    NONE = 0
+    # 直接登录
+    NORMAL = 1
+    # WebVPN 登录
+    WEBVPN = 2
+
+
 class Config(QConfig):
+    AttendanceLoginMethod = AttendanceLoginMethod
+
     hasReadLoginTip = OptionsConfigItem("one_time_notice", "read_login_tip", False,
                                         OptionsValidator([True, False]), BooleanSerializer())
+    defaultAttendanceLoginMethod = OptionsConfigItem("Settings", "default_attendance_login_method",
+                                                     AttendanceLoginMethod.NONE,
+                                                     OptionsValidator(
+                                                         [AttendanceLoginMethod.NONE, AttendanceLoginMethod.NORMAL,
+                                                          AttendanceLoginMethod.WEBVPN]),
+                                                     EnumSerializer(AttendanceLoginMethod))
 
 
 cfg = Config()
