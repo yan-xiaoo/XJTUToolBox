@@ -8,14 +8,15 @@ from .HomeInterface import HomeInterface
 from .AccountInterface import AccountInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
+from .ToolBoxInterface import ToolBoxInterface
 from .sub_interfaces import LoginInterface
+from .sub_interfaces import AutoJudgeInterface
 from .utils import cfg, accounts, MyFluentIcon
 
 
 class MainWindow(MSFluentWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
-
         self.initWindow()
         self.initInterface()
         self.initNavigation()
@@ -38,20 +39,33 @@ class MainWindow(MSFluentWindow):
         self.attendance_interface = AttendanceInterface(self, self)
         self.account_interface = AccountInterface(accounts, self, self)
         self.setting_interface = SettingInterface(self)
+        self.tool_box_interface = ToolBoxInterface(self, self)
+        self.judge_interface = AutoJudgeInterface(self)
 
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
         self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
+        self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
-        self.navigationInterface.addWidget("GitHub", NavigationBarPushButton(FIF.GITHUB, self.tr("GitHub"), isSelectable=False,
-                                                                             parent=self),
-                                           lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox")),
+        self.navigationInterface.addWidget("GitHub",
+                                           NavigationBarPushButton(FIF.GITHUB, self.tr("GitHub"), isSelectable=False,
+                                                                   parent=self),
+                                           lambda: QDesktopServices.openUrl(
+                                               QUrl("https://github.com/yan-xiaoo/XJTUToolbox")),
                                            NavigationItemPosition.BOTTOM)
-        self.addSubInterface(self.account_interface, FIF.EDUCATION, self.tr("账户"), position=NavigationItemPosition.BOTTOM)
-        self.addSubInterface(self.setting_interface, FIF.SETTING, self.tr("设置"), position=NavigationItemPosition.BOTTOM)
+        self.addSubInterface(self.account_interface, FIF.EDUCATION, self.tr("账户"),
+                             position=NavigationItemPosition.BOTTOM)
+        self.addSubInterface(self.setting_interface, FIF.SETTING, self.tr("设置"),
+                             position=NavigationItemPosition.BOTTOM)
+
+        # 添加评教界面作为工具箱界面的卡片
+        card = self.tool_box_interface.addCard(self.judge_interface, FIF.BOOK_SHELF, self.tr("一键评教"),
+                                               self.tr("轻松完成每学期的评教问卷"))
+        card.setFixedSize(200, 180)
 
         # 添加登录界面作为子界面，但是将其隐藏
-        button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"), position=NavigationItemPosition.BOTTOM)
+        button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
+                                      position=NavigationItemPosition.BOTTOM)
         button.setVisible(False)
 
     @pyqtSlot()

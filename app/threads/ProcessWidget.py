@@ -2,8 +2,9 @@ import sys
 import time
 
 from PyQt5.QtWidgets import QFrame, QHBoxLayout
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QTimer
-from qfluentwidgets import ProgressBar, VBoxLayout, BodyLabel, PrimaryPushButton, IndeterminateProgressBar
+from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QTimer, Qt
+from qfluentwidgets import ProgressBar, VBoxLayout, BodyLabel, PrimaryPushButton, IndeterminateProgressBar, \
+    MessageBoxBase
 
 
 class ProcessWidget(QFrame):
@@ -125,6 +126,27 @@ class ProcessThread(QThread):
     @pyqtSlot()
     def onStopSignal(self):
         self.can_run = False
+
+
+class ProcessDialog(MessageBoxBase):
+    def __init__(self, thread: "ProcessThread", parent=None, stoppable=False):
+        super().__init__(parent)
+        self.widget = ProcessWidget(thread, parent, stoppable, False)
+        self.viewLayout.addWidget(self.widget, 1, alignment=Qt.AlignVCenter)
+        self.buttonGroup.setVisible(False)
+
+        thread.hasFinished.connect(self.onThreadFinished)
+        thread.canceled.connect(self.onThreadCanceled)
+
+    @pyqtSlot()
+    def onThreadCanceled(self):
+        self.reject()
+        self.rejected.emit()
+
+    @pyqtSlot()
+    def onThreadFinished(self):
+        self.accept()
+        self.accepted.emit()
 
 
 if __name__ == '__main__':

@@ -141,6 +141,7 @@ class AttendanceFlowWidget(QFrame):
     @pyqtSlot(str, str)
     def onThreadError(self, title, msg):
         InfoBar.error(title, msg, duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
+        # 保存是否增加了页面数；如果增加了，则减少回去，以免出现“取消了但是页面数还是增加了”的情况
         if self.page_added:
             self.thread_.page -= 1 if self.thread_.page > 1 else 0
             self.page_added = False
