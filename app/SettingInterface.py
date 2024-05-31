@@ -48,7 +48,7 @@ class SettingInterface(ScrollArea):
         self.loginMethodCard = ComboBoxSettingCard(cfg.defaultAttendanceLoginMethod, FIF.GLOBE,
                                                    self.tr("考勤默认连接方式"),
                                                    self.tr("选择是否默认通过 WebVPN 连接考勤系统"),
-                                                   texts=[self.tr("不设置"), self.tr("直接连接"),
+                                                   texts=[self.tr("每次都询问"), self.tr("直接连接"),
                                                           self.tr("WebVPN 连接")],
                                                    parent=self.attendanceGroup)
         self.attendanceGroup.addSettingCard(self.loginMethodCard)
