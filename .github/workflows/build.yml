@@ -1,0 +1,61 @@
+name: Build & Release App
+
+on:
+  workflow_dispatch:
+    push:
+      tags:
+        - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: 'ubuntu-20.04'
+          - os: 'windows-latest'
+          - os: 'macos-12'
+    name: build
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pillow pyinstaller
+      - name: Create Executable
+        run: |
+          pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" app.py
+      - name: Compress Artifacts(Windows)
+        if: runner.os == 'Windows'
+        run: |
+          powershell Compress-Archive -Path .\dist\XJTUToolbox\ -DestinationPath .\dist\XJTUToolbox.zip -Force
+      - name: Upload Artifacts(Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox_windows.exe
+          path: ./dist/XJTUToolbox.zip
+      - name: Upload Artifacts(macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox_osx.app
+          path: ./dist/XJTUToolbox
+      - name: Compress Artifacts(Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          zip -r ./dist/XJTUToolbox.zip ./dist/XJTUToolbox
+      - name: Upload Artifacts(Ubuntu)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox_ubuntu.zip
+          path: ./dist/XJTUToolbox.zip
