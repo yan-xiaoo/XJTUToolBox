@@ -1,4 +1,5 @@
 import json
+import os.path
 import secrets
 import hashlib
 from uuid import uuid4
@@ -117,6 +118,9 @@ class AccountManager(QObject):
         return json.dumps({"data": list_, "encrypted": False, "current": current}, indent=4)
 
     def save_to(self, file="config/accounts.json"):
+        if not os.path.exists("config"):
+            os.mkdir("config")
+
         with open(file, "w", encoding="utf-8") as f:
             f.write(self.save())
 

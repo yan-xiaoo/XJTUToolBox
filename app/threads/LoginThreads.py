@@ -1,6 +1,6 @@
 from enum import Enum
 
-from auth import Login, BB_LOGIN_URL, ServerError
+from auth import Login, EHALL_LOGIN_URL, ServerError
 from PyQt5.QtCore import QThread, pyqtSignal
 
 
@@ -35,7 +35,7 @@ class LoginThread(QThread):
 
     def run(self):
         try:
-            self.login = self.login or Login(BB_LOGIN_URL)
+            self.login = self.login or Login(EHALL_LOGIN_URL)
             if self.choice == LoginChoice.GET_SHOW_CAPTCHA:
                 result = self.login.isShowJCaptchaCode(self.username)
                 self.isShowCaptcha.emit(result)

@@ -1,6 +1,12 @@
+from traceback import format_exception
+from types import TracebackType
+from typing import Type
+import sys
+
 from PyQt5.QtCore import pyqtSlot, QUrl
 from PyQt5.QtGui import QIcon, QDesktopServices
-from qfluentwidgets import MSFluentWindow, NavigationBarPushButton
+from PyQt5.QtWidgets import QApplication
+from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import NavigationItemPosition, isDarkTheme
 
@@ -26,6 +32,8 @@ class MainWindow(MSFluentWindow):
 
         self.on_theme_changed()
         cfg.themeChanged.connect(self.on_theme_changed)
+
+        sys.excepthook = self.catchExceptions
 
     def initWindow(self):
         self.setWindowTitle("仙交百宝箱")
@@ -67,6 +75,27 @@ class MainWindow(MSFluentWindow):
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
                                       position=NavigationItemPosition.BOTTOM)
         button.setVisible(False)
+
+    def catchExceptions(self, ty: Type[BaseException], value: BaseException, _traceback: TracebackType):
+        """
+        全局捕获异常，并弹窗显示
+        :param ty: 异常的类型
+        :param value: 异常的对象
+        :param _traceback: 异常的traceback
+        """
+        tracebackString = "".join(format_exception(ty, value, _traceback))
+        box = MessageBox(
+            self.tr("程序发生未经处理的异常"),
+            content=tracebackString,
+            parent=self,
+        )
+        box.yesButton.setText(self.tr("复制到剪切板"))
+        box.cancelButton.setText(self.tr("关闭"))
+        box.yesSignal.connect(
+            lambda: QApplication.clipboard().setText(tracebackString)
+        )
+        box.exec()
+        return sys.__excepthook__(ty, value, _traceback)
 
     @pyqtSlot()
     def on_theme_changed(self):
