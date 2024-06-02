@@ -37,25 +37,17 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox_windows.zip
+          name: XJTUToolbox_windows
           path: ./dist/XJTUToolbox
-      - name: Compress Artifacts(macOS)
-        if: runner.os == 'macOS'
-        run: |
-          zip -r ./dist/XJTUToolbox.app.zip ./dist/XJTUToolbox.app
       - name: Upload Artifacts(macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox_osx.zip
-          path: ./dist/XJTUToolbox.app.zip
-      - name: Compress Artifacts(Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          zip -r ./dist/XJTUToolbox.zip ./dist/XJTUToolbox
+          name: XJTUToolbox_macOS
+          path: ./dist/XJTUToolbox.app
       - name: Upload Artifacts(Ubuntu)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox_ubuntu.zip
-          path: ./dist/XJTUToolbox.zip
+          name: XJTUToolbox_ubuntu
+          path: ./dist/XJTUToolbox
