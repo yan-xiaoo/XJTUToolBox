@@ -15,13 +15,15 @@
 如果你解决了某个问题或添加了新的功能，欢迎提出 PR。
 
 ## 界面展示
-![sample1](screenshots/sample_1.png)
-![sample2](screenshots/sample_2.png)
-![sample3](screenshots/sample_3.png)
+![sample1](./screenshots/sample_1.png)
+![sample2](./screenshots/sample_2.png)
+![sample3](./screenshots/sample_3.png)
 
 ## 下载安装
-从 [Release](https://github.com/yan-xiaoo/XJTUToolBox/releases) 页面下载最新版本的安装包，解压后双击 app.exe 即可运行
+从 [Release](https://github.com/yan-xiaoo/XJTUToolBox/releases) 页面下载最新版本的安装包
 > 本项目的二进制安装包全部由 Github Actions 直接从源代码生成，请放心使用
+
+macOS 下，需要将应用程序拖到「应用程序」文件夹内，否则无法正常运行；如果提示「无法验证此 app 的开发者」，请在设置-隐私与安全性中选择「仍要打开」。
 
 目前程序暂时没有检查更新功能，如需更新请重新下载最新版本的安装包
 

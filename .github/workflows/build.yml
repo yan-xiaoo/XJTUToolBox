@@ -2,9 +2,9 @@ name: Build & Release App
 
 on:
   workflow_dispatch:
-    push:
-      tags:
-        - 'v*.*.*'
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -33,16 +33,11 @@ jobs:
       - name: Create Executable
         run: |
           pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" app.py
-      - name: Compress Artifacts(Windows)
-        if: runner.os == 'Windows'
-        run: |
-          powershell Compress-Archive -Path .\dist\XJTUToolbox\ -DestinationPath .\dist\XJTUToolbox.zip -Force
-      - name: Upload Artifacts(Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox_windows.exe
-          path: ./dist/XJTUToolbox.zip
+          name: XJTUToolbox_windows.zip
+          path: ./dist/XJTUToolbox
       - name: Compress Artifacts(macOS)
         if: runner.os == 'macOS'
         run: |
@@ -51,7 +46,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox_osx.app
+          name: XJTUToolbox_osx.zip
           path: ./dist/XJTUToolbox.app.zip
       - name: Compress Artifacts(Ubuntu)
         if: runner.os == 'Linux'
