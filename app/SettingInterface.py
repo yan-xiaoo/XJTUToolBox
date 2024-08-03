@@ -38,8 +38,11 @@ class SettingInterface(ScrollArea):
         self.decryptCard = PushSettingCard(self.tr("不再加密"), FIF.FINGERPRINT,
                                            self.tr("不再加密账户"), self.tr("撤销账户加密，重新使用明文存储账户信息"),
                                            self.accountGroup)
+        self.clearCard = PushSettingCard(self.tr("清除账户信息"), FIF.CLEAR_SELECTION,
+                                         self.tr("清除所有账户"), self.tr("清除本地存储的所有账户信息并撤销账户加密"))
         self.accountGroup.addSettingCard(self.encryptCard)
         self.accountGroup.addSettingCard(self.decryptCard)
+        self.accountGroup.addSettingCard(self.clearCard)
 
         self._onUpdateEncryptStatus()
 
@@ -85,6 +88,7 @@ class SettingInterface(ScrollArea):
                                                                                       self.loginMethodCard.comboBox.currentIndex())))
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
+        self.clearCard.clicked.connect(self._onClearAccountsClicked)
 
     @pyqtSlot()
     def onEncryptAccountClicked(self):
@@ -128,3 +132,17 @@ class SettingInterface(ScrollArea):
         w.cancelButton.setText(self.tr("取消"))
         if w.exec():
             accounts.setEncrypted(False)
+
+    @pyqtSlot()
+    def _onClearAccountsClicked(self):
+        if accounts.encrypted:
+            msg = self.tr("清除后，所有账户信息将被删除，且不可恢复。\n账户加密将同时被解除")
+        else:
+            msg = self.tr("清除后，所有账户信息将被删除，且不可恢复")
+        w = MessageBox(self.tr("确认清除所有账户信息?"),
+                       msg, self)
+        w.yesButton.setText(self.tr("清除"))
+        w.cancelButton.setText(self.tr("取消"))
+        if w.exec():
+            accounts.clear()
+            InfoBar.success(title='', content="清除账户成功", parent=self)

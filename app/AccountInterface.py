@@ -236,6 +236,7 @@ class AccountInterface(ScrollArea):
             self.accountClickable = True
 
         accounts.accountDecrypted.connect(self._onAccountDecrypted)
+        accounts.accountCleared.connect(self._onAccountCleared)
 
         self.account_widgets = {}
         for account in self.accounts:
@@ -248,6 +249,15 @@ class AccountInterface(ScrollArea):
         self.setWidgetResizable(True)
 
         StyleSheet.ACCOUNT_INTERFACE.apply(self)
+
+    @pyqtSlot()
+    def _onAccountCleared(self):
+        self.decryptFrame.setVisible(False)
+        self.accountClickable = True
+        for one in self.account_widgets.values():
+            self.accountAreaLayout.removeWidget(one)
+            one.deleteLater()
+        self.account_widgets.clear()
 
     @pyqtSlot()
     def _onAccountDecrypted(self):

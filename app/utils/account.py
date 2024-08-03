@@ -63,6 +63,10 @@ class AccountManager(QObject):
     accountDecrypted = pyqtSignal()
     # 账户变成需要加密的/不需要加密的
     accountEncryptStateChanged = pyqtSignal()
+    # 账户被清除数据
+    # 清除时会同时触发 accountEncryptStateChanged 信号（因为此时新添加的账户不会被再加密）
+    # 如果清除时账户数据受密码保护但已经被解密/未受密码保护，会同时触发 accountDeleted 信号（因为已经存在的账户数据被删除了）
+    accountCleared = pyqtSignal()
 
     def __init__(self, *args):
         super().__init__()
@@ -135,6 +139,21 @@ class AccountManager(QObject):
         key = key or self.key
         with open(file, "w", encoding="utf-8") as f:
             f.write(self.encrypt_save(key))
+
+    def clear(self):
+        """
+        删除当前存储的所有账户信息，并且使账户不再受密码保护
+        """
+        # 清除当前账号信息
+        self.accounts.clear()
+        # 清除当前账号
+        self.current = None
+        # 覆盖当前磁盘上的账号信息
+        self.setEncrypted(False)
+        self.accountCleared.emit()
+        # 清除所有缓存
+        from app.utils.cache import remove_all_cache
+        remove_all_cache()
 
     def setEncrypted(self, status, key=None):
         """设置账户是否需要加密。请注意这个操作本身不会加密或者解密账户。"""

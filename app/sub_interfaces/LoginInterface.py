@@ -230,6 +230,7 @@ class LoginInterface(ScrollArea):
         # 处理「本次登录需要验证码了但是用户没填」的情况
         if show and not self._captcha_required:
             self._show_captcha(refresh=True)
+            self._captcha_required = True
             InfoBar.info("请输入验证码", "", orient=Qt.Horizontal, isClosable=True,
                          position=InfoBarPosition.TOP_RIGHT, duration=3000, parent=self)
             self._unlock(False)

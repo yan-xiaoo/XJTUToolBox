@@ -68,3 +68,10 @@ class AccountCacheManager(CacheManager):
             shutil.rmtree(os.path.join("config", "cache", self.account_id))
         except FileNotFoundError:
             pass
+
+
+def remove_all_cache():
+    try:
+        shutil.rmtree(os.path.join("config", "cache"))
+    except FileNotFoundError:
+        pass

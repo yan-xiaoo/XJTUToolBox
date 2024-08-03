@@ -26,6 +26,7 @@ class HomeFrame(QWidget):
             self.decrypt_frame.setVisible(False)
         self.vBoxLayout.addWidget(self.decrypt_frame, alignment=Qt.AlignHCenter)
         accounts.accountDecrypted.connect(self.onAccountDecrypted)
+        accounts.accountCleared.connect(self.onAccountDecrypted)
 
         self.linkCardView = LinkCardView(self)
         self.vBoxLayout.addWidget(self.linkCardView, alignment=Qt.AlignTop)

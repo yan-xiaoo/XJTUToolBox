@@ -43,7 +43,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox_macOS
+          name: XJTUToolbox_macOS.app
           path: ./dist/XJTUToolbox.app
       - name: Upload Artifacts(Ubuntu)
         if: runner.os == 'Linux'
