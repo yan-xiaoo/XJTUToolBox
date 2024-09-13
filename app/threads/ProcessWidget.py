@@ -131,8 +131,8 @@ class ProcessThread(QThread):
 class ProcessDialog(MessageBoxBase):
     def __init__(self, thread: "ProcessThread", parent=None, stoppable=False):
         super().__init__(parent)
-        self.widget = ProcessWidget(thread, parent, stoppable, False)
-        self.viewLayout.addWidget(self.widget, 1, alignment=Qt.AlignVCenter)
+        widget = ProcessWidget(thread, self, stoppable, False)
+        self.viewLayout.addWidget(widget)
         self.buttonGroup.setVisible(False)
 
         thread.hasFinished.connect(self.onThreadFinished)

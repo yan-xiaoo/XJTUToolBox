@@ -2,7 +2,7 @@ from PyQt5.QtCore import Qt, pyqtSlot, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFrame
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ComboBox, ScrollArea, PrimaryPushButton, ToolTipFilter, \
-    ToolTipPosition, InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, PushButton
+    ToolTipPosition, InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, PushButton, TitleLabel
 from ehall import Questionnaire, QuestionnaireTemplate
 from ..utils import StyleSheet
 from ..threads.JudgeThread import JudgeThread, JudgeChoice
@@ -148,15 +148,18 @@ class AutoJudgeInterface(ScrollArea):
 
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
-        self.processDialog = ProcessDialog(self.thread_, self.parent(), True)
+        self.processDialog = ProcessDialog(self.thread_, parent, True)
 
         self.startFrame = QFrame(self.view)
         self.startFrameLayout = QVBoxLayout(self.startFrame)
         self.questionnaireFrame = QFrame(self.view)
         self.questionnaireWidgets = []
         self.finishedQuestionnaireWidgets = []
+        self.noQuestionnaireLabel = TitleLabel(self.tr("没有需要完成的问卷"), self.questionnaireFrame)
+        self.noQuestionnaireLabel.setVisible(False)
 
         self.questionnaireFrameLayout = QVBoxLayout(self.questionnaireFrame)
+        
 
         self.hintLabel = BodyLabel(
             self.tr("使用说明：选择评分分数，再点击一键评教按钮，即可完成评教。\n"
@@ -164,6 +167,8 @@ class AutoJudgeInterface(ScrollArea):
                     "课程类型不正确时，部分选项的评教结果可能出现异常"),
             self.questionnaireFrame
         )
+        self.questionnaireFrameLayout.addWidget(self.noQuestionnaireLabel, alignment=Qt.AlignHCenter)
+        self.questionnaireFrameLayout.addSpacing(20)
         self.questionnaireFrameLayout.addWidget(self.hintLabel, alignment=Qt.AlignHCenter)
         self.questionnaireFrameLayout.addSpacing(10)
         self.hintLabel.setVisible(False)
@@ -285,6 +290,11 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot(list, list)
     def onGetQuestionnaireFinish(self, questionnaires: list, finished_questionnaires: list):
+        if len(questionnaires) == 0:
+            self.noQuestionnaireLabel.setVisible(True)
+        else:
+            self.noQuestionnaireLabel.setVisible(False)
+
         for questionnaire in questionnaires:
             self.addQuestionnaire(questionnaire, False)
         self.questionnaireFrameLayout.addSpacing(20)

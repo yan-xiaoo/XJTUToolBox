@@ -18,7 +18,7 @@ class HomeFrame(QWidget):
         self.title.setContentsMargins(10, 15, 0, 0)
         self.vBoxLayout.setSpacing(0)
 
-        self.decrypt_frame = DecryptFrame(main_window, self)
+        self.decrypt_frame = DecryptFrame(self, self)
         self.decrypt_frame.setMaximumWidth(300)
         if accounts.encrypted:
             self.decrypt_frame.setVisible(True)

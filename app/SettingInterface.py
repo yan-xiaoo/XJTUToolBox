@@ -38,7 +38,7 @@ class SettingInterface(ScrollArea):
         self.decryptCard = PushSettingCard(self.tr("不再加密"), FIF.FINGERPRINT,
                                            self.tr("不再加密账户"), self.tr("撤销账户加密，重新使用明文存储账户信息"),
                                            self.accountGroup)
-        self.clearCard = PushSettingCard(self.tr("清除账户信息"), FIF.CLEAR_SELECTION,
+        self.clearCard = PushSettingCard(self.tr("清除"), FIF.CLEAR_SELECTION,
                                          self.tr("清除所有账户"), self.tr("清除本地存储的所有账户信息并撤销账户加密"))
         self.accountGroup.addSettingCard(self.encryptCard)
         self.accountGroup.addSettingCard(self.decryptCard)

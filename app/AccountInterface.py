@@ -204,7 +204,7 @@ class AccountInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.minorLabel)
         self.vBoxLayout.addSpacing(10)
 
-        self.decryptFrame = DecryptFrame(main_window, self)
+        self.decryptFrame = DecryptFrame(self, self)
         self.decryptFrame.setMaximumWidth(300)
 
         self.vBoxLayout.addWidget(self.decryptFrame, alignment=Qt.AlignHCenter)
