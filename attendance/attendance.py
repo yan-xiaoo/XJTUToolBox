@@ -1,3 +1,4 @@
+import math
 import time
 from enum import Enum
 
@@ -434,6 +435,32 @@ class Attendance:
             week_schedule = self.getWeekSchedule(week, termNo)
             schedule.set_week_lessons(week, week_schedule.lessons)
         return schedule
+
+    def getFlowRecordWithPage(self, current=1, page_size=10):
+        """
+        获得包含总页数、总数量、当前页数等信息的考勤流水信息
+        :param current: 目前获取第几页
+        :param page_size: 每页包含多少流水信息
+        :return: 考勤流水信息的字典，其内容如下：
+        - data: 考勤流水信息的列表
+        - total_pages: 总页数
+        - total_count: 总数量
+        - current_page: 当前页数
+        """
+        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/waterList/page", json={
+            "calendarBh": "", "enddate": "", "startdate": "", "pageSize": page_size, "current": current
+        })
+        result = response.json()
+        if not result['success']:
+            raise ServerError(result['code'], result['msg'])
+        else:
+            return {
+                "data": [AttendanceFlow.from_json(one) for one in result['data']['list']],
+                # 网站返回的总页数信息不正确
+                "total_pages": math.ceil(result['data']['totalCount'] / page_size),
+                "total_count": result['data']['totalCount'],
+                "current_page": current
+            }
 
     def getFlowRecord(self, current=1, page_size=10):
         """

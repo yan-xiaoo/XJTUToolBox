@@ -19,7 +19,8 @@ class AttendanceFlowChoice(Enum):
 
 
 class AttendanceFlowThread(ProcessThread):
-    flowRecord = pyqtSignal(list)
+    # 发送内容：字典。data：数据列表；total_pages：总页数；current_page：当前页数
+    flowRecord = pyqtSignal(dict)
     successMessage = pyqtSignal(str)
 
     def __init__(self, account: Account, choice: AttendanceFlowChoice, size=10, page=1, parent=None):
@@ -57,7 +58,7 @@ class AttendanceFlowThread(ProcessThread):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在查询考勤流水..."))
         lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN)
-        return lookup_wrapper.getFlowRecord(self.page, self.size)
+        return lookup_wrapper.getFlowRecordWithPage(self.page, self.size)
 
     def login_again(self, session):
         """

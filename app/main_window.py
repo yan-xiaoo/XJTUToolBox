@@ -3,7 +3,7 @@ from types import TracebackType
 from typing import Type
 import sys
 
-from PyQt5.QtCore import pyqtSlot, QUrl
+from PyQt5.QtCore import pyqtSlot, QUrl, Qt
 from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox
@@ -89,6 +89,8 @@ class MainWindow(MSFluentWindow):
             content=tracebackString,
             parent=self,
         )
+        # 允许错误内容被复制
+        box.contentLabel.setTextInteractionFlags(box.contentLabel.textInteractionFlags() | Qt.TextSelectableByMouse)
         box.yesButton.setText(self.tr("复制到剪切板"))
         box.cancelButton.setText(self.tr("关闭"))
         box.yesSignal.connect(

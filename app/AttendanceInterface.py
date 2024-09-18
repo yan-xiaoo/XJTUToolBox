@@ -3,8 +3,8 @@ import typing
 from PyQt5.QtWidgets import QWidget, QStackedWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractItemView
 from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, VBoxLayout, Pivot, BodyLabel, PrimaryPushButton, TableWidget, \
-    CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition
-from .utils import StyleSheet, accounts, AccountCacheManager
+    CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition, PipsPager, PipsScrollButtonDisplayMode
+from .utils import StyleSheet, accounts, AccountCacheManager, Color
 from attendance.attendance import AttendanceFlow, FlowRecordType
 from .threads.ProcessWidget import ProcessWidget
 from .threads.AttendanceFlowThread import AttendanceFlowThread, AttendanceFlowChoice
@@ -22,6 +22,9 @@ class AttendanceFlowWidget(QFrame):
 
         self.vBoxLayout.addWidget(self.nothingFrame)
         self.vBoxLayout.addWidget(self.normalFrame)
+
+        # 控制页面只显示最新的一条通知
+        self._onlyNotice = None
 
         if len(accounts) > 0:
             self.loadContentCache()
@@ -52,6 +55,42 @@ class AttendanceFlowWidget(QFrame):
             self.tableWidget.setItem(i, 0, QTableWidgetItem(""))
             self.tableWidget.setItem(i, 1, QTableWidgetItem(""))
             self.tableWidget.setItem(i, 2, QTableWidgetItem(""))
+
+    def success(self, title, msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=None):
+        """
+        显示一个成功的通知。如果已经存在通知，已存在的通知会被立刻关闭。
+        :param duration: 通知显示时间
+        :param position: 通知显示位置
+        :param parent: 通知的父窗口
+        :param title: 通知标题
+        :param msg: 通知内容
+        """
+        if self._onlyNotice is not None:
+            try:
+                self._onlyNotice.close()
+            except RuntimeError:
+                # RuntimeError: wrapped C/C++ object of type InfoBar has been deleted
+                # 这个异常无所谓，忽略
+                self._onlyNotice = None
+        self._onlyNotice = InfoBar.success(title, msg, duration=duration, position=position, parent=parent)
+
+    def error(self, title, msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=None):
+        """
+        显示一个错误的通知。如果已经存在通知，已存在的通知会被立刻关闭。
+        :param duration: 通知显示时间
+        :param position: 通知显示位置
+        :param parent: 通知的父窗口
+        :param title: 通知标题
+        :param msg: 通知内容
+        """
+        if self._onlyNotice is not None:
+            try:
+                self._onlyNotice.close()
+            except RuntimeError:
+                # RuntimeError: wrapped C/C++ object of type InfoBar has been deleted
+                # 这个异常无所谓，忽略
+                self._onlyNotice = None
+        self._onlyNotice = InfoBar.error(title, msg, duration=duration, position=position, parent=parent)
 
     @pyqtSlot()
     def currentAccountChanged(self):
@@ -101,6 +140,10 @@ class AttendanceFlowWidget(QFrame):
 
     @pyqtSlot()
     def onNextClicked(self):
+        if self.pager.currentIndex() == self.pager.getPageNumber() - 1:
+            self.success("", self.tr("已经到底啦"), duration=2000, position=InfoBarPosition.TOP_RIGHT,
+                            parent=self._parent)
+            return
         self.page_added = True
         self.thread_.page += 1
         self.onSearchClicked()
@@ -111,13 +154,25 @@ class AttendanceFlowWidget(QFrame):
             self.thread_.page -= 1
             self.onSearchClicked()
         else:
-            InfoBar.success("", self.tr("已经到顶啦"), duration=2000, position=InfoBarPosition.TOP_RIGHT,
+            self.success("", self.tr("已经到顶啦"), duration=2000, position=InfoBarPosition.TOP_RIGHT,
                             parent=self._parent)
 
-    @pyqtSlot(list)
-    def onGetFlowRecord(self, record: list):
-        self.setTableContent(record)
-        self.saveContentCache(record)
+    @pyqtSlot(int)
+    def onPageClicked(self, current_index: int):
+        if self.thread_.page - 1 != current_index:
+            self.thread_.page = current_index + 1
+            self.onSearchClicked()
+
+    @pyqtSlot(dict)
+    def onGetFlowRecord(self, record: dict):
+        # 在获得了考勤记录后，我们就知道总共有多少页了，因此可以显示分页控件
+        self.pager.setVisible(True)
+        if self.pager.getPageNumber() != record['total_pages']:
+            self.pager.setPageNumber(record['total_pages'])
+        self.pager.setCurrentIndex(record['current_page'] - 1)
+
+        self.setTableContent(record['data'])
+        self.saveContentCache(record['data'])
 
     def loadContentCache(self):
         try:
@@ -135,12 +190,12 @@ class AttendanceFlowWidget(QFrame):
 
     @pyqtSlot(str)
     def onThreadSuccess(self, msg):
-        InfoBar.success(self.tr("登录成功"), msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
+        self.success(self.tr("成功"), msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
         self.page_added = False
 
     @pyqtSlot(str, str)
     def onThreadError(self, title, msg):
-        InfoBar.error(title, msg, duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
+        self.error(title, msg, duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
         # 保存是否增加了页面数；如果增加了，则减少回去，以免出现“取消了但是页面数还是增加了”的情况
         if self.page_added:
             self.thread_.page -= 1 if self.thread_.page > 1 else 0
@@ -167,10 +222,18 @@ class AttendanceFlowWidget(QFrame):
             return self.tr("未知")
 
     def setTableContent(self, record: typing.List[AttendanceFlow]):
+        self.tableWidget.clearContents()
         for i in range(min(self.tableWidget.rowCount(), len(record))):
             self.tableWidget.setItem(i, 0, QTableWidgetItem(record[i].water_time))
             self.tableWidget.setItem(i, 1, QTableWidgetItem(record[i].place))
-            self.tableWidget.setItem(i, 2, QTableWidgetItem(self.mapTypeToResult(record[i].type_)))
+            statusWidget = QTableWidgetItem(self.mapTypeToResult(record[i].type_))
+            if record[i].type_ == FlowRecordType.INVALID:
+                statusWidget.setForeground(Color.INVALID_COLOR)
+            elif record[i].type_ == FlowRecordType.REPEATED:
+                statusWidget.setForeground(Color.REPEAT_COLOR)
+            else:
+                statusWidget.setForeground(Color.VALID_COLOR)
+            self.tableWidget.setItem(i, 2, statusWidget)
 
     def constructWithAccountFrame(self) -> QFrame:
         frame = QFrame(self)
@@ -215,6 +278,16 @@ class AttendanceFlowWidget(QFrame):
 
         # self.tableWidget.setMinimumSize(550, 250)
         vBoxLayout.addWidget(self.tableWidget, stretch=1, alignment=Qt.AlignHCenter)
+
+        self.pager = PipsPager(Qt.Horizontal)
+
+        # 始终显示前进和后退按钮
+        self.pager.setNextButtonDisplayMode(PipsScrollButtonDisplayMode.ALWAYS)
+        self.pager.setPreviousButtonDisplayMode(PipsScrollButtonDisplayMode.ALWAYS)
+        self.pager.setVisible(False)
+        self.pager.currentIndexChanged.connect(self.onPageClicked)
+
+        vBoxLayout.addWidget(self.pager, alignment=Qt.AlignHCenter)
 
         self.mentionLabel = BodyLabel(
             self.tr("使用说明：先点击「登录 WebVPN」或者「直接登录」，然后选择「立刻刷新」即可查询\n"

@@ -1,5 +1,6 @@
 from enum import Enum
 
+from PyQt5.QtGui import QColor
 from qfluentwidgets import StyleSheetBase, Theme
 from .config import cfg
 
@@ -19,3 +20,10 @@ class StyleSheet(StyleSheetBase, Enum):
     def path(self, theme=Theme.AUTO):
         theme = cfg.theme if theme == Theme.AUTO else theme
         return f"assets/qss/{theme.value.lower()}/{self.value}.qss"
+
+
+class Color:
+    # 课表不同状态的不同颜色
+    INVALID_COLOR = QColor(255, 0, 0)
+    VALID_COLOR = QColor(0, 255, 0)
+    REPEAT_COLOR = QColor(0, 0, 255)
