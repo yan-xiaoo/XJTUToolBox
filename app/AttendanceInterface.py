@@ -23,6 +23,11 @@ class AttendanceFlowWidget(QFrame):
         self.vBoxLayout.addWidget(self.nothingFrame)
         self.vBoxLayout.addWidget(self.normalFrame)
 
+        # 在用户选择查看另一页从而发起网络请求期间，last_page 保持修改前的页数，current_page 保持修改后的页数
+        self.last_page = 1
+        # self.current_page, self.thread_.page, self.pager.currentIndex 三者应该永远保持一致
+        self.current_page = 1
+
         # 控制页面只显示最新的一条通知
         self._onlyNotice = None
 
@@ -38,8 +43,6 @@ class AttendanceFlowWidget(QFrame):
         accounts.accountAdded.connect(self.accountAdded)
         accounts.accountDeleted.connect(self.accountAdded)
         accounts.currentAccountChanged.connect(self.currentAccountChanged)
-
-        self.page_added = False
 
     @pyqtSlot()
     def accountAdded(self):
@@ -140,17 +143,20 @@ class AttendanceFlowWidget(QFrame):
 
     @pyqtSlot()
     def onNextClicked(self):
-        if self.pager.currentIndex() == self.pager.getPageNumber() - 1:
+        if self.current_page >= self.pager.getPageNumber():
             self.success("", self.tr("已经到底啦"), duration=2000, position=InfoBarPosition.TOP_RIGHT,
-                            parent=self._parent)
+                         parent=self._parent)
             return
-        self.page_added = True
+        self.last_page = self.current_page
+        self.current_page += 1
         self.thread_.page += 1
         self.onSearchClicked()
 
     @pyqtSlot()
     def onPrevClicked(self):
-        if self.thread_.page > 1:
+        if self.current_page > 1:
+            self.last_page = self.current_page
+            self.current_page -= 1
             self.thread_.page -= 1
             self.onSearchClicked()
         else:
@@ -159,7 +165,9 @@ class AttendanceFlowWidget(QFrame):
 
     @pyqtSlot(int)
     def onPageClicked(self, current_index: int):
-        if self.thread_.page - 1 != current_index:
+        if self.current_page - 1 != current_index:
+            self.last_page = self.current_page
+            self.current_page = current_index + 1
             self.thread_.page = current_index + 1
             self.onSearchClicked()
 
@@ -191,15 +199,14 @@ class AttendanceFlowWidget(QFrame):
     @pyqtSlot(str)
     def onThreadSuccess(self, msg):
         self.success(self.tr("成功"), msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
-        self.page_added = False
 
     @pyqtSlot(str, str)
     def onThreadError(self, title, msg):
         self.error(title, msg, duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
-        # 保存是否增加了页面数；如果增加了，则减少回去，以免出现“取消了但是页面数还是增加了”的情况
-        if self.page_added:
-            self.thread_.page -= 1 if self.thread_.page > 1 else 0
-            self.page_added = False
+
+        self.current_page = self.last_page
+        self.thread_.page = self.last_page
+        self.pager.setCurrentIndex(self.current_page - 1)
 
     def constructNoAccountFrame(self) -> QFrame:
         frame = QFrame(self)

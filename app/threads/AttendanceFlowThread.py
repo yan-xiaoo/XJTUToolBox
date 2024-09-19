@@ -77,12 +77,14 @@ class AttendanceFlowThread(ProcessThread):
         self.expire_time = time.time()
 
     def run(self):
-        # 根据设置更改登录方式
-        setting = cfg.get(cfg.defaultAttendanceLoginMethod)
-        if setting == cfg.AttendanceLoginMethod.WEBVPN:
-            self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
-        elif setting == cfg.AttendanceLoginMethod.NORMAL:
-            self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
+        # 如果用户已经选择过登录方式，就不再更改
+        if self.last_login_choice is None:
+            # 根据设置更改登录方式
+            setting = cfg.get(cfg.defaultAttendanceLoginMethod)
+            if setting == cfg.AttendanceLoginMethod.WEBVPN:
+                self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
+            elif setting == cfg.AttendanceLoginMethod.NORMAL:
+                self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
 
         try:
             if self.account is None:
@@ -131,9 +133,11 @@ class AttendanceFlowThread(ProcessThread):
             else:
                 raise ValueError(f"{self.choice} is not a valid choice. ")
         except ServerError as e:
+            traceback.print_exc()
             self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()
         except requests.RequestException as e:
+            traceback.print_exc()
             self.error.emit(self.tr("网络错误"), str(e))
             self.canceled.emit()
         except Exception as e:
