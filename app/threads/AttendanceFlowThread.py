@@ -1,13 +1,12 @@
-import time
 import traceback
 from enum import Enum
 
 import requests
 
 from auth import ServerError
+from ..sessions.attendance_session import AttendanceSession
 from ..utils import Account, cfg
-from auth import get_session
-from attendance.attendance import AttendanceWebVPNLogin, AttendanceLogin, Attendance
+from attendance.attendance import Attendance
 from .ProcessWidget import ProcessThread
 from PyQt5.QtCore import pyqtSignal
 
@@ -28,30 +27,26 @@ class AttendanceFlowThread(ProcessThread):
         self.account = account
         self.size = size
         self.page = page
-        self.session = None
-        self.expire_duration = 600
         self.choice = choice
         self.last_login_choice = None
-        # 开始时默认为过期状态，以便在实际使用时刷新
-        self.expire_time = time.time() - self.expire_duration
 
-    def has_expired(self):
-        return time.time() - self.expire_time > self.expire_duration
+    @property
+    def session(self) -> AttendanceSession:
+        """
+        获取当前账户用于访问 ehall 的 session
+        """
+        return self.account.session_manager.get_session("attendance")
 
-    def webvpn_login(self, session):
+    def webvpn_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
-        attendance_login = AttendanceWebVPNLogin(session)
-        attendance_login.login(self.account.username, self.account.password)
-        attendance_login.post_login()
+        self.session.webvpn_login(self.account.username, self.account.password)
         self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
 
-    def normal_login(self, session):
+    def normal_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
-        attendance_login = AttendanceLogin(session)
-        attendance_login.login(self.account.username, self.account.password)
-        attendance_login.post_login()
+        self.session.login(self.account.username, self.account.password)
         self.messageChanged.emit(self.tr("直接登录考勤系统成功。"))
 
     def search(self, session):
@@ -60,21 +55,14 @@ class AttendanceFlowThread(ProcessThread):
         lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN)
         return lookup_wrapper.getFlowRecordWithPage(self.page, self.size)
 
-    def login_again(self, session):
+    def login_again(self):
         """
         根据存储的上次使用的登录方法，再次登录。
-        :param session: 这应当是一个新的 requests.Session。
-        :return: 无
         """
         if self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN:
-            self.webvpn_login(session)
+            self.webvpn_login()
         else:
-            self.normal_login(session)
-        self.reset_expire_time()
-
-    def reset_expire_time(self):
-        """重置当前 session 的过期时间为最大值"""
-        self.expire_time = time.time()
+            self.normal_login()
 
     def run(self):
         # 如果用户已经选择过登录方式，就不再更改
@@ -91,33 +79,28 @@ class AttendanceFlowThread(ProcessThread):
                 raise ValueError(self.tr("账户信息为空"))
 
             if self.choice == AttendanceFlowChoice.WEBVPN_LOGIN:
-                if not self.has_expired():
+                if self.session.has_login:
                     self.successMessage.emit(self.tr("无需重新登录。"))
                     self.hasFinished.emit()
                     return
                 else:
-                    self.session = get_session()
-                    self.webvpn_login(self.session)
-                    self.reset_expire_time()
+                    self.webvpn_login()
                     self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
                     self.successMessage.emit(self.tr("WebVPN 登录成功"))
                     self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.NORMAL_LOGIN:
-                if not self.has_expired():
+                if self.session.has_login:
                     self.successMessage.emit(self.tr("无需重新登录。"))
                     self.hasFinished.emit()
                 else:
-                    self.session = get_session()
-                    self.normal_login(self.session)
-                    self.reset_expire_time()
+                    self.normal_login()
                     self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
                     self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
                     self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.SEARCH:
-                if self.has_expired():
+                if not self.session.has_login:
                     if self.last_login_choice is not None:
-                        self.session = get_session()
-                        self.login_again(self.session)
+                        self.login_again()
                         result = self.search(self.session)
                         self.flowRecord.emit(result)
                         self.successMessage.emit(self.tr("获得考勤流水成功。"))
@@ -144,7 +127,3 @@ class AttendanceFlowThread(ProcessThread):
             traceback.print_exc()
             self.error.emit(self.tr("其他错误"), str(e))
             self.canceled.emit()
-
-    def reset(self):
-        """设置当前内容为已过期，从而强制下一次调用时刷新 session"""
-        self.expire_time = time.time() - self.expire_duration

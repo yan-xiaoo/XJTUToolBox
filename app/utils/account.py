@@ -7,6 +7,8 @@ from uuid import uuid4
 from Crypto.Cipher import AES
 from PyQt5.QtCore import pyqtSignal, QObject
 
+from app.utils import SessionManager
+
 
 def pad(text):
     text_length = len(text)
@@ -34,6 +36,8 @@ class Account:
         self.password = password
         self.nickname = nickname
         self.uuid = uuid or str(uuid4())
+        # 存储当前账号用于访问各个需要登录网站的 session
+        self.session_manager = SessionManager()
 
     def to_diction(self):
         return {"username": self.username, "password": self.password, "nickname": self.nickname, "uuid": self.uuid}

@@ -15,14 +15,26 @@ from .AccountInterface import AccountInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
 from .ToolBoxInterface import ToolBoxInterface
+from .sessions.attendance_session import AttendanceSession
+from .sessions.ehall_session import EhallSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
-from .utils import cfg, accounts, MyFluentIcon
+from .utils import cfg, accounts, MyFluentIcon, SessionManager
+
+
+def registerSession():
+    """
+    注册各个子网站需要使用的 Session 类
+    """
+    # ehall：ehall.xjtu.edu.cn 所用的 session
+    SessionManager.global_register(EhallSession, "ehall")
+    SessionManager.global_register(AttendanceSession, "attendance")
 
 
 class MainWindow(MSFluentWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
+        registerSession()
         self.initWindow()
         self.initInterface()
         self.initNavigation()

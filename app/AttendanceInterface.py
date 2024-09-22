@@ -99,12 +99,14 @@ class AttendanceFlowWidget(QFrame):
     def currentAccountChanged(self):
         self.clearTableContent()
         self.thread_.account = accounts.current
-        self.thread_.reset()
+        # 由于不知道其他用户考勤总共有多少页，因此隐藏分页控件
+        self.pager.setVisible(False)
         self.loadContentCache()
 
     @pyqtSlot()
     def lock(self):
         """锁定一切网络连接有关的元素"""
+        self.pager.setEnabled(False)
         self.webVPNLoginAction.setEnabled(False)
         self.normalLoginAction.setEnabled(False)
         self.refreshAction.setEnabled(False)
@@ -114,6 +116,7 @@ class AttendanceFlowWidget(QFrame):
     @pyqtSlot()
     def unlock(self):
         """解锁一切网络连接有关的元素"""
+        self.pager.setEnabled(True)
         self.webVPNLoginAction.setEnabled(True)
         self.normalLoginAction.setEnabled(True)
         self.refreshAction.setEnabled(True)

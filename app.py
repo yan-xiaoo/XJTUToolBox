@@ -22,6 +22,6 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = MainWindow()
     try:
-        sys.exit(app.exec_())
+        app.exec_()
     finally:
         cfg.save()

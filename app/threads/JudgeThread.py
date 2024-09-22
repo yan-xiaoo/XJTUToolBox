@@ -1,8 +1,7 @@
-import time
-
 from PyQt5.QtCore import pyqtSignal
 
 from .ProcessWidget import ProcessThread
+from ..sessions.ehall_session import EhallSession
 from ..utils import Account
 
 from ehall import AutoJudge
@@ -30,19 +29,23 @@ class JudgeThread(ProcessThread):
         super().__init__(parent)
         self.account = account
         self.choice = choice
-        self.session = None
         self.expire_duration = 600
         self.judge_ = None
         self.questionnaire = None
         self.template = None
-        # 开始时默认为过期状态，以便在实际使用时刷新
-        self.expire_time = time.time() - self.expire_duration
+
+    @property
+    def session(self) -> EhallSession:
+        """
+        获取当前账户用于访问 ehall 的 session
+        """
+        return self.account.session_manager.get_session("ehall")
 
     def login(self) -> bool:
         self.setIndeterminate.emit(False)
         self.messageChanged.emit(self.tr("正在登录 EHALL..."))
         self.progressChanged.emit(10)
-        login = Login(EHALL_LOGIN_URL)
+        login = Login(EHALL_LOGIN_URL, session=self.session)
         self.messageChanged.emit(self.tr("正在验证身份..."))
         self.progressChanged.emit(33)
         if not self.can_run:
@@ -52,15 +55,16 @@ class JudgeThread(ProcessThread):
             return False
         self.progressChanged.emit(66)
         self.messageChanged.emit(self.tr("正在完成登录..."))
-        self.session = login.post_login()
+        login.post_login()
         self.progressChanged.emit(88)
+
+        self.session.has_login = True
 
         # 进入评教区域
         self.messageChanged.emit(self.tr("正在进入评教系统..."))
         self.judge_ = AutoJudge(self.session)
         self.progressChanged.emit(100)
 
-        self.expire_time = time.time()
         return True
 
     def judge(self) -> bool:
@@ -116,12 +120,6 @@ class JudgeThread(ProcessThread):
             return False
         return True
 
-    def has_expired(self):
-        return time.time() - self.expire_time > self.expire_duration
-
-    def set_expired(self):
-        self.expire_time = time.time() - self.expire_duration
-
     def run(self):
         # 强制重置可运行状态，避免上次取消后本次直接退出
         self.can_run = True
@@ -129,11 +127,13 @@ class JudgeThread(ProcessThread):
             self.error.emit(self.tr("未登录"), self.tr("请您先添加一个账户"))
             self.canceled.emit()
             return
-
+        # 依据当前的 session 重建 judge 对象
+        if self.session.has_login:
+            self.judge_ = AutoJudge(self.session)
         self.progressChanged.emit(0)
         try:
             if self.choice == JudgeChoice.GET_COURSES:
-                if self.session is None or self.judge is None or self.has_expired():
+                if not self.session.has_login:
                     result = self.login()
                     if not result:
                         self.canceled.emit()
@@ -152,7 +152,7 @@ class JudgeThread(ProcessThread):
                 self.questionnaires.emit(questionnaires, questionnaires_finished)
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.JUDGE:
-                if self.session is None or self.judge_ is None or self.has_expired():
+                if not self.session.has_login:
                     result = self.login()
                     if not result:
                         self.canceled.emit()
@@ -164,7 +164,7 @@ class JudgeThread(ProcessThread):
                 self.submitSuccess.emit()
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.EDIT:
-                if self.session is None or self.judge_ is None or self.has_expired():
+                if not self.session.has_login:
                     result = self.login()
                     if not result:
                         self.canceled.emit()
