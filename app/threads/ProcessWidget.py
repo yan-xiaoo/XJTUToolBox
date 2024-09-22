@@ -46,6 +46,13 @@ class ProcessWidget(QFrame):
         self.timer.setInterval(500)
         self.timer.timeout.connect(self.checkProcess)
 
+        # 在通知子线程退出后，最多 5 秒后强制退出（直接终止子线程）
+        # 此设计是为了防止子线程在网络请求中长时间卡顿，导致无法响应退出请求。
+        # 子线程可以通过发送信号更改这一时间长度
+        self.thread_dead_time = 5
+        # 父线程发起退出请求的时间
+        self.dead_time_start = 0
+
         # 连接信号-槽
         self.stop.connect(self.thread_.onStopSignal)
         thread.progressChanged.connect(self.onSetProgress)
@@ -56,6 +63,7 @@ class ProcessWidget(QFrame):
         self.thread_.canceled.connect(self.onStopped)
         self.thread_.started.connect(self.onThreadStart)
         self.thread_.setIndeterminate.connect(self.onSetIndeterminate)
+        self.thread_.deadTime.connect(self.onSetDeadTime)
 
     @pyqtSlot(bool)
     def onSetIndeterminate(self, value: bool):
@@ -65,6 +73,10 @@ class ProcessWidget(QFrame):
         else:
             self.progressBar.setVisible(True)
             self.indeterminateProgressBar.setVisible(False)
+
+    @pyqtSlot(float)
+    def onSetDeadTime(self, value: float):
+        self.thread_dead_time = value
 
     @pyqtSlot()
     def onFinished(self):
@@ -93,12 +105,19 @@ class ProcessWidget(QFrame):
         self.stopButton.setEnabled(False)
         self.label.setText(self.tr("子线程正在退出"))
         if not self.stopped:
+            self.dead_time_start = time.time()
             self.stop.emit()
         self.stopped = True
 
     @pyqtSlot()
     def checkProcess(self):
         if not self.thread_.isRunning():
+            self.onStopped()
+            self.timer.stop()
+        # 如果已经发送了停止请求，且超过了设定的时间线程仍然没有退出，强制终止线程
+        if self.stopped and self.thread_.isRunning() and time.time() - self.dead_time_start > self.thread_dead_time:
+            self.thread_.terminate()
+            self.thread_.wait()
             self.onStopped()
             self.timer.stop()
 
@@ -122,6 +141,7 @@ class ProcessThread(QThread):
     hasFinished = pyqtSignal()
     setIndeterminate = pyqtSignal(bool)
     error = pyqtSignal(str, str)
+    deadTime = pyqtSignal(float)
 
     @pyqtSlot()
     def onStopSignal(self):
