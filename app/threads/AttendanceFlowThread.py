@@ -65,6 +65,8 @@ class AttendanceFlowThread(ProcessThread):
             self.normal_login()
 
     def run(self):
+        # 重设自身为可执行
+        self.can_run = True
         # 如果用户已经选择过登录方式，就不再更改
         if self.last_login_choice is None:
             # 根据设置更改登录方式

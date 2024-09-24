@@ -86,6 +86,7 @@ class ProcessWidget(QFrame):
 
     @pyqtSlot()
     def onThreadStart(self):
+        self.stopped = False
         self.timer.start()
 
     @pyqtSlot()
@@ -112,7 +113,9 @@ class ProcessWidget(QFrame):
     @pyqtSlot()
     def checkProcess(self):
         if not self.thread_.isRunning():
-            self.onStopped()
+            # 如果线程是被要求退出的，发送退出信号
+            if self.stopped:
+                self.onStopped()
             self.timer.stop()
         # 如果已经发送了停止请求，且超过了设定的时间线程仍然没有退出，强制终止线程
         if self.stopped and self.thread_.isRunning() and time.time() - self.dead_time_start > self.thread_dead_time:

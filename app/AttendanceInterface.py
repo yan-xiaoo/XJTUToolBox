@@ -1,4 +1,5 @@
 import typing
+from functools import total_ordering
 
 from PyQt5.QtWidgets import QWidget, QStackedWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractItemView
 from PyQt5.QtCore import Qt, pyqtSlot
@@ -178,8 +179,12 @@ class AttendanceFlowWidget(QFrame):
     def onGetFlowRecord(self, record: dict):
         # 在获得了考勤记录后，我们就知道总共有多少页了，因此可以显示分页控件
         self.pager.setVisible(True)
-        if self.pager.getPageNumber() != record['total_pages']:
-            self.pager.setPageNumber(record['total_pages'])
+        total_pages = record['total_pages']
+        # 设置分页器的可见页数，最多十页
+        self.pager.setVisibleNumber(min(total_pages, 10))
+        # 如果分页器当前页数不等于总页数，则设置分页器页数
+        if self.pager.getPageNumber() != total_pages:
+            self.pager.setPageNumber(total_pages)
         self.pager.setCurrentIndex(record['current_page'] - 1)
 
         self.setTableContent(record['data'])
@@ -207,6 +212,16 @@ class AttendanceFlowWidget(QFrame):
     def onThreadError(self, title, msg):
         self.error(title, msg, duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self._parent)
 
+        self.current_page = self.last_page
+        self.thread_.page = self.last_page
+        self.pager.setCurrentIndex(self.current_page - 1)
+
+    @pyqtSlot()
+    def onThreadTerminated(self):
+        """
+        线程被主动终止后执行的操作
+        """
+        # 复原更改过的页数信息
         self.current_page = self.last_page
         self.thread_.page = self.last_page
         self.pager.setCurrentIndex(self.current_page - 1)
@@ -270,8 +285,9 @@ class AttendanceFlowWidget(QFrame):
 
         self.thread_ = AttendanceFlowThread(accounts.current, choice=None, page=1, size=5,
                                             parent=self)
-        self.processWidget = ProcessWidget(thread=self.thread_)
+        self.processWidget = ProcessWidget(thread=self.thread_,stoppable=True)
         vBoxLayout.addWidget(self.processWidget)
+        self.processWidget.canceled.connect(self.onThreadTerminated, Qt.UniqueConnection)
         self.processWidget.setVisible(False)
 
         self.tableWidget = TableWidget(self)
