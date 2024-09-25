@@ -160,6 +160,8 @@ class ProcessDialog(MessageBoxBase):
 
         thread.hasFinished.connect(self.onThreadFinished)
         thread.canceled.connect(self.onThreadCanceled)
+        # 线程被强行终止时发送信号
+        widget.canceled.connect(self.onThreadCanceled)
 
     @pyqtSlot()
     def onThreadCanceled(self):

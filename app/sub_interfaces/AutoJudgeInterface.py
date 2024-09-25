@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFrame
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ComboBox, ScrollArea, PrimaryPushButton, ToolTipFilter, \
     ToolTipPosition, InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, PushButton, TitleLabel
 from ehall import Questionnaire, QuestionnaireTemplate
+from .JudgeOptionInterface import JudgeOptionMessageBox
 from ..utils import StyleSheet
 from ..threads.JudgeThread import JudgeThread, JudgeChoice
 from ..threads.ProcessWidget import ProcessDialog
@@ -25,37 +26,13 @@ class JudgeCard(CardWidget):
         else:
             self.titleLabel = BodyLabel(questionnaire.KCM + " " + questionnaire.BPJS + " (已完成)", self)
         self.contentLabel = CaptionLabel(questionnaire.WJMC, self)
-        self.classTypeBox = ComboBox(self)
-        self.scoreBox = ComboBox(self)
         if not finished:
-            self.submitButton = PrimaryPushButton(self.tr("一键评教"), self)
+            self.submitButton = PrimaryPushButton(self.tr("开始评教"), self)
         else:
-            self.submitButton = PrimaryPushButton(self.tr("再次提交"), self)
-
-        self.classTypeBox.setToolTip(self.tr("选择问卷的类型"))
-        self.scoreBox.setToolTip(self.tr("选择预先设置的问卷分数"))
-        self.classTypeBox.setToolTipDuration(1000)
-        self.scoreBox.setToolTipDuration(1000)
-        self.scoreBox.installEventFilter(ToolTipFilter(self.scoreBox, showDelay=300, position=ToolTipPosition.TOP))
-        self.classTypeBox.installEventFilter(ToolTipFilter(self.classTypeBox, showDelay=300, position=ToolTipPosition.TOP))
+            self.submitButton = PrimaryPushButton(self.tr("编辑评教"), self)
 
         self.submitButton.clicked.connect(self.onJudgeButtonClicked)
-
-        type_dict = {QuestionnaireTemplate.Type.THEORY: "理论课",
-                     QuestionnaireTemplate.Type.IDEOLOGY: "思政课",
-                     QuestionnaireTemplate.Type.GENERAL: "通识课",
-                     QuestionnaireTemplate.Type.EXPERIMENT: "实验课",
-                     QuestionnaireTemplate.Type.PROJECT: "项目设计课",
-                     QuestionnaireTemplate.Type.PHYSICAL: "体育课"}
-        for one in QuestionnaireTemplate.Type:
-            self.classTypeBox.addItem(self.tr(type_dict[one]), userData=one)
-
-        score_dict = {QuestionnaireTemplate.Score.HUNDRED: "100分",
-                      QuestionnaireTemplate.Score.EIGHTY: "80分",
-                      QuestionnaireTemplate.Score.SIXTY: "60分",
-                      QuestionnaireTemplate.Score.FORTY: "40分"}
-        for one in QuestionnaireTemplate.Score:
-            self.scoreBox.addItem(self.tr(score_dict[one]), userData=one)
+        self.submitButton.setMaximumWidth(150)
 
         self.hBoxLayout = QHBoxLayout(self)
         self.vBoxLayout = QVBoxLayout()
@@ -73,43 +50,21 @@ class JudgeCard(CardWidget):
         self.vBoxLayout.setAlignment(Qt.AlignVCenter)
         self.hBoxLayout.addLayout(self.vBoxLayout)
 
-        self.hBoxLayout.addStretch(1)
-        self.hBoxLayout.addWidget(self.classTypeBox, 0, Qt.AlignRight)
-        self.hBoxLayout.addWidget(self.scoreBox, 0, Qt.AlignVCenter)
-
         self.hBoxLayout.addSpacing(10)
         self.hBoxLayout.addWidget(self.submitButton, 0, Qt.AlignVCenter)
 
-        for item in self.classTypeBox.items:
-            if item.text in questionnaire.WJMC:
-                self.classTypeBox.setCurrentIndex(self.classTypeBox.items.index(item))
-                break
-
-    def lock(self):
-        self.submitButton.setEnabled(False)
-
-    def unlock(self):
-        self.submitButton.setEnabled(True)
-
     @pyqtSlot()
     def onJudgeButtonClicked(self):
-        self.parent_.lock()
-        self.thread_.questionnaire = self.questionnaire
-        self.thread_.template = QuestionnaireTemplate.from_file(self.classTypeBox.currentData(),
-                                                                self.scoreBox.currentData())
-        if self.finished:
-            self.thread_.choice = JudgeChoice.EDIT
-        else:
-            self.thread_.choice = JudgeChoice.JUDGE
-        self.thread_.start()
+        dev_interface = JudgeOptionMessageBox(self.questionnaire, self.thread_, self.finished, self.parent_)
+        dev_interface.exec()
 
     def setFinished(self, status):
         self.finished = status
         if status:
-            self.submitButton.setText(self.tr("再次提交"))
+            self.submitButton.setText(self.tr("编辑评教"))
             self.titleLabel.setText(self.tr(self.questionnaire.KCM + " " + self.questionnaire.BPJS + " (已完成)"))
         else:
-            self.submitButton.setText(self.tr("一键评教"))
+            self.submitButton.setText(self.tr("开始评教"))
             self.titleLabel.setText(self.tr(self.questionnaire.KCM + " " + self.questionnaire.BPJS))
 
 
@@ -140,8 +95,6 @@ class AutoJudgeInterface(ScrollArea):
         self.thread_ = JudgeThread(accounts.current, choice=JudgeChoice.GET_COURSES)
         self.thread_.questionnaires.connect(self.onGetQuestionnaireFinish)
         self.thread_.error.connect(self.onThreadError)
-        self.thread_.canceled.connect(self.unlock)
-        self.thread_.hasFinished.connect(self.unlock)
         self.thread_.submitSuccess.connect(self.onSubmitSuccess)
         self.thread_.editSuccess.connect(self.onEditSuccess)
         self.thread_.started.connect(self.onThreadStarted)
@@ -159,7 +112,6 @@ class AutoJudgeInterface(ScrollArea):
         self.noQuestionnaireLabel.setVisible(False)
 
         self.questionnaireFrameLayout = QVBoxLayout(self.questionnaireFrame)
-        
 
         self.hintLabel = BodyLabel(
             self.tr("使用说明：选择评分分数，再点击一键评教按钮，即可完成评教。\n"
@@ -234,14 +186,6 @@ class AutoJudgeInterface(ScrollArea):
         self.questionnaireFrameLayout.removeWidget(widget)
         self.questionnaireFrameLayout.addWidget(widget)
 
-    def lock(self):
-        for one in self.questionnaireWidgets:
-            one.lock()
-
-    def unlock(self):
-        for one in self.questionnaireWidgets:
-            one.unlock()
-
     @pyqtSlot()
     def onCurrentAccountChanged(self):
         self.thread_.account = accounts.current
@@ -283,7 +227,6 @@ class AutoJudgeInterface(ScrollArea):
         for one in self.questionnaireWidgets:
             if one.questionnaire == questionnaire:
                 self.setQuestionnaireFinished(one)
-                one.unlock()
                 one.setVisible(self.showAllAction.isChecked())
                 break
 

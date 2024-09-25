@@ -29,7 +29,6 @@ class JudgeThread(ProcessThread):
         super().__init__(parent)
         self.account = account
         self.choice = choice
-        self.expire_duration = 600
         self.judge_ = None
         self.questionnaire = None
         self.template = None

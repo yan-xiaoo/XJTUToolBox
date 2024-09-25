@@ -14,6 +14,7 @@ class StyleSheet(StyleSheetBase, Enum):
     ACCOUNT_INTERFACE = "account_interface"
     ATTENDANCE_INTERFACE = "attendance_interface"
     AUTO_JUDGE_INTERFACE = "auto_judge_interface"
+    JUDGE_OPTION_INTERFACE = "judge_option_interface"
     TOOLBOX_INTERFACE = "toolbox_interface"
     TOOL_CARD = "tool_card"
 
