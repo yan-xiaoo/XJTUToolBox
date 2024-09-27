@@ -1,5 +1,6 @@
 from enum import Enum
 
+from app.utils import logger
 from auth import Login, EHALL_LOGIN_URL, ServerError
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -48,6 +49,7 @@ class LoginThread(QThread):
                 try:
                     self.login.login(self.username, self.password, self.captcha or "")
                 except ServerError as e:
+                    logger.error("服务器错误", exc_info=True)
                     self.loginFailed.emit(True, e.message)
                 else:
                     self.loginSuccess.emit()
@@ -55,12 +57,15 @@ class LoginThread(QThread):
                 try:
                     self.login.getUserIdentity()
                 except ServerError as e:
+                    logger.error("服务器错误", exc_info=True)
                     self.loginFailed.emit(True, e.message)
                 else:
                     self.studentID.emit(self.login.personNo)
             else:
                 raise ValueError("Invalid choice")
         except ServerError as e:
+            logger.error("服务器错误", exc_info=True)
             self.loginFailed.emit(True, e.message)
         except Exception as e:
+            logger.error("其他错误", exc_info=True)
             self.loginFailed.emit(False, str(e))

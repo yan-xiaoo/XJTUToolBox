@@ -2,12 +2,11 @@ from PyQt5.QtCore import pyqtSignal
 
 from .ProcessWidget import ProcessThread
 from ..sessions.ehall_session import EhallSession
-from ..utils import Account
+from ..utils import Account, logger
 
 from ehall import AutoJudge
-from auth import Login, EHALL_LOGIN_URL
+from auth import Login, EHALL_LOGIN_URL, ServerError
 from enum import Enum
-import traceback
 
 
 class JudgeChoice(Enum):
@@ -176,7 +175,11 @@ class JudgeThread(ProcessThread):
                 self.hasFinished.emit()
             else:
                 raise ValueError(self.tr("未知选项"))
+        except ServerError as e:
+            logger.error("服务器错误", exc_info=True)
+            self.error.emit(self.tr("服务器错误"), str(e))
+            self.canceled.emit()
         except Exception as e:
-            traceback.print_exc()
+            logger.error("其他错误", exc_info=True)
             self.error.emit(self.tr("其他错误"), str(e))
             self.canceled.emit()

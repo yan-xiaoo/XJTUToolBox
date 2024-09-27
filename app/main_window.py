@@ -19,7 +19,7 @@ from .sessions.attendance_session import AttendanceSession
 from .sessions.ehall_session import EhallSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
-from .utils import cfg, accounts, MyFluentIcon, SessionManager
+from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger
 
 
 def registerSession():
@@ -95,6 +95,7 @@ class MainWindow(MSFluentWindow):
         :param value: 异常的对象
         :param _traceback: 异常的traceback
         """
+        logger.error("未经处理的异常", exc_info=(ty, value, _traceback))
         tracebackString = "".join(format_exception(ty, value, _traceback))
         box = MessageBox(
             self.tr("程序发生未经处理的异常"),

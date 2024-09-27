@@ -6,6 +6,8 @@ from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, QTimer, Qt
 from qfluentwidgets import ProgressBar, VBoxLayout, BodyLabel, PrimaryPushButton, IndeterminateProgressBar, \
     MessageBoxBase
 
+from ..utils import logger
+
 
 class ProcessWidget(QFrame):
     """一个框架，包含一个进度条和一个标签，用于让子线程方便的报告状态"""
@@ -119,6 +121,7 @@ class ProcessWidget(QFrame):
             self.timer.stop()
         # 如果已经发送了停止请求，且超过了设定的时间线程仍然没有退出，强制终止线程
         if self.stopped and self.thread_.isRunning() and time.time() - self.dead_time_start > self.thread_dead_time:
+            logger.warning(f"{str(self.thread_)} 线程强制退出")
             self.thread_.terminate()
             self.thread_.wait()
             self.onStopped()
