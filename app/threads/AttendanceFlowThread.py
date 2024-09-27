@@ -81,24 +81,15 @@ class AttendanceFlowThread(ProcessThread):
                 raise ValueError(self.tr("账户信息为空"))
 
             if self.choice == AttendanceFlowChoice.WEBVPN_LOGIN:
-                if self.session.has_login:
-                    self.successMessage.emit(self.tr("无需重新登录。"))
-                    self.hasFinished.emit()
-                    return
-                else:
-                    self.webvpn_login()
-                    self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
-                    self.successMessage.emit(self.tr("WebVPN 登录成功"))
-                    self.hasFinished.emit()
+                self.webvpn_login()
+                self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
+                self.successMessage.emit(self.tr("WebVPN 登录成功"))
+                self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.NORMAL_LOGIN:
-                if self.session.has_login:
-                    self.successMessage.emit(self.tr("无需重新登录。"))
-                    self.hasFinished.emit()
-                else:
-                    self.normal_login()
-                    self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
-                    self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
-                    self.hasFinished.emit()
+                self.normal_login()
+                self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
+                self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
+                self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.SEARCH:
                 if not self.session.has_login:
                     if self.last_login_choice is not None:

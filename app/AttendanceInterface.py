@@ -4,7 +4,7 @@ from functools import total_ordering
 from PyQt5.QtWidgets import QWidget, QStackedWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractItemView
 from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, VBoxLayout, Pivot, BodyLabel, PrimaryPushButton, TableWidget, \
-    CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition, PipsPager, PipsScrollButtonDisplayMode
+    CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition, PipsPager, PipsScrollButtonDisplayMode, MessageBox
 from .utils import StyleSheet, accounts, AccountCacheManager, Color
 from attendance.attendance import AttendanceFlow, FlowRecordType
 from .threads.ProcessWidget import ProcessWidget
@@ -124,19 +124,72 @@ class AttendanceFlowWidget(QFrame):
         self.nextAction.setEnabled(True)
         self.prevAction.setEnabled(True)
 
+    def askForRelogin(self) -> bool:
+        """
+        如果用户已经登录，则弹出对话框并询问用户是否要重新登录。如果用户没有登录，此函数直接返回 False。
+        :return: 用户选择是否要重新登录
+        """
+        if self.thread_.session.has_login:
+            if self.thread_.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN:
+                w = MessageBox(self.tr("确认重新登录"),
+                               self.tr("你已经通过 WebVPN 登录考勤系统，是否要清除登录信息并重新登录？"),
+                               self.parent().parent())
+            else:
+                w = MessageBox(self.tr("确认重新登录"),
+                               self.tr("你已经直接登录考勤系统，是否要清除登录信息并重新登录？"), self.parent().parent())
+            w.yesButton.setText(self.tr("确定"))
+            w.cancelButton.setText(self.tr("取消"))
+            if w.exec():
+                return True
+        else:
+            return False
+
+    def keyReleaseEvent(self, a0):
+        if a0.key() == Qt.Key_Space:
+            if self.refreshAction.isEnabled():
+                self.refreshAction.trigger()
+        if a0.key() == Qt.Key_Down or a0.key() == Qt.Key_Right:
+            if self.nextAction.isEnabled():
+                self.nextAction.trigger()
+        if a0.key() == Qt.Key_Up or a0.key() == Qt.Key_Left:
+            if self.prevAction.isEnabled():
+                self.prevAction.trigger()
+
     @pyqtSlot()
     def onWebVPNLoginClicked(self):
-        self.processWidget.setVisible(True)
-        self.thread_.choice = AttendanceFlowChoice.WEBVPN_LOGIN
-        self.lock()
-        self.thread_.start()
+        if self.askForRelogin():
+            self.thread_.session.has_login = False
+            self.thread_.session.cookies.clear_session_cookies()
+            self.processWidget.setVisible(True)
+            self.thread_.choice = AttendanceFlowChoice.WEBVPN_LOGIN
+            self.lock()
+            self.thread_.start()
+            return
+
+        if not self.thread_.session.has_login:
+            self.processWidget.setVisible(True)
+            self.thread_.choice = AttendanceFlowChoice.WEBVPN_LOGIN
+            self.lock()
+            self.thread_.start()
+            return
 
     @pyqtSlot()
     def onNormalLoginClicked(self):
-        self.processWidget.setVisible(True)
-        self.thread_.choice = AttendanceFlowChoice.NORMAL_LOGIN
-        self.lock()
-        self.thread_.start()
+        if self.askForRelogin():
+            self.thread_.session.has_login = False
+            self.thread_.session.cookies.clear_session_cookies()
+            self.processWidget.setVisible(True)
+            self.thread_.choice = AttendanceFlowChoice.NORMAL_LOGIN
+            self.lock()
+            self.thread_.start()
+            return
+
+        if not self.thread_.session.has_login:
+            self.processWidget.setVisible(True)
+            self.thread_.choice = AttendanceFlowChoice.NORMAL_LOGIN
+            self.lock()
+            self.thread_.start()
+            return
 
     @pyqtSlot()
     def onSearchClicked(self):

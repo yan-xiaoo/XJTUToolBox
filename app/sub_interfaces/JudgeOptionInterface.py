@@ -162,7 +162,7 @@ class JudgeOptionInterface(ScrollArea):
         self.optionHLayout.addWidget(self.scoreBox)
         self.optionHLayout.addWidget(self.classTypeBox)
 
-        self.vBoxLayout.addWidget(self.title)
+        self.vBoxLayout.addWidget(self.title, alignment=Qt.AlignHCenter)
         self.vBoxLayout.addWidget(self.detailLabel, alignment=Qt.AlignHCenter)
         self.vBoxLayout.addLayout(self.optionHLayout)
         self.vBoxLayout.addWidget(self.textArea, stretch=1)
@@ -212,7 +212,7 @@ class JudgeOptionInterface(ScrollArea):
                                                    self.scoreBox.currentData())
         for one_data in template.data:
             if one_data.TXDM != '01':
-                one_data.ZGDA = self.textArea.toPlainText()
+                one_data.ZGDA = self.textArea.toPlainText() if self.textArea.toPlainText() else self.tr("无")
         self.thread_.template = template
 
         if self.finished_:
@@ -235,6 +235,7 @@ class JudgeOptionMessageBox(MessageBoxBase):
         self.yesButton.setText(self.tr("提交"))
         self.cancelButton.setText(self.tr("保存但不提交"))
 
+        self.cancelButton.clicked.disconnect()
         self.cancelButton.clicked.connect(self.onSaveButtonClicked)
         self.yesButton.clicked.disconnect()
         self.yesButton.clicked.connect(self.onYesButtonClicked)
@@ -242,6 +243,7 @@ class JudgeOptionMessageBox(MessageBoxBase):
     @pyqtSlot()
     def onSaveButtonClicked(self):
         self.interface.save()
+        self.reject()
 
     @pyqtSlot()
     def onYesButtonClicked(self):

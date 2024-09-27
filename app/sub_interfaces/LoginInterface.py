@@ -2,10 +2,10 @@ from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtWidgets import QVBoxLayout, QWidget, QFrame, QHBoxLayout, QDialog
 from qfluentwidgets import TitleLabel, ScrollArea, LineEdit, PasswordLineEdit, PrimaryPushButton, PushButton, \
-    ImageLabel, InfoBar, InfoBarPosition, StateToolTip, isDarkTheme, Theme
+    ImageLabel, InfoBar, InfoBarPosition, StateToolTip, isDarkTheme, Theme, MessageBox
 
 from ..threads.LoginThreads import LoginThread
-from ..utils import StyleSheet, cfg
+from ..utils import StyleSheet, cfg, accounts
 
 
 class LoginInterface(ScrollArea):
@@ -71,6 +71,10 @@ class LoginInterface(ScrollArea):
 
         # 登录进度提示
         self.stateToolTip = None
+        # 是否显示所谓重复登录提示
+        # 当此标识为真时，账号重复时会弹出提示框
+        # 设立此标识是因为用户更改密码时也会错误触发重复提醒，只能用标志位关掉了
+        self.showRepeatHint = False
 
         # 应用 qss
         StyleSheet.LOGIN_INTERFACE.apply(self)
@@ -166,6 +170,13 @@ class LoginInterface(ScrollArea):
         if a0.key() == Qt.Key_Return:
             self.on_loginButton_clicked()
 
+    @staticmethod
+    def checkForSameId(id_: str):
+        for account in accounts:
+            if account.username == id_:
+                return True
+        return False
+
     @pyqtSlot()
     def on_cancelButton_clicked(self):
         """处理用户点击取消按钮后的事件"""
@@ -195,8 +206,18 @@ class LoginInterface(ScrollArea):
 
     @pyqtSlot(str)
     def __on_getID_success(self, id_: str):
-        self.loginSuccess.emit(id_, self.__password)
-        self._unlock(True)
+        if self.checkForSameId(id_) and self.showRepeatHint:
+            w = MessageBox(self.tr("账户已经存在"), self.tr("如果同时登录多个相同的账户并频繁切换，则访问只允许单处登录的网站时可能遇到问题。\n是否仍要继续？"), self)
+            w.yesButton.setText(self.tr("继续"))
+            w.cancelButton.setText(self.tr("取消"))
+            if w.exec():
+                self.loginSuccess.emit(id_, self.__password)
+                self._unlock(True)
+            else:
+                self._unlock(False)
+        else:
+            self.loginSuccess.emit(id_, self.__password)
+            self._unlock(True)
 
     @pyqtSlot(bool)
     def __on_double_check_isShowCaptcha(self, show: bool):

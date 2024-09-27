@@ -123,6 +123,8 @@ class AccountCard(CardWidget):
 
     def _onEditAccountPasswordClicked(self):
         self.main_window.switchTo(self.main_window.login_interface)
+        # 不显示账户重复提示，否则会错误的提醒用户账户重复
+        self.main_window.login_interface.showRepeatHint = False
         self.main_window.login_interface.userNameEdit.setText(self.account.username)
         self.main_window.login_interface.loginSuccess.connect(self._onLoginFinish)
         self.main_window.login_interface.passwordEdit.setFocus()
@@ -295,6 +297,7 @@ class AccountInterface(ScrollArea):
             if not self.show_first_time_tip():
                 return
         self.main_window.login_interface.loginSuccess.connect(self._onLoginFinish)
+        self.main_window.login_interface.showRepeatHint = True
         self.main_window.switchTo(self.main_window.login_interface)
         self.main_window.login_interface.userNameEdit.setFocus()
 

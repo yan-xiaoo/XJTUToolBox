@@ -55,6 +55,9 @@ class DecryptDialog(MessageBoxBase):
         self.failHint = CaptionLabel(self)
         self.failHint.setVisible(False)
         self.failHint.setTextColor(QColor(255, 0, 0), QColor(255, 0, 0))
+        # 记录输入密码失败的次数
+        self.failCount = 0
+        self.setMinimumWidth(300)
 
         self.viewLayout.addWidget(self.title)
         self.viewLayout.addWidget(self.hint)
@@ -87,9 +90,14 @@ class DecryptDialog(MessageBoxBase):
         try:
             accounts.extend_from(key=self.passwordEdit.text().encode())
         except ValueError:
-            self.showError(self.tr("密码错误"))
+            self.failCount += 1
+            if self.failCount >= 3:
+                self.showError(self.tr("密码错误。如果你忘记了密码，可以通过设置-清除账户信息清空账户并撤销加密。"))
+            else:
+                self.showError(self.tr("密码错误"))
         else:
             accounts.key = self.passwordEdit.text().encode()
+            self.failCount = 0
             self.accept()
             self.accepted.emit()
 
