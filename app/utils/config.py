@@ -1,6 +1,8 @@
+import os
 from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme, \
     EnumSerializer
 from enum import Enum
+from .migrate_data import DATA_DIRECTORY
 
 
 class BooleanSerializer(ConfigSerializer):
@@ -33,7 +35,10 @@ class Config(QConfig):
                                                      EnumSerializer(AttendanceLoginMethod))
 
 
+DEFAULT_CONFIG_PATH = os.path.join(DATA_DIRECTORY, "config.json")
+
+
 cfg = Config()
 cfg.themeMode.value = Theme.AUTO
 cfg.themeColor.value = "#ff5d74a2"
-qconfig.load("config/config.json", cfg)
+qconfig.load(DEFAULT_CONFIG_PATH, cfg)

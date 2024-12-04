@@ -2,6 +2,8 @@ import logging
 import os
 import time
 
+from .migrate_data import LOG_DIRECTORY
+
 
 def get_logger(name, path):
     log = logging.getLogger(name)
@@ -18,5 +20,5 @@ def get_logger(name, path):
     return log
 
 
-os.makedirs("config/logs", exist_ok=True)
-logger = get_logger("default", f"config/logs/{time.strftime('%Y-%m-%d', time.localtime())}.log")
+logger = get_logger("default", os.path.join(LOG_DIRECTORY,
+                                            f"{time.strftime('%Y-%m-%d', time.localtime())}.log"))

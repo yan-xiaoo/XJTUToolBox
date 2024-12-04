@@ -9,6 +9,8 @@ from PyQt5.QtCore import pyqtSignal, QObject
 
 from app.utils import SessionManager
 
+from .migrate_data import DATA_DIRECTORY
+
 
 def pad(text):
     text_length = len(text)
@@ -56,6 +58,10 @@ class Account:
 
     def __repr__(self):
         return f"Account(username={self.username}, password={self.password}, nickname={self.nickname})"
+
+
+# 默认账户信息的存储位置
+DEFAULT_ACCOUNT_PATH = os.path.join(DATA_DIRECTORY, "accounts.json")
 
 
 class AccountManager(QObject):
@@ -125,21 +131,21 @@ class AccountManager(QObject):
             current = self.accounts.index(self.current)
         return json.dumps({"data": list_, "encrypted": False, "current": current}, indent=4)
 
-    def save_to(self, file="config/accounts.json"):
+    def save_to(self, file=DEFAULT_ACCOUNT_PATH):
         if not os.path.exists("config"):
             os.mkdir("config")
 
         with open(file, "w", encoding="utf-8") as f:
             f.write(self.save())
 
-    def save_suitable(self, file="config/accounts.json"):
+    def save_suitable(self, file=DEFAULT_ACCOUNT_PATH):
         """如果当前账户是加密状态，加密的保存账户；否则，直接保存账户"""
         if self.encrypted:
             self.encrypted_save_to(file=file)
         else:
             self.save_to(file)
 
-    def encrypted_save_to(self, key: bytes = None, file="config/accounts.json"):
+    def encrypted_save_to(self, key: bytes = None, file=DEFAULT_ACCOUNT_PATH):
         key = key or self.key
         with open(file, "w", encoding="utf-8") as f:
             f.write(self.encrypt_save(key))
@@ -173,28 +179,28 @@ class AccountManager(QObject):
             self.save_to()
 
     @classmethod
-    def exists(cls):
+    def exists(cls, path: str = DEFAULT_ACCOUNT_PATH):
         try:
-            with open("config/accounts.json", "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 json.load(f)
             return True
         except (json.JSONDecodeError, FileNotFoundError):
             return False
 
     @classmethod
-    def empty(cls):
+    def empty(cls, path: str = DEFAULT_ACCOUNT_PATH):
         if not cls.exists():
             return True
-        with open("config/accounts.json", "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return len(data["data"]) == 0
 
     @classmethod
-    def is_encrypted(cls):
+    def is_encrypted(cls, path: str = DEFAULT_ACCOUNT_PATH):
         if not cls.exists():
             return False
         try:
-            with open("config/accounts.json", "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data.get("encrypted", False)
         except (json.JSONDecodeError, KeyError):
@@ -233,7 +239,7 @@ class AccountManager(QObject):
             self.current = self.accounts[current]
         return self
 
-    def extend_from(self, file="config/accounts.json", key: bytes = None):
+    def extend_from(self, file=DEFAULT_ACCOUNT_PATH, key: bytes = None):
         new = self.load_from(file, key)
         self.accounts.extend(new)
         if self._current is None:
@@ -244,7 +250,7 @@ class AccountManager(QObject):
         self.accountAdded.emit()
 
     @classmethod
-    def load_from(cls, file="config/accounts.json", key: bytes = None):
+    def load_from(cls, file=DEFAULT_ACCOUNT_PATH, key: bytes = None):
         with open(file, "r", encoding="utf-8") as f:
             return cls.load(f.read(), key)
 

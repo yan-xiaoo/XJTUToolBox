@@ -19,7 +19,7 @@ from .sessions.attendance_session import AttendanceSession
 from .sessions.ehall_session import EhallSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
-from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger
+from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all
 
 
 def registerSession():
@@ -46,6 +46,15 @@ class MainWindow(MSFluentWindow):
         cfg.themeChanged.connect(self.on_theme_changed)
 
         sys.excepthook = self.catchExceptions
+
+        if migrate_all():
+            box = MessageBox("需要重启",
+                             "数据目录迁移完成，目前程序无法获取任何账户数据，需要重启程序才能生效",
+                             parent=self)
+            box.yesButton.setText(self.tr("重启"))
+            box.cancelButton.setText(self.tr("关闭"))
+            box.yesSignal.connect(lambda: sys.exit(0))
+            box.exec()
 
     def initWindow(self):
         self.setWindowTitle("仙交百宝箱")

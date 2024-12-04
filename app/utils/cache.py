@@ -3,19 +3,23 @@ import json
 import shutil
 
 from .account import Account
+from .migrate_data import DATA_DIRECTORY
 
 
+DEFAULT_DATA_DIRECTORY = os.path.join(DATA_DIRECTORY, "data")
+
+# 此类读写的数据实际都存储到数据文件夹
+# 为了不大幅度修改代码，不更改此类的名称了
 class CacheManager:
     def __init__(self):
         pass
 
     def _makesure_exists(self):
-        path = os.path.join("config", "cache", "global")
-        if not os.path.exists(path):
-            os.makedirs(path)
+        # 迁移缓存存储位置后，新的缓存文件夹会自动创建，不需要再手动创建
+        os.makedirs(DEFAULT_DATA_DIRECTORY, exist_ok=True)
 
     def path(self, filename: str) -> str:
-        return os.path.join("config", "cache", "global", filename)
+        return os.path.join(DEFAULT_DATA_DIRECTORY, filename)
 
     def read_json(self, file: str):
         with open(self.path(file), "r", encoding="utf-8") as f:
@@ -56,22 +60,22 @@ class AccountCacheManager(CacheManager):
         self.account_id = account.uuid
 
     def _makesure_exists(self):
-        path = os.path.join("config", "cache", self.account_id)
+        path = os.path.join(DEFAULT_DATA_DIRECTORY, self.account_id)
         if not os.path.exists(path):
             os.makedirs(path)
 
-    def path(self, filename: str) -> str:
-        return os.path.join("config", "cache", self.account_id, filename)
+    def path(self, filename: str):
+        return os.path.join(DEFAULT_DATA_DIRECTORY, self.account_id, filename)
 
     def remove_all(self):
         try:
-            shutil.rmtree(os.path.join("config", "cache", self.account_id))
+            shutil.rmtree(os.path.join(DEFAULT_DATA_DIRECTORY, self.account_id))
         except FileNotFoundError:
             pass
 
 
 def remove_all_cache():
     try:
-        shutil.rmtree(os.path.join("config", "cache"))
+        shutil.rmtree(DEFAULT_DATA_DIRECTORY)
     except FileNotFoundError:
         pass
