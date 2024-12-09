@@ -114,9 +114,10 @@ class AutoJudgeInterface(ScrollArea):
         self.questionnaireFrameLayout = QVBoxLayout(self.questionnaireFrame)
 
         self.hintLabel = BodyLabel(
-            self.tr("使用说明：选择评分分数，再点击一键评教按钮，即可完成评教。\n"
-                    "如果提交出现问题，可以尝试调整课程类型。\n"
-                    "课程类型不正确时，部分选项的评教结果可能出现异常"),
+            self.tr("使用说明：点击开始评教，选择分数，点击提交即可完成评教。\n"
+                    "可以选择输入评语，也可以不输入。\n"
+                    "如果提交出现问题，可以尝试调整「课程类型」选项。\n"
+                    "请不要随意调整「课程类型」，不正确时，部分选项的评教结果可能出现异常"),
             self.questionnaireFrame
         )
         self.questionnaireFrameLayout.addWidget(self.noQuestionnaireLabel, alignment=Qt.AlignHCenter)

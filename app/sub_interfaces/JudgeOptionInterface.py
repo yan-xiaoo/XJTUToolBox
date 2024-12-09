@@ -1,7 +1,9 @@
+from collections.abc import Callable
+
 from PyQt5.QtCore import pyqtSlot, Qt, QObject
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from qfluentwidgets import ScrollArea, MessageBoxBase, SubtitleLabel, ToolTipFilter, ComboBox, ToolTipPosition, \
-    PlainTextEdit, FlyoutViewBase, BodyLabel, PrimaryPushButton, Flyout, CaptionLabel
+    PlainTextEdit, FlyoutViewBase, BodyLabel, PrimaryPushButton, Flyout, CaptionLabel, PushButton
 
 from app.threads.JudgeThread import JudgeChoice
 from app.threads.ProcessWidget import ProcessThread
@@ -11,22 +13,36 @@ from ehall import Questionnaire, QuestionnaireTemplate
 
 class _CustomFlyoutView(FlyoutViewBase):
 
-    def __init__(self, parent=None):
+    def __init__(self,on_confirm: Callable, on_cancel: Callable, parent=None):
         super().__init__(parent)
+        # 在选择”撤销“和”仍然更改“时，分别执行 on_cancel 和 on_confirm 函数
+        self._on_cancel = on_cancel
+        self._on_confirm = on_confirm
         self.vBoxLayout = QVBoxLayout(self)
+        self.buttonHBoxLayout = QHBoxLayout()
         self.label = BodyLabel(self.tr('此功能仅在问卷填写失败时使用，请不要随意更改'), self)
-        self.button = PrimaryPushButton(self.tr('明白'), self)
+        self.confirm_button = PrimaryPushButton(self.tr('仍然更改'), self)
+        self.cancel_button = PushButton(self.tr("撤销"), self)
 
-        self.button.clicked.connect(self.onButtonClicked)
+        self.confirm_button.clicked.connect(self.onConfirmButtonClicked)
+        self.cancel_button.clicked.connect(self.onCancelButtonClicked)
 
-        self.button.setFixedWidth(140)
+        self.confirm_button.setFixedWidth(140)
+        self.buttonHBoxLayout.addWidget(self.confirm_button)
+        self.buttonHBoxLayout.addWidget(self.cancel_button)
         self.vBoxLayout.setSpacing(12)
         self.vBoxLayout.setContentsMargins(20, 16, 20, 16)
         self.vBoxLayout.addWidget(self.label)
-        self.vBoxLayout.addWidget(self.button)
+        self.vBoxLayout.addLayout(self.buttonHBoxLayout)
 
     @pyqtSlot()
-    def onButtonClicked(self):
+    def onConfirmButtonClicked(self):
+        self._on_confirm()
+        self.parent().close()
+
+    @pyqtSlot()
+    def onCancelButtonClicked(self):
+        self._on_cancel()
         self.parent().close()
 
 
@@ -119,6 +135,8 @@ class JudgeOptionInterface(ScrollArea):
         self.optionHLayout = QHBoxLayout()
         self.scoreBox = ComboBox(self.view)
         self.classTypeBox = ComboBox(self.view)
+        # 记录上一次选择的课程类型
+        self.last_class_index = None
 
         # 设置工具提示
         self.classTypeBox.setToolTip(self.tr("选择问卷的类型"))
@@ -151,6 +169,7 @@ class JudgeOptionInterface(ScrollArea):
         for item in self.classTypeBox.items:
             if item.text in questionnaire.WJMC:
                 self.classTypeBox.setCurrentIndex(self.classTypeBox.items.index(item))
+                self.last_class_index = self.classTypeBox.currentIndex()
                 break
 
         self.textArea = PlainTextEdit(self.view)
@@ -198,12 +217,24 @@ class JudgeOptionInterface(ScrollArea):
             self.textArea.setPlainText(data["comment"])
 
     @pyqtSlot()
+    def cancelModifyClassType(self):
+        self.classTypeBox.setCurrentIndex(self.last_class_index)
+
+    @pyqtSlot()
+    def confirmModifyClassType(self):
+        self.last_class_index = self.classTypeBox.currentIndex()
+
+    @pyqtSlot()
     def onModifyClassTypeClicked(self):
-        Flyout.make(
+        # 如果此修改是被下方提示中的「撤销」按钮触发的，则不执行任何操作
+        if self.classTypeBox.currentIndex() == self.last_class_index:
+            return
+        flyout = Flyout.make(
             target=self.classTypeBox,
-            view=_CustomFlyoutView(),
+            view=_CustomFlyoutView(on_confirm=self.confirmModifyClassType, on_cancel=self.cancelModifyClassType),
             parent=self
         )
+        flyout.closed.connect(self.cancelModifyClassType)
 
     @pyqtSlot()
     def onSubmitButtonClicked(self):
