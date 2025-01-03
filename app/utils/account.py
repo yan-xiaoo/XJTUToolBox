@@ -112,6 +112,9 @@ class AccountManager(QObject):
 
     def append(self, account: Account):
         self.accounts.append(account)
+        data_dir = os.path.join(DATA_DIRECTORY, "data", account.uuid)
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
         self.accountAdded.emit()
 
     def remove(self, account: Account):

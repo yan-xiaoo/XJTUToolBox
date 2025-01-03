@@ -33,6 +33,8 @@ class ScheduleInterface(ScrollArea):
         self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db"))\
         if accounts.current else None
 
+        accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
+
         self.vBoxLayout = QVBoxLayout(self.view)
         self.schedule_thread = ScheduleThread()
         self.schedule_thread.schedule.connect(self.onReceiveSchedule)
@@ -167,8 +169,6 @@ class ScheduleInterface(ScrollArea):
         self.lastWeekButton.setEnabled(False)
         self.nextWeekButton.setEnabled(False)
         self.weekComboBox.setEnabled(False)
-        self.process_widget_attendance.setVisible(False)
-        self.process_widget_ehall.setVisible(False)
 
     @pyqtSlot()
     def unlock(self):
