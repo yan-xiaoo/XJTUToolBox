@@ -1,3 +1,5 @@
+import datetime
+
 import math
 import time
 from enum import Enum
@@ -14,6 +16,15 @@ class FlowRecordType(Enum):
     INVALID = 0  # 无效：指在某个教室没有课但刷了卡
     VALID = 1  # 有效：指在有课的教室成功刷卡
     REPEATED = 2  # 重复：在某个有课的教室多次刷卡
+
+
+class WaterType(Enum):
+    """已经结束的课程的考勤状态，一共五种"""
+    NORMAL = 1 # 正常
+    LATE = 2 # 迟到
+    ABSENCE = 3 # 缺勤
+    EARLY_LEAVE = 4 # 早退
+    LEAVE = 5 # 请假
 
 
 class AttendanceFlow:
@@ -39,6 +50,46 @@ class AttendanceFlow:
 
     def json(self):
         return {"sBh": self.sbh, "eqno": self.place, "watertime": self.water_time, "isdone": self.type_.value}
+
+
+class AttendanceWaterRecord:
+    def __init__(self, sbh: str, term_string: str, start_time: int, end_time: int, week: int, location: str, teacher: str, status: WaterType, date: datetime.date):
+        """
+        创建一个考勤流水信息
+        :param sbh: 此考勤信息的编号，可以在接口中查询到此考勤相关的课程、教师等很多信息
+        :param term_string: 学期字符串
+        :param start_time: 开始时间
+        :param end_time: 结束时间
+        :param week: 周数
+        :param location: 地点
+        :param teacher: 教师
+        :param status: 状态
+        """
+        self.sbh = sbh
+        self.term_string = term_string
+        self.start_time = start_time
+        self.end_time = end_time
+        self.week = week
+        self.location = location
+        self.teacher = teacher
+        self.status = status
+        self.date = date
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(sbh={self.sbh}, term_string={self.term_string}, start_time={self.start_time}, end_time={self.end_time}, week={self.week}, location={self.location}, teacher={self.teacher}, status={self.status}, date={self.date})"
+
+    @classmethod
+    def from_json(cls, json):
+        return cls(json["sBh"], json["termString"], json["startTime"], json["endTime"], json["week"], json["location"], json["teacher"], WaterType(int(json["status"])), datetime.datetime.strptime(json["date"], "%Y-%m-%d").date())
+
+    @classmethod
+    def from_response_json(cls, json):
+        return cls(str(json["classWaterBean"]["bh"]), json["stuClassBean"]["termNo"], json["accountBean"]["startJc"], json["accountBean"]["endJc"]
+                   , json["accountBean"]["week"], json["buildBean"]["name"] + "-" + json["roomBean"]["roomnum"], json["teachNameList"], WaterType(int(json["classWaterBean"]["status"])),
+                   datetime.datetime.strptime(json["accountBean"]["checkdate"], "%Y-%m-%d").date())
+
+    def json(self):
+        return {"sBh": self.sbh, "termString": self.term_string, "startTime": self.start_time, "endTime": self.end_time, "week": self.week, "location": self.location, "teacher": self.teacher, "status": self.status.value, "date": self.date.strftime("%Y-%m-%d")}
 
 
 class AttendanceLogin(Login):
@@ -154,6 +205,10 @@ def attendance_fast_webvpn_login(username: str, password: str, captcha="", sessi
 
 def _getNowTime():
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+
+def _getNowDay():
+    return time.strftime("%Y-%m-%d", time.localtime())
 
 
 class Attendance:
@@ -301,6 +356,32 @@ class Attendance:
             raise ServerError(result['code'], result["msg"])
         return result['data']
 
+    def attendanceDetailByTime(self, start_date: str, end_date: str, current: int = 1, page_size: int = 10, termNo=None):
+        """
+        根据时间段查询考勤信息。
+        :param start_date: 开始日期，格式为 "%Y-%m-%d"
+        :param end_date: 结束日期，格式为 "%Y-%m-%d"
+        :param current: 当前页数
+        :param page_size: 每页的数量
+        :param termNo: 学期编号。如果为 None，则会自动获取当前学期的编号。
+        :return: 考勤信息
+        """
+        if termNo is None:
+            if self._bh is not None:
+                termNo = self._bh
+            else:
+                result = self.getNearTerm()
+                termNo = self._bh = result["bh"]
+
+        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/classWater/getClassWaterPage",
+                              json={"startDate": start_date, "endDate": end_date, "current": current, "pageSize": page_size,
+                              "timeCondition": '', "subjectBean": {"sCode": ""}, "classWaterBean": {"status": ""},
+                              "classBean": {"termNo": termNo}})
+        result = response.json()
+        if not result["success"]:
+            raise ServerError(result['code'], result["msg"])
+        return [AttendanceWaterRecord.from_response_json(one) for one in result['data']['list']]
+
     def attendanceByTime(self, start_date: str, end_date: str = None):
         """
         根据时间段查询考勤信息。
@@ -435,6 +516,21 @@ class Attendance:
             week_schedule = self.getWeekSchedule(week, termNo)
             schedule.set_week_lessons(week, week_schedule.lessons)
         return schedule
+
+    def getFlowRecordByTime(self, start_date: str, end_date: str = None):
+        """
+        根据时间段查询考勤流水信息。
+        :param start_date: 开始日期，格式为 "%Y-%m-%d"
+        :param end_date: 结束日期，格式为 "%Y-%m-%d"。如果为 None，则默认为当前时间。
+        """
+        if end_date is None:
+            end_date = _getNowDay()
+        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/waterList/page",
+                              json={"startdate": start_date, "enddate": end_date, "current": 1, "pageSize": 50, "calendarBh": ""})
+        result = response.json()
+        if not result['success']:
+            raise ServerError(result['code'], result['msg'])
+        return [AttendanceFlow.from_json(one) for one in result['data']['list']]
 
     def getFlowRecordWithPage(self, current=1, page_size=10):
         """

@@ -1,5 +1,5 @@
 from PyQt5.QtCore import Qt, pyqtSlot
-from qfluentwidgets import ScrollArea, TitleLabel
+from qfluentwidgets import ScrollArea, TitleLabel, FluentIcon as FIF, Theme
 from PyQt5.QtWidgets import QVBoxLayout, QWidget
 from .utils import accounts, StyleSheet
 from .cards.link_card import LinkCardView, LinkCard
@@ -36,15 +36,21 @@ class HomeFrame(QWidget):
             self.linkCardView.addCard(self.accountCard)
             self.accountCard.cardClicked.connect(lambda: main_window.switchTo(main_window.account_interface))
 
-        self.tableCard = LinkCard("assets/icons/table.png", self.tr("课程表"),
+        self.tableCard = LinkCard(FIF.CALENDAR.icon(theme=Theme.DARK), self.tr("课程表"),
                                   self.tr("查看你的每周课表"))
         self.tableCard.setBackgroundColor(LinkCard.LinkCardColor.RED)
+        self.tableCard.cardClicked.connect(lambda: main_window.switchTo(main_window.schedule_interface))
         self.linkCardView.addCard(self.tableCard)
         self.attendanceCard = LinkCard("assets/icons/attendance.png", self.tr("考勤"),
                                        self.tr("查看你的考勤信息"))
         self.attendanceCard.setBackgroundColor(LinkCard.LinkCardColor.PURPLE)
         self.attendanceCard.cardClicked.connect(lambda: main_window.switchTo(main_window.attendance_interface))
         self.linkCardView.addCard(self.attendanceCard)
+        self.judgeCard = LinkCard(FIF.BOOK_SHELF.icon(theme=Theme.DARK), self.tr("评教"),
+                                 self.tr("快速完成本学期评教"))
+        self.judgeCard.setBackgroundColor(LinkCard.LinkCardColor.YELLOW)
+        self.judgeCard.cardClicked.connect(lambda: main_window.switchTo(main_window.judge_interface))
+        self.linkCardView.addCard(self.judgeCard)
 
     @pyqtSlot()
     def onAccountDecrypted(self):

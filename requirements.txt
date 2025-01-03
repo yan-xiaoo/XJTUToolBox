@@ -4,3 +4,4 @@ pycryptodome~=3.21.0
 PyQt-Fluent-Widgets~=1.7.2
 PyQt5~=5.15.11
 platformdirs~=4.3.6
+peewee~=3.17.8

@@ -16,6 +16,7 @@ class StyleSheet(StyleSheetBase, Enum):
     AUTO_JUDGE_INTERFACE = "auto_judge_interface"
     JUDGE_OPTION_INTERFACE = "judge_option_interface"
     TOOLBOX_INTERFACE = "toolbox_interface"
+    SCHEDULE_INTERFACE = "schedule_interface"
     TOOL_CARD = "tool_card"
 
     def path(self, theme=Theme.AUTO):

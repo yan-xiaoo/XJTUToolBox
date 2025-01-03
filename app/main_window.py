@@ -12,6 +12,7 @@ from qfluentwidgets import NavigationItemPosition, isDarkTheme
 
 from .HomeInterface import HomeInterface
 from .AccountInterface import AccountInterface
+from .ScheduleInterface import ScheduleInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
 from .ToolBoxInterface import ToolBoxInterface
@@ -58,7 +59,7 @@ class MainWindow(MSFluentWindow):
 
     def initWindow(self):
         self.setWindowTitle("仙交百宝箱")
-        self.setMinimumSize(785, 600)
+        self.setMinimumSize(900, 600)
 
         self.show()
 
@@ -69,10 +70,12 @@ class MainWindow(MSFluentWindow):
         self.account_interface = AccountInterface(accounts, self, self)
         self.setting_interface = SettingInterface(self)
         self.tool_box_interface = ToolBoxInterface(self, self)
+        self.schedule_interface = ScheduleInterface(self)
         self.judge_interface = AutoJudgeInterface(self)
 
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
+        self.addSubInterface(self.schedule_interface, FIF.CALENDAR, self.tr("课表"))
         self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 

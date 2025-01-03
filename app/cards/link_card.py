@@ -1,8 +1,9 @@
 # coding:utf-8
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget, QHBoxLayout
 
-from qfluentwidgets import IconWidget, TextWrap, SingleDirectionScrollArea, isDarkTheme
+from qfluentwidgets import IconWidget, TextWrap, SingleDirectionScrollArea, isDarkTheme, FluentIconBase, FlowLayout
 from ..utils.style_sheet import StyleSheet
 
 
@@ -21,6 +22,7 @@ class LinkCardColor:
     LIGHT = "light"
     DARK = "dark"
     PURPLE = 'purple'
+    YELLOW = 'yellow'
     colors = {
         LIGHT_BLUE: {
             "light": __light_color_base.format("118, 162, 185"),
@@ -33,6 +35,10 @@ class LinkCardColor:
         PURPLE: {
             "light": __light_color_base.format("139, 105, 158"),
             "dark": __dark_color_base.format("139, 105, 158")
+        },
+        YELLOW: {
+            "light": __light_color_base.format("173, 139, 115"),
+            "dark": __dark_color_base.format("173, 139, 115")
         }
     }
 
@@ -41,7 +47,7 @@ class LinkCard(QFrame):
     cardClicked = pyqtSignal()
     LinkCardColor = LinkCardColor
 
-    def __init__(self, icon: str, title, content, parent=None):
+    def __init__(self, icon: str | FluentIconBase | QIcon, title, content, parent=None):
         super().__init__(parent=parent)
         self.setFixedSize(198, 180)
         self.iconWidget = IconWidget(icon, self)
@@ -85,11 +91,11 @@ class LinkCardView(SingleDirectionScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent, Qt.Horizontal)
         self.view = QWidget(self)
-        self.hBoxLayout = QHBoxLayout(self.view)
+        self.flowLayout = FlowLayout(self.view)
 
-        self.hBoxLayout.setContentsMargins(36, 0, 0, 0)
-        self.hBoxLayout.setSpacing(12)
-        self.hBoxLayout.setAlignment(Qt.AlignLeft)
+        self.flowLayout.setContentsMargins(66, 0, 0, 0)
+        self.flowLayout.setSpacing(12)
+        self.flowLayout.setAlignment(Qt.AlignLeft)
 
         self.setWidget(self.view)
         self.setWidgetResizable(True)
@@ -101,4 +107,4 @@ class LinkCardView(SingleDirectionScrollArea):
 
     def addCard(self, card: LinkCard):
         """ add link card """
-        self.hBoxLayout.addWidget(card, 0, Qt.AlignLeft)
+        self.flowLayout.addWidget(card)

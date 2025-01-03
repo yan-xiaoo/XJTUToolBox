@@ -1,10 +1,11 @@
 # coding:utf-8
 from typing import Union
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QIcon, QColor
 from PyQt5.QtWidgets import QWidget, QLabel, QButtonGroup, QVBoxLayout, QPushButton, QHBoxLayout
 
-from qfluentwidgets import ColorDialog, ExpandGroupSettingCard, RadioButton, qconfig, ColorConfigItem, FluentIconBase
+from qfluentwidgets import ColorDialog, ExpandGroupSettingCard, RadioButton, qconfig, ColorConfigItem, FluentIconBase, \
+    Theme, isDarkTheme
 
 
 class CustomColorSettingCard(ExpandGroupSettingCard):
@@ -43,6 +44,8 @@ class CustomColorSettingCard(ExpandGroupSettingCard):
 
         self.choiceLabel = QLabel(self)
 
+        qconfig.themeChanged.connect(self.onThemeChanged)
+
         self.radioWidget = QWidget(self.view)
         self.radioLayout = QVBoxLayout(self.radioWidget)
         self.defaultRadioButton = RadioButton(
@@ -60,6 +63,10 @@ class CustomColorSettingCard(ExpandGroupSettingCard):
 
         self.__initWidget()
 
+    @pyqtSlot(Theme)
+    def onThemeChanged(self, _):
+        self.choiceLabel.setStyleSheet("color: #ffffff;" if isDarkTheme() else "color: #000000;")
+
     def __initWidget(self):
         self.__initLayout()
 
@@ -72,6 +79,7 @@ class CustomColorSettingCard(ExpandGroupSettingCard):
 
         self.choiceLabel.setText(self.buttonGroup.checkedButton().text())
         self.choiceLabel.adjustSize()
+        self.onThemeChanged(qconfig.theme)
 
         self.chooseColorButton.setObjectName('chooseColorButton')
 
@@ -122,7 +130,15 @@ class CustomColorSettingCard(ExpandGroupSettingCard):
     def __showColorDialog(self):
         """ show color dialog """
         w = ColorDialog(
-            qconfig.get(self.configItem), self.tr('Choose color'), self.window(), self.enableAlpha)
+            qconfig.get(self.configItem), self.tr('自定义颜色'), self.window(), self.enableAlpha)
+        # 强行汉化一下颜色窗口
+        w.yesButton.setText(self.tr('确定'))
+        w.cancelButton.setText(self.tr('取消'))
+        w.editLabel.setText(self.tr('编辑颜色'))
+        w.redLabel.setText(self.tr('红'))
+        w.greenLabel.setText(self.tr('绿'))
+        w.blueLabel.setText(self.tr('蓝'))
+        w.opacityLabel.setText(self.tr('透明度'))
         w.colorChanged.connect(self.__onCustomColorChanged)
         w.exec()
 

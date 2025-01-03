@@ -21,6 +21,16 @@ DATA_DIRECTORY = platformdirs.user_data_dir(APP_NAME, ensure_exists=True)
 CACHE_DIRECTORY = platformdirs.user_cache_dir(APP_NAME, ensure_exists=True)
 
 
+def account_data_directory(account) -> str:
+    """
+    获取账户数据文件夹路径
+
+    :param account: 账户对象
+    :returns 账户数据文件夹路径
+    """
+    return os.path.join(DATA_DIRECTORY, "data", account.uuid)
+
+
 def migrate_log(old_path: str = "config/logs", new_path: str = LOG_DIRECTORY) -> bool:
     """
     迁移日志文件

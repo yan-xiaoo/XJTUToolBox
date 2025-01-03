@@ -31,3 +31,15 @@ class EhallUtil:
         if result["result"] != "success":
             raise ServerError(-1, result["message"])
         return response.json()["data"]["groupList"]
+
+    def useApp(self, appid: str):
+        """
+        获得并直接访问某个子模块的首页。
+        此函数为了便捷提供；它获取某个 appId 对应应用的所有可访问角色，并直接访问其中第一个角色的访问 url，以获得该模块的访问权限。
+        :param appid: 子模块的 appid
+        :raise ServerError: 服务器返回错误
+        """
+        roles = self.getRoles(appid)
+        if len(roles) == 0:
+            raise ServerError(-1, "未找到任何角色")
+        self.session.get(roles[0]["targetUrl"])
