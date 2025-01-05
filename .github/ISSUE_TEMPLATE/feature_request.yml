@@ -6,9 +6,9 @@ labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
-    value: |
-    ## 感谢您愿意提出功能建议
-    ## 请您检查以下事项，帮助我们更快地理解您的需求：
+      value: |
+        ## 感谢您愿意提出功能建议
+        ## 请您检查以下事项，帮助我们更快地理解您的需求：
 
   - type: checkboxes
     id: checklist

@@ -55,7 +55,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox-macOS-{{ env.DIST_ARCH }.zip
+          name: XJTUToolbox-macOS-${{ runner.arch }}.zip
           path: ./dist/XJTUToolbox-macOS-*.zip
       - name: Archive(Ubuntu)
         if: runner.os == 'Linux'

@@ -5,10 +5,10 @@ labels: ["bug"]
 
 body:
   - type: markdown
-  - attributes:
-  - value: |
-    ## 感谢您愿意反馈问题
-    ## 请您检查以下事项，确保您的问题能够被快速解决：
+    attributes:
+      value: |
+        ## 感谢您愿意反馈问题
+        ## 请您检查以下事项，确保您的问题能够被快速解决：
 
   - type: checkboxes
     id: checklist
@@ -27,6 +27,8 @@ body:
     attributes:
       label: XJTUToolbox 版本号（或 Commit Id）
       description: 请提供您使用的 XJTUToolbox 版本号，方便开发者定位问题。
+    validations:
+      required: true
 
   - type: textarea
     id: reproduce
