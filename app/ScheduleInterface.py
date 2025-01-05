@@ -14,8 +14,10 @@ from app.threads.ScheduleThread import ScheduleThread
 from app.utils import StyleSheet, accounts, cfg
 from app.utils.migrate_data import account_data_directory
 from attendance.attendance import AttendanceWaterRecord, AttendanceFlow, WaterType, FlowRecordType
+from schedule import getAttendanceEndTime, getAttendanceStartTime
 from schedule.schedule_database import CourseInstance, CourseStatus
 from schedule.schedule_service import ScheduleService
+from schedule.xjtu_time import isSummerTime
 
 
 class ScheduleInterface(ScrollArea):
@@ -419,21 +421,23 @@ class ScheduleInterface(ScrollArea):
             updated.append(lesson)
 
         for page in water_page:
-            if page.type_ == FlowRecordType.VALID:
+            # 不管是有效的还是重复的，都说明这门课已经打卡了
+            if page.type_ == FlowRecordType.VALID or page.type_ == FlowRecordType.REPEATED:
                 water_time = datetime.datetime.strptime(page.water_time, "%Y-%m-%d %H:%M:%S")
                 date = water_time.date()
                 week = (water_time.date() - self.schedule_service.getStartOfTerm()).days // 7 + 1
-                try:
-                    lesson = self.schedule_service.selectCourse(CourseInstance.week_number == week,
-                                                                 CourseInstance.day_of_week == date.weekday() + 1,
-                                                                 CourseInstance.location == page.place)[0]
-                except IndexError:
-                    continue
-                if lesson.status != CourseStatus.UNKNOWN.value:
-                    continue
-                lesson.status = CourseStatus.CHECKED.value
-                lesson.save()
-                updated.append(lesson)
+                lessons = self.schedule_service.selectCourse(CourseInstance.week_number == week,
+                                                             CourseInstance.day_of_week == date.weekday() + 1,
+                                                             CourseInstance.location == page.place)
+                for lesson in lessons:
+                    # 如果这门课程已经查询到了考勤状态，就不更新打卡状态
+                    if lesson.status != CourseStatus.UNKNOWN.value:
+                        continue
+                    # 比较打卡流水时间是否在考勤时间内
+                    if getAttendanceStartTime(lesson.start_time, isSummerTime(date)) <= water_time.time() <= getAttendanceEndTime(lesson.start_time, isSummerTime(date)):
+                        lesson.status = CourseStatus.CHECKED.value
+                        lesson.save()
+                        updated.append(lesson)
 
         for i in range(7):
             for j in range(13):
