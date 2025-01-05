@@ -1,4 +1,3 @@
-import sys
 from enum import Enum
 
 import requests
@@ -109,14 +108,18 @@ class AttendanceFlowThread(ProcessThread):
             else:
                 raise ValueError(f"{self.choice} is not a valid choice. ")
         except ServerError as e:
-            logger.error("服务器错误", exc_info=sys.exc_info(), stack=True)
+            logger.error("服务器错误", exc_info=True)
             self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()
+        except requests.ConnectionError:
+            logger.error("网络错误", exc_info=True)
+            self.error.emit(self.tr("无网络连接"), self.tr("请检查网络连接，然后重试。"))
+            self.canceled.emit()
         except requests.RequestException as e:
-            logger.error("网络错误", exc_info=sys.exc_info())
+            logger.error("网络错误", exc_info=True)
             self.error.emit(self.tr("网络错误"), str(e))
             self.canceled.emit()
         except Exception as e:
-            logger.error("其他错误", exc_info=sys.exc_info())
+            logger.error("其他错误", exc_info=True)
             self.error.emit(self.tr("其他错误"), str(e))
             self.canceled.emit()

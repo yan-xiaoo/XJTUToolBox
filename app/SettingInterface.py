@@ -1,12 +1,13 @@
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtCore import pyqtSlot, QUrlQuery, QUrl
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox
 from qfluentwidgets import FluentIcon as FIF
 from PyQt5.QtWidgets import QWidget
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QDesktopServices
 
+from .components.ConfirmBox import ConfirmBox
 from .utils.config import cfg
-from .utils import accounts
+from .utils import accounts, DEFAULT_CONFIG_PATH, LOG_DIRECTORY
 from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
 from .sub_interfaces.EncryptDialog import EncryptDialog, DecryptDialog
@@ -73,10 +74,34 @@ class SettingInterface(ScrollArea):
         self.personalGroup.addSettingCard(self.themeCard)
         self.personalGroup.addSettingCard(self.themeColorCard)
 
+        # 关于组
+        self.aboutGroup = SettingCardGroup(self.tr("关于"), self.view)
+        self.feedbackCard = PrimaryPushSettingCard(
+            self.tr("提供反馈"),
+            FIF.FEEDBACK,
+            self.tr("提供反馈"),
+            self.tr("通过提供反馈帮助我们改进 XJTUToolbox"),
+            self.aboutGroup
+        )
+        self.logCard = PushSettingCard(
+            self.tr("查看日志"),
+            FIF.FOLDER,
+            self.tr("查看日志"),
+            self.tr("打开应用的日志目录"),
+            self.aboutGroup
+        )
+
+        self.aboutGroup.addSettingCard(self.feedbackCard)
+        self.aboutGroup.addSettingCard(self.logCard)
+
         # 添加设置组到布局
         self.expandLayout.addWidget(self.accountGroup)
-        self.expandLayout.addWidget(self.personalGroup)
         self.expandLayout.addWidget(self.attendanceGroup)
+        self.expandLayout.addWidget(self.personalGroup)
+        self.expandLayout.addWidget(self.aboutGroup)
+
+        self.expandLayout.setSpacing(28)
+        self.expandLayout.setContentsMargins(36, 10, 36, 0)
 
         StyleSheet.SETTING_INTERFACE.apply(self)
 
@@ -89,6 +114,8 @@ class SettingInterface(ScrollArea):
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
         self.clearCard.clicked.connect(self._onClearAccountsClicked)
+        self.feedbackCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox/issues")))
+        self.logCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("file:///" + LOG_DIRECTORY)))
 
     @pyqtSlot()
     def onEncryptAccountClicked(self):
@@ -139,10 +166,8 @@ class SettingInterface(ScrollArea):
             msg = self.tr("清除后，所有账户信息将被删除，且不可恢复。\n账户加密将同时被解除")
         else:
             msg = self.tr("清除后，所有账户信息将被删除，且不可恢复")
-        w = MessageBox(self.tr("确认清除所有账户信息?"),
-                       msg, self)
+        w = ConfirmBox(self.tr("清除所有账户"), msg, self.tr("清除"), self.tr("请输入“清除”以确认"), self)
         w.yesButton.setText(self.tr("清除"))
-        w.cancelButton.setText(self.tr("取消"))
         if w.exec():
             accounts.clear()
             InfoBar.success(title='', content="清除账户成功", parent=self)

@@ -1,13 +1,14 @@
 import datetime
 import os.path
 
-from PyQt5.QtCore import pyqtSlot, Qt
+from PyQt5.QtCore import pyqtSlot
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHBoxLayout, QHeaderView
-from qfluentwidgets import ScrollArea, TableWidget, CommandBar, Action, FluentIcon, ComboBox, \
-    PushButton, InfoBarPosition, InfoBar, MessageBox
+from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
+    PushButton, InfoBarPosition, InfoBar, MessageBox, PrimaryPushButton
 
 from app.components.ScheduleTable import ScheduleTableWidget
 from app.threads.ProcessWidget import ProcessWidget
+from app.threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
 from app.threads.ScheduleAttendanceThread import ScheduleAttendanceThread, AttendanceFlowLogin
 from app.threads.ScheduleThread import ScheduleThread
 from app.utils import StyleSheet, accounts, cfg
@@ -50,13 +51,22 @@ class ScheduleInterface(ScrollArea):
         self.schedule_attendance_thread.error.connect(self.onThreadError)
         self.schedule_attendance_thread.finished.connect(self.unlock)
 
+        # 监视线程
+        self.schedule_attendance_monitor_thread = ScheduleAttendanceMonitorThread(self.schedule_attendance_thread, self.process_widget_attendance)
+        self.process_widget_attendance.connectMonitorThread(self.schedule_attendance_monitor_thread)
+        self.schedule_attendance_monitor_thread.result.connect(self.onReceiveAttendance)
+
         self.commandFrame = QFrame(self)
         self.frameLayout = QHBoxLayout(self.commandFrame)
-        self.leftCommandBar = CommandBar(self)
-        self.leftCommandBar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.getTableAction = Action(FluentIcon.SYNC, self.tr("获取课表"), self.leftCommandBar)
-        self.getTableAction.triggered.connect(self.onGetTableClicked)
-        self.leftCommandBar.addAction(self.getTableAction)
+        self.getTableButton = PushButton(self.tr("获取课表"), parent=self)
+        self.getTablePrimaryButton = PrimaryPushButton(self.tr("获取课表"), parent=self)
+        self.getTablePrimaryButton.clicked.connect(self.onGetTableClicked)
+        self.getTableButton.clicked.connect(self.onGetTableClicked)
+
+        self.getWeekAttendanceButton = PushButton(self.tr("获取本周考勤"), parent=self)
+        self.getWeekAttendanceButton.clicked.connect(self.onGetWeekAttendanceClicked)
+        self.getWeekAttendancePrimaryButton = PrimaryPushButton(self.tr("获取本周考勤"), parent=self)
+        self.getWeekAttendancePrimaryButton.clicked.connect(self.onGetWeekAttendanceClicked)
 
         self.lastWeekButton = PushButton('<', parent=self)
         self.lastWeekButton.setFixedWidth(45)
@@ -68,17 +78,13 @@ class ScheduleInterface(ScrollArea):
         self.nextWeekButton.clicked.connect(self.onNextWeekClicked)
         self.lastWeekButton.clicked.connect(self.onLastWeekClicked)
 
-        self.rightCommandBar = CommandBar(self)
-        self.rightCommandBar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.getWeekAttendanceAction = Action(FluentIcon.DOCUMENT, self.tr("获取本周考勤"), self.rightCommandBar)
-        self.getWeekAttendanceAction.triggered.connect(self.onGetWeekAttendanceClicked)
-        self.rightCommandBar.addAction(self.getWeekAttendanceAction)
-
-        self.frameLayout.addWidget(self.leftCommandBar, stretch=1)
+        self.frameLayout.addWidget(self.getTableButton)
+        self.frameLayout.addWidget(self.getTablePrimaryButton)
         self.frameLayout.addWidget(self.lastWeekButton)
         self.frameLayout.addWidget(self.weekComboBox)
         self.frameLayout.addWidget(self.nextWeekButton)
-        self.frameLayout.addWidget(self.rightCommandBar, stretch=1)
+        self.frameLayout.addWidget(self.getWeekAttendanceButton)
+        self.frameLayout.addWidget(self.getWeekAttendancePrimaryButton)
 
         self.table_widget = TableWidget(self)
         self.table_widget.setColumnCount(7)
@@ -111,12 +117,37 @@ class ScheduleInterface(ScrollArea):
 
         # 加载可能存在的课表缓存到页面中
         if accounts.current is not None:
-            self.loadSchedule()
+            if self.schedule_service.getStartOfTerm() is not None:
+                self.loadSchedule()
+                self.setTablePrimary(False)
+                self.setAttendancePrimary(True)
+            else:
+                self.setTablePrimary(True)
+                self.setAttendancePrimary(False)
+        else:
+            self.setTablePrimary(False)
+            self.setAttendancePrimary(False)
 
         StyleSheet.SCHEDULE_INTERFACE.apply(self)
 
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+
+    def setTablePrimary(self, primary: bool):
+        self.getTablePrimaryButton.setVisible(primary)
+        self.getTableButton.setVisible(not primary)
+
+    def setAttendancePrimary(self, primary: bool):
+        self.getWeekAttendancePrimaryButton.setVisible(primary)
+        self.getWeekAttendanceButton.setVisible(not primary)
+
+    def setTableEnabled(self, enabled: bool):
+        self.getTableButton.setEnabled(enabled)
+        self.getTablePrimaryButton.setEnabled(enabled)
+
+    def setAttendanceEnabled(self, enabled: bool):
+        self.getWeekAttendanceButton.setEnabled(enabled)
+        self.getWeekAttendancePrimaryButton.setEnabled(enabled)
 
     @property
     def week(self):
@@ -139,7 +170,10 @@ class ScheduleInterface(ScrollArea):
         当周数改变时，加载新的课程表
         :param week: 新的周数
         """
-        self.loadSchedule(week + 1)
+        if self.schedule_service is not None:
+            self.loadSchedule(week + 1)
+        else:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
 
     @pyqtSlot()
     def onNextWeekClicked(self):
@@ -164,8 +198,10 @@ class ScheduleInterface(ScrollArea):
         """
         锁定一切与网络通信相关的按钮
         """
-        self.getTableAction.setEnabled(False)
-        self.getWeekAttendanceAction.setEnabled(False)
+        self.getTableButton.setEnabled(False)
+        self.getWeekAttendanceButton.setEnabled(False)
+        self.getTablePrimaryButton.setEnabled(False)
+        self.getWeekAttendancePrimaryButton.setEnabled(False)
         self.lastWeekButton.setEnabled(False)
         self.nextWeekButton.setEnabled(False)
         self.weekComboBox.setEnabled(False)
@@ -175,8 +211,10 @@ class ScheduleInterface(ScrollArea):
         """
         解锁一切与网络通信相关的按钮
         """
-        self.getTableAction.setEnabled(True)
-        self.getWeekAttendanceAction.setEnabled(True)
+        self.getTableButton.setEnabled(True)
+        self.getWeekAttendanceButton.setEnabled(True)
+        self.getTablePrimaryButton.setEnabled(True)
+        self.getWeekAttendancePrimaryButton.setEnabled(True)
         self.lastWeekButton.setEnabled(True)
         self.nextWeekButton.setEnabled(True)
         self.weekComboBox.setEnabled(True)
@@ -283,6 +321,10 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot()
     def onGetTableClicked(self):
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+
         if not self.schedule_service.getCourseInTerm():
             self.process_widget_ehall.setVisible(True)
             self.lock()
@@ -298,10 +340,18 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot()
     def onGetWeekAttendanceClicked(self):
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+
         start = self.schedule_service.getStartOfTerm()
+        if start is None:
+            self.error("", self.tr("请先获取课表"), parent=self)
+            return
+
         start_date = start + datetime.timedelta(days=(self.week - 1) * 7)
         if start_date > datetime.date.today():
-            self.error(self.tr("错误"), self.tr("无法获取未来的考勤记录"))
+            self.error(self.tr("错误"), self.tr("无法获取未来的考勤记录"), parent=self)
             return
         end_date = start + datetime.timedelta(days=self.week * 7 - 1)
         if end_date > datetime.date.today():
@@ -325,6 +375,7 @@ class ScheduleInterface(ScrollArea):
         self.lock()
         self.process_widget_attendance.setVisible(True)
         self.schedule_attendance_thread.start()
+        self.schedule_attendance_monitor_thread.start()
 
     @pyqtSlot(dict)
     def onReceiveSchedule(self, schedule: dict):
@@ -339,6 +390,9 @@ class ScheduleInterface(ScrollArea):
 
         for lesson in schedule["lessons"]:
             self.schedule_service.addCourseFromJson(lesson, merge_with_existing=True)
+
+        self.setTablePrimary(False)
+        self.setAttendancePrimary(True)
         self.loadSchedule()
 
     @pyqtSlot(list, list)
@@ -375,7 +429,7 @@ class ScheduleInterface(ScrollArea):
                                                                  CourseInstance.location == page.place)[0]
                 except IndexError:
                     continue
-                if lesson.status != CourseStatus.UNKNOWN:
+                if lesson.status != CourseStatus.UNKNOWN.value:
                     continue
                 lesson.status = CourseStatus.CHECKED.value
                 lesson.save()
@@ -393,6 +447,18 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot()
     def onCurrentAccountChanged(self):
-        # 重载课表服务为当前账户的内容
-        self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db"))
-        self.loadSchedule()
+        if accounts.current is None:
+            self.schedule_service = None
+            self.table_widget.clear()
+            self.setTablePrimary(False)
+            self.setAttendancePrimary(False)
+        else:
+            # 重载课表服务为当前账户的内容
+            self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db"))
+            if self.schedule_service.getStartOfTerm() is not None:
+                self.setTablePrimary(False)
+                self.setAttendancePrimary(True)
+            else:
+                self.setTablePrimary(True)
+                self.setAttendancePrimary(False)
+            self.loadSchedule()

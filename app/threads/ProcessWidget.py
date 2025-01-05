@@ -67,6 +67,27 @@ class ProcessWidget(QFrame):
         self.thread_.setIndeterminate.connect(self.onSetIndeterminate)
         self.thread_.deadTime.connect(self.onSetDeadTime)
 
+    def connectMonitorThread(self, thread: "ProcessThread"):
+        """
+        连接一个辅助监视线程到本组件。监视线程的状态（开始，结束，撤销，成功完成）不会影响本组件的状态。
+        监视线程只能设置本组件的信息，进度，采用非确定性进度条还是确定性的、以及与组件关联的线程超时未响应后被杀死的时间，不能改变其他内容
+        应当在监视线程和被监视线程之间使用合适的信号-槽进行通信。
+        监视线程需要自行启动。
+        """
+        thread.progressChanged.connect(self.onSetProgress)
+        thread.messageChanged.connect(self.onSetMessage)
+        thread.setIndeterminate.connect(self.onSetIndeterminate)
+        thread.deadTime.connect(self.onSetDeadTime)
+
+    def disconnectMonitorThread(self, thread: "ProcessThread"):
+        """
+        断开一个辅助监视线程到本组件的连接
+        """
+        thread.progressChanged.disconnect(self.onSetProgress)
+        thread.messageChanged.disconnect(self.onSetMessage)
+        thread.setIndeterminate.disconnect(self.onSetIndeterminate)
+        thread.deadTime.disconnect(self.onSetDeadTime)
+
     @pyqtSlot(bool)
     def onSetIndeterminate(self, value: bool):
         if value:
