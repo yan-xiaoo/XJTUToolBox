@@ -1,0 +1,47 @@
+name: 功能建议
+description: 建议开发者添加某个功能
+title: "[Feat]: "
+labels: ["enhancement"]
+
+body:
+  - type: markdown
+    attributes:
+    value: |
+    ## 感谢您愿意提出功能建议
+    ## 请您检查以下事项，帮助我们更快地理解您的需求：
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 请先确认以下事项
+      options:
+        - label: 我确定这是一个从未被提出和实现过的功能
+          required: true
+        - label: 我已经检查过 [issue](https://github.com/yan-xiaoo/XJTUToolbox/issues) 和 [Pull Requests](https://github.com/yan-xiaoo/XJTUToolBox/pulls), 没有找到类似的功能建议
+          required: true
+        - label: 我确定此功能不会用于获利（如抢课、刷分等）
+          required: true
+        - label: 我理解并明白，如果我不按照模板的指示规范填写，我的 issue 可能不会得到及时处理
+          required: true
+
+  - type: textarea
+    id: feature_description
+    attributes:
+      label: 需要什么样的功能？
+      description: 您希望添加什么样的功能？请尽量详细地描述您的需求，需求的背景和用途，也可以提供您想到的实现方案（如有）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: other_description
+    attributes:
+      label: 其他描述
+      description: 关于新功能的任何其他描述或截图
+
+  - type: checkboxes
+    id: PR
+    attributes:
+      label: 是否愿意提交 PR 实现该功能
+      description: 如果您有能力实现该功能，是否愿意提交 PR？
+      options:
+        - label: 我愿意提交 PR 实现该功能

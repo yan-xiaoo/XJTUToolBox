@@ -1,0 +1,83 @@
+name: 反馈问题
+description: 反馈问题
+title: "[Bug]: "
+labels: ["bug"]
+
+body:
+  - type: markdown
+  - attributes:
+  - value: |
+    ## 感谢您愿意反馈问题
+    ## 请您检查以下事项，确保您的问题能够被快速解决：
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 请先确认以下事项：
+      options:
+        - label: 我已仔细阅读了 [README](https://github.com/yan-xiaoo/XJTUToolbox#readme)
+          required: true
+        - label: 我在 [issues](https://github.com/yan-xiaoo/XJTUToolbox/issues) 页面搜索过问题（包括已关闭的 issue），但未能找到解决方法
+          required: true
+        - label: 我理解并明白，如果我不按照模板的指示规范填写，我的 issue 可能不会得到及时处理
+          required: true
+
+  - type: textarea
+    id: XJTUToolbox-version
+    attributes:
+      label: XJTUToolbox 版本号（或 Commit Id）
+      description: 请提供您使用的 XJTUToolbox 版本号，方便开发者定位问题。
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 重现步骤
+      description: |
+        如何操作会使问题出现？请提供详细的操作步骤，方便开发者重现问题。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望的结果是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际的结果是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: 截图(可选)
+      description: |
+        如果方便，请提供问题截图或录屏。如果您遇到了 UI 相关的问题，截图或录屏将会非常有帮助。
+      placeholder: 请提供问题相关截图
+
+  - type: textarea
+    id: log
+    attributes:
+      label: 运行日志
+      description: |
+        选择设置->关于->查看日志，在文件夹中打开以 Bug 发生日期命名的文件，然后复制粘贴其内容到下方。
+      placeholder: 请复制粘贴运行日志的内容
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python 版本(可选)
+      description: 如果您通过下载源代码运行应用，请提供您的 Python 版本号。
+
+  - type: textarea
+    id: others
+    attributes:
+      label: 其他信息(可选)
+      description: |
+        如果您有其他信息需要补充，请在此处填写。
