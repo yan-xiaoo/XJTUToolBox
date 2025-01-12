@@ -20,13 +20,14 @@ class ScheduleAttendanceThread(ProcessThread):
     # 获取考勤流水完成（与监视线程通信）
     water_page_finished = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, term_number=None, parent=None):
         super().__init__(parent)
         self.util = None
         self.start_date = None
         self.end_date = None
         self.login_method = None
-
+        self.term_number = None
+        self.term_map = None
         # 考勤流水（打卡信息）
         self.water_page = []
         # 考勤信息
@@ -104,7 +105,11 @@ class ScheduleAttendanceThread(ProcessThread):
 
             self.progressChanged.emit(66)
             self.messageChanged.emit(self.tr("正在查询考勤信息..."))
-            records = self.util.attendanceDetailByTime(self.start_date, self.end_date, 1, 50)
+            if self.term_map is None:
+                self.term_map = self.util.getTermNoMap()
+
+            records = self.util.attendanceDetailByTime(self.start_date, self.end_date, 1, 50,
+                                                       termNo=self.term_map[self.term_number])
             self.records = records
             self.progressChanged.emit(100)
 

@@ -1,8 +1,11 @@
 from peewee import Model, CharField, ForeignKeyField, IntegerField, DatabaseProxy, Database
 from enum import Enum
 
-database_proxy = DatabaseProxy()
 
+# 数据库当前版本
+DATABASE_VERSION = 2
+
+database_proxy = DatabaseProxy()
 
 class CourseStatus(Enum):
     # 课程的不同状态
@@ -48,16 +51,25 @@ class CourseInstance(BaseModel):
 
 class Config(BaseModel):
     """
-    存储当前学期编号，学期开始日期等信息
+    存储当前学期编号等信息
     """
     key = CharField()
     value = CharField()
 
 
+class Term(BaseModel):
+    """
+    存储学期信息，包含学期开始时间
+    """
+    term_number = CharField(primary_key=True, unique=True)
+    start_date = CharField()
+
+
 def create_tables(new_database: Database):
     new_database.connect(reuse_if_open=True)
     with new_database:
-        new_database.create_tables([Course, CourseInstance, Config])
+        new_database.create_tables([Course, CourseInstance, Config, Term])
+    set_config("database_version", str(DATABASE_VERSION))
 
 
 def set_database(new_database: Database):
@@ -80,11 +92,57 @@ def set_config(key: str, value: str):
         config.save()
 
 
-def upgrade(old_version, new_version):
+def _upgrade(old_version: int, new_version: int):
+    """升级数据库版本"""
+    if old_version != new_version - 1:
+        raise ValueError("只能升级一个版本")
+
+    database: Database = database_proxy.obj
+    if database is None:
+        raise ValueError("数据库对象未初始化")
+
+    if old_version == 1 and new_version == 2:
+        # 从版本 1 升级到版本 2
+        with database:
+            database.create_tables([Term])
+        set_config("database_version", str(new_version))
+
+
+def upgrade(old_version: int, new_version: int):
     """留作以后升级、更改数据库结构使用"""
-    pass
+    if old_version > new_version:
+        return
+
+    if old_version < new_version - 1:
+        for i in range(old_version, new_version):
+            _upgrade(i, i + 1)
+    else:
+        _upgrade(old_version, new_version)
 
 
-def downgrade(old_version, new_version):
+def _downgrade(old_version: int, new_version: int):
+    """降级数据库版本"""
+    if old_version != new_version + 1:
+        raise ValueError("只能降级一个版本")
+
+    database: Database = database_proxy.obj
+    if database is None:
+        raise ValueError("数据库对象未初始化")
+
+    if old_version == 2 and new_version == 1:
+        # 从版本 2 降级到版本 1
+        with database:
+            database.drop_tables([Term])
+        set_config("database_version", str(new_version))
+
+
+def downgrade(old_version: int, new_version: int):
     """留作以后降级、更改数据库结构使用"""
-    pass
+    if old_version < new_version:
+        return
+
+    if old_version > new_version + 1:
+        for i in range(old_version, new_version, -1):
+            _downgrade(i, i - 1)
+    else:
+        _downgrade(old_version, new_version)

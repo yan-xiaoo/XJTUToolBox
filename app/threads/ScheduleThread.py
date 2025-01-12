@@ -17,9 +17,15 @@ class ScheduleThread(ProcessThread):
     # {"lessons": 课表信息, "term_number": 学期编号, "start_date": 学期开始日期}
     schedule = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, term_number=None, parent=None):
+        """
+        创建一个获取课表的线程
+        :param term_number: 需要获取的课表的学期编号
+        :param parent: 父对象
+        """
         super().__init__(parent)
         self.util = None
+        self.term_number = term_number
 
     @property
     def session(self) -> EhallSession:
@@ -81,12 +87,12 @@ class ScheduleThread(ProcessThread):
 
             self.progressChanged.emit(66)
             self.messageChanged.emit("正在获取课表信息...")
-            result = self.util.getSchedule()
+            result = self.util.getSchedule(timestamp=self.term_number)
 
             self.progressChanged.emit(88)
             self.messageChanged.emit("正在获取学期开始时间...")
 
-            date = self.util.getStartOfTerm()
+            date = self.util.getStartOfTerm(timestamp=self.term_number)
 
             self.progressChanged.emit(100)
 
@@ -109,7 +115,7 @@ class ScheduleThread(ProcessThread):
         else:
             self.schedule.emit({
                 "lessons": result,
-                "term_number": self.util.termString,
+                "term_number": self.term_number if self.term_number is not None else self.util.termString,
                 "start_date": date
             })
             self.hasFinished.emit()

@@ -2,7 +2,8 @@ import datetime
 import os.path
 from peewee import SqliteDatabase, DoesNotExist
 
-from .schedule_database import Course, CourseInstance, create_tables, set_database, set_config, get_config
+from .schedule_database import Course, CourseInstance, create_tables, set_database, set_config, get_config, \
+    DATABASE_VERSION, upgrade, downgrade, Term
 
 
 class ScheduleService:
@@ -17,6 +18,16 @@ class ScheduleService:
         set_database(self.database)
         if not os.path.exists(database_path):
             create_tables(self.database)
+        else:
+            # 检查数据库版本
+            try:
+                current_version = int(get_config("database_version"))
+            except (DoesNotExist, ValueError):
+                current_version = 1
+            if current_version < DATABASE_VERSION:
+                upgrade(current_version, DATABASE_VERSION)
+            elif current_version > DATABASE_VERSION:
+                downgrade(current_version, DATABASE_VERSION)
 
     def clearNonManualCourses(self, term_number: str = None):
         """
@@ -43,26 +54,40 @@ class ScheduleService:
 
     def setCurrentTerm(self, term_number: str):
         """
-        设置当前学期
+        设置当前学期为某个学期。此操作不会创建新的学期，只会设置 config 中的 current_term 为此学期编号
         """
         set_config("current_term", term_number)
+
+    def setTermInfo(self, term_number: str, start_date: str, current: bool = False):
+        """
+        设置学期信息。如果设置的学期已存在，将更新学期的开始时间；否则创建新的学期。
+        :param term_number: 学期编号
+        :param start_date: 学期开始日期
+        :param current: 是否设置为当前学期，如果为 true，设置 config 中的 current_term 为此学期编号
+        """
+        term = Term.get_or_none(Term.term_number == term_number)
+        if term is not None:
+            term.start_date = start_date
+            term.save()
+        else:
+            Term.create(term_number=term_number, start_date=start_date)
+
+        if current:
+            set_config("current_term", term_number)
 
     def getStartOfTerm(self):
         """
         获取学期的第一周的周一日期, 如果不存在则返回 None
         """
         try:
-            day_string = get_config("start_of_term")
+            current_term = self.getCurrentTerm()
+            if current_term is None:
+                return None
+            day_string = Term.get(Term.term_number == current_term).start_date
             year, month, day = map(int, day_string.split("-"))
             return datetime.date(year, month, day)
         except DoesNotExist:
             return None
-
-    def setStartOfTerm(self, start_date: datetime.date):
-        """
-        设置学期的第一周的周一日期
-        """
-        set_config("start_of_term", f"{start_date.year}-{start_date.month}-{start_date.day}")
 
     def getCourseInTerm(self, term_number: str = None):
         """
@@ -104,16 +129,19 @@ class ScheduleService:
         day = int(course_json["SKXQ"])
         start_time = int(course_json["KSJC"])
         end_time = int(course_json["JSJC"])
+        # 使用批量插入以加速
+        insertion = []
         for week_no, single in enumerate(course_json["SKZC"]):
             if single == "1":
-                CourseInstance.create(
-                    course=course,
-                    day_of_week=day,
-                    start_time=start_time,
-                    end_time=end_time,
-                    location=location,
-                    teacher=teacher,
-                    week_number=week_no + 1,
-                    manual=1 if manual else 0,
-                    term_number=course_json["XNXQDM"]
+                insertion.append({
+                    "course": course,
+                    "day_of_week": day,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "location": location,
+                    "teacher": teacher,
+                    "week_number": week_no + 1,
+                    "manual": 1 if manual else 0,
+                    "term_number": course_json["XNXQDM"]}
                 )
+        CourseInstance.insert_many(insertion).execute()

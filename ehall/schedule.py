@@ -69,9 +69,9 @@ class Schedule:
         response = self.session.post(
             'https://ehall.xjtu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/cxjcs.do',
             data={
-                'XN': self._termString.split('-')[0] + '-' + self._termString.split('-')[1],
-                'XQ': self._termString.split('-')[2]
+                'XN': timestamp.split('-')[0] + '-' + timestamp.split('-')[1],
+                'XQ': timestamp.split('-')[2]
             }
         )
         data = response.json()
-        return datetime.strptime(data['datas']['cxjcs']['rows'][0]["XQKSRQ"].split(' ')[0], '%Y-%m-%d')
+        return datetime.strptime(data['datas']['cxjcs']['rows'][0]["XQKSRQ"].split(' ')[0], '%Y-%m-%d').date()

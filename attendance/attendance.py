@@ -471,6 +471,25 @@ class Attendance:
             raise ServerError(result['code'], result["msg"])
         return result['data']
 
+    def getTermNoMap(self):
+        """
+        获得学期编号的映射表。
+        :return: 学期编号的映射表，格式如下：
+        {
+            "2020-2021-1": 525,
+            "2020-2021-2": 526,
+            ...
+        }
+        """
+        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/global/getBeforeTodayTerm")
+        result = response.json()
+        if not result["success"]:
+            raise ServerError(result['code'], result["msg"])
+        mapping = {}
+        for data in result["data"]:
+            mapping[data["name"]] = data["bh"]
+        return mapping
+
     def getWeekSchedule(self, week: int, termNo: int = None) -> WeekSchedule:
         """
         获得特定周的课程表。

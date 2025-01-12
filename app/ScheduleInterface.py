@@ -1,12 +1,15 @@
 import datetime
 import os.path
 
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtCore import pyqtSlot, QPoint
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHBoxLayout, QHeaderView
 from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
-    PushButton, InfoBarPosition, InfoBar, MessageBox, PrimaryPushButton
+    PushButton, InfoBarPosition, InfoBar, MessageBox, PrimaryPushButton, TransparentPushButton, RoundMenu, Action, \
+    CaptionLabel
+from qfluentwidgets import FluentIcon as FIF
 
 from app.components.ScheduleTable import ScheduleTableWidget
+from app.sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
 from app.threads.ScheduleAttendanceThread import ScheduleAttendanceThread, AttendanceFlowLogin
@@ -60,6 +63,10 @@ class ScheduleInterface(ScrollArea):
 
         self.commandFrame = QFrame(self)
         self.frameLayout = QHBoxLayout(self.commandFrame)
+
+        self.termButton = TransparentPushButton(self)
+        self.termButton.clicked.connect(self.onChangeTermClicked)
+
         self.getTableButton = PushButton(self.tr("获取课表"), parent=self)
         self.getTablePrimaryButton = PrimaryPushButton(self.tr("获取课表"), parent=self)
         self.getTablePrimaryButton.clicked.connect(self.onGetTableClicked)
@@ -70,16 +77,24 @@ class ScheduleInterface(ScrollArea):
         self.getWeekAttendancePrimaryButton = PrimaryPushButton(self.tr("获取本周考勤"), parent=self)
         self.getWeekAttendancePrimaryButton.clicked.connect(self.onGetWeekAttendanceClicked)
 
+        # 作为菜单触发器的按钮
+        self.moreButton = TransparentPushButton("更多...", parent=self)
+        self.moreButton.setFixedWidth(100)
+        self.moreButton.clicked.connect(lambda: self.createMoreMenu(self.moreButton.mapToGlobal(
+            QPoint(0, self.moreButton.height()))))
+
         self.lastWeekButton = PushButton('<', parent=self)
         self.lastWeekButton.setFixedWidth(45)
         self.weekComboBox = ComboBox(self)
         self.weekComboBox.addItems([str(i) for i in range(1, 19)])
         self.weekComboBox.currentIndexChanged.connect(self.onWeekChanged)
+        self.weekComboBox.setMaximumWidth(60)
         self.nextWeekButton = PushButton('>', parent=self)
         self.nextWeekButton.setFixedWidth(45)
         self.nextWeekButton.clicked.connect(self.onNextWeekClicked)
         self.lastWeekButton.clicked.connect(self.onLastWeekClicked)
 
+        self.frameLayout.addWidget(self.termButton)
         self.frameLayout.addWidget(self.getTableButton)
         self.frameLayout.addWidget(self.getTablePrimaryButton)
         self.frameLayout.addWidget(self.lastWeekButton)
@@ -87,6 +102,14 @@ class ScheduleInterface(ScrollArea):
         self.frameLayout.addWidget(self.nextWeekButton)
         self.frameLayout.addWidget(self.getWeekAttendanceButton)
         self.frameLayout.addWidget(self.getWeekAttendancePrimaryButton)
+        self.frameLayout.addWidget(self.moreButton)
+
+        # 更多菜单
+        self.moreMenu = RoundMenu(parent=self)
+        # 修改学期菜单项
+        self.changeTermAction = Action(FIF.EDIT, self.tr("修改学期..."))
+        self.moreMenu.addAction(self.changeTermAction)
+        self.changeTermAction.triggered.connect(self.onChangeTermClicked)
 
         self.table_widget = TableWidget(self)
         self.table_widget.setColumnCount(7)
@@ -124,9 +147,14 @@ class ScheduleInterface(ScrollArea):
                 self.setTablePrimary(False)
                 self.setAttendancePrimary(True)
             else:
+                term = self.schedule_service.getCurrentTerm()
+                if term is not None:
+                    self.termButton.setText(self.schedule_service.getCurrentTerm())
+
                 self.setTablePrimary(True)
                 self.setAttendancePrimary(False)
         else:
+            self.termButton.setText(self.tr("未登录"))
             self.setTablePrimary(False)
             self.setAttendancePrimary(False)
 
@@ -151,19 +179,22 @@ class ScheduleInterface(ScrollArea):
         self.getWeekAttendanceButton.setEnabled(enabled)
         self.getWeekAttendancePrimaryButton.setEnabled(enabled)
 
+    def createMoreMenu(self, position):
+        self.moreMenu.exec(position, ani=True)
+
     @property
     def week(self):
         return self.weekComboBox.currentIndex() + 1
 
     def getCurrentWeek(self):
         """
-        获取当前周数，如果学期开始时间为空，则返回 1，不会超过 18 周
+        获取当前周数，如果学期开始时间为空或大于当前日期，或者当前日期超过了学期结束时间，则返回 1。结果不会超过 18 周
         :return: 周数
         """
         start = self.schedule_service.getStartOfTerm()
-        if start is None:
-            return 1
         current = datetime.date.today()
+        if start is None or start > current or (current - start).days // 7 >= 20:
+            return 1
         return min((current - start).days // 7 + 1, 18)
 
     @pyqtSlot(int)
@@ -278,6 +309,8 @@ class ScheduleInterface(ScrollArea):
         if self.weekComboBox.currentIndex() != week - 1:
             self.weekComboBox.setCurrentIndex(week - 1)
 
+        self.termButton.setText(self.schedule_service.getCurrentTerm())
+
         # 锁定按钮
         if week == 1:
             self.lastWeekButton.setEnabled(False)
@@ -287,6 +320,9 @@ class ScheduleInterface(ScrollArea):
             self.nextWeekButton.setEnabled(False)
         else:
             self.nextWeekButton.setEnabled(True)
+
+        # 重置表头
+        self.table_widget.setHorizontalHeaderLabels(self.DAYS)
 
         # 显示日期和本天特殊颜色
         start_date = self.schedule_service.getStartOfTerm()
@@ -321,13 +357,23 @@ class ScheduleInterface(ScrollArea):
         if schedule:
             self.table_widget.adjustSize()
 
+        # 根据这学期是否有课程，设置按钮是否高亮
+        if self.schedule_service.getCourseInTerm():
+            self.setTablePrimary(False)
+            self.setAttendancePrimary(True)
+        else:
+            self.setTablePrimary(True)
+            self.setAttendancePrimary(False)
+
     @pyqtSlot()
     def onGetTableClicked(self):
         if self.schedule_service is None:
             self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
             return
 
-        if not self.schedule_service.getCourseInTerm():
+        term_number = self.schedule_service.getCurrentTerm()
+        self.schedule_thread.term_number = term_number
+        if not self.schedule_service.getCourseInTerm(term_number):
             self.process_widget_ehall.setVisible(True)
             self.lock()
             self.schedule_thread.start()
@@ -353,11 +399,14 @@ class ScheduleInterface(ScrollArea):
 
         start_date = start + datetime.timedelta(days=(self.week - 1) * 7)
         if start_date > datetime.date.today():
-            self.error(self.tr("错误"), self.tr("无法获取未来的考勤记录"), parent=self)
+            self.error("", self.tr("无法获取未来的考勤记录"), parent=self)
             return
         end_date = start + datetime.timedelta(days=self.week * 7 - 1)
         if end_date > datetime.date.today():
             end_date = datetime.date.today()
+
+        term_number = self.schedule_service.getCurrentTerm()
+        self.schedule_attendance_thread.term_number = term_number
 
         self.schedule_attendance_thread.start_date = start_date.strftime("%Y-%m-%d")
         self.schedule_attendance_thread.end_date = end_date.strftime("%Y-%m-%d")
@@ -379,16 +428,22 @@ class ScheduleInterface(ScrollArea):
         self.schedule_attendance_thread.start()
         self.schedule_attendance_monitor_thread.start()
 
+    @pyqtSlot()
+    def onChangeTermClicked(self):
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+
+        w = ChangeTermDialog(self)
+        if w.exec():
+            self.schedule_service.setCurrentTerm(w.term_number)
+            self.loadSchedule()
+
     @pyqtSlot(dict)
     def onReceiveSchedule(self, schedule: dict):
+        # 清除获取的新课表所在学期的所有非手动添加的课程
+        self.schedule_service.setTermInfo(schedule["term_number"], schedule["start_date"], True)
         self.schedule_service.clearNonManualCourses()
-        # 如果学期编号比当前的大，更新当前学期及其开始时间
-        if self.schedule_service.getCurrentTerm() is None or self.schedule_service.getCurrentTerm() < schedule["term_number"]:
-            self.schedule_service.setCurrentTerm(schedule["term_number"])
-            self.schedule_service.setStartOfTerm(schedule["start_date"])
-        # 如果学期编号相同，但开始时间为空，更新开始时间
-        if self.schedule_service.getStartOfTerm() is None:
-            self.schedule_service.setStartOfTerm(schedule["start_date"])
 
         for lesson in schedule["lessons"]:
             self.schedule_service.addCourseFromJson(lesson, merge_with_existing=True)
