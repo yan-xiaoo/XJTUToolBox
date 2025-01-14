@@ -7,7 +7,7 @@ from qfluentwidgets import ScrollArea, MessageBoxBase, SubtitleLabel, ToolTipFil
 
 from app.threads.JudgeThread import JudgeChoice
 from app.threads.ProcessWidget import ProcessThread
-from app.utils import StyleSheet, accounts, AccountCacheManager
+from app.utils import StyleSheet, accounts, AccountDataManager
 from ehall import Questionnaire, QuestionnaireTemplate
 
 
@@ -93,14 +93,14 @@ class JudgeCacheManager(QObject):
         """
         写入缓存到当前账户的缓存文件中
         """
-        cache = AccountCacheManager(accounts.current)
+        cache = AccountDataManager(accounts.current)
         cache.write_json("judge_cache.json", self.caches, True)
 
     def load(self):
         """
         从当前账户的缓存文件中读取缓存
         """
-        cache = AccountCacheManager(accounts.current)
+        cache = AccountDataManager(accounts.current)
         self.caches = cache.read_json("judge_cache.json")
 
     @pyqtSlot()

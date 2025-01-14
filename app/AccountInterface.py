@@ -6,7 +6,7 @@ from qfluentwidgets import ScrollArea, TitleLabel, VBoxLayout, StrongBodyLabel, 
     MessageBoxBase, InfoBar
 
 from .sub_interfaces.EncryptDialog import DecryptFrame
-from .utils import StyleSheet, cfg, AccountCacheManager
+from .utils import StyleSheet, cfg, AccountDataManager
 from .utils.account import Account, AccountManager
 
 
@@ -284,7 +284,7 @@ class AccountInterface(ScrollArea):
         else:
             self.accounts.remove(account)
 
-        AccountCacheManager(account).remove_all()
+        AccountDataManager(account).remove_all()
         self.accountAreaLayout.removeWidget(self.account_widgets[account])
         self.account_widgets[account].deleteLater()
         self._onAccountChanged()

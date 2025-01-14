@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QWidget, QStackedWidget, QTableWidgetItem, QFrame, Q
 from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, VBoxLayout, Pivot, BodyLabel, PrimaryPushButton, TableWidget, \
     CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition, PipsPager, PipsScrollButtonDisplayMode, MessageBox
-from .utils import StyleSheet, accounts, AccountCacheManager, Color
+from .utils import StyleSheet, accounts, AccountDataManager, Color
 from attendance.attendance import AttendanceFlow, FlowRecordType
 from .threads.ProcessWidget import ProcessWidget
 from .threads.AttendanceFlowThread import AttendanceFlowThread, AttendanceFlowChoice
@@ -245,7 +245,7 @@ class AttendanceFlowWidget(QFrame):
 
     def loadContentCache(self):
         try:
-            cache = AccountCacheManager(accounts.current)
+            cache = AccountDataManager(accounts.current)
             record_list = cache.read_json("attendance_flow.json")
             record = [AttendanceFlow.from_json(one) for one in record_list]
             self.setTableContent(record)
@@ -253,7 +253,7 @@ class AttendanceFlowWidget(QFrame):
             pass
 
     def saveContentCache(self, record: list):
-        cache = AccountCacheManager(accounts.current)
+        cache = AccountDataManager(accounts.current)
         record_list = [one.json() for one in record]
         cache.write_json("attendance_flow.json", record_list, allow_overwrite=True)
 

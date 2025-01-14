@@ -58,8 +58,10 @@ macOS 下，需要将应用程序拖到「应用程序」文件夹内，否则�
 > 
 > attendance: 考勤系统相关代码，包含考勤查询、课表查询接口
 
-## 相关项目
+## 相关项目与致谢
 本项目的完成离不开如下开源项目的帮助：
 - [qfluentwidgets (PyQt5 界面库)](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
 - [better-ehall (交大登录示例项目)](https://github.com/guitaoliu/xjtu-grade)
 - [webvpn-dlut (WebVPN 网址转换)](https://github.com/ESWZY/webvpn-dlut)
+- [xidian-script（Ehall 开发实例）](https://github.com/xdlinux/xidian-scripts)
+- [chine-holiday-calendar（节假日日历接口）](https://github.com/lanceliao/china-holiday-calender)

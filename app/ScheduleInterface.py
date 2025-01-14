@@ -1,23 +1,32 @@
 import datetime
+import json
 import os.path
+
+import requests
+from icalendar import Calendar
 
 from PyQt5.QtCore import pyqtSlot, QPoint
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHBoxLayout, QHeaderView
+from icalendar.cal import Event
 from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
     PushButton, InfoBarPosition, InfoBar, MessageBox, PrimaryPushButton, TransparentPushButton, RoundMenu, Action, \
-    CaptionLabel
+    CaptionLabel, StateToolTip
 from qfluentwidgets import FluentIcon as FIF
 
 from app.components.ScheduleTable import ScheduleTableWidget
 from app.sub_interfaces.ChangeTermDialog import ChangeTermDialog
+from app.sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
+from app.threads.HolidayThread import HolidayThread
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
 from app.threads.ScheduleAttendanceThread import ScheduleAttendanceThread, AttendanceFlowLogin
 from app.threads.ScheduleThread import ScheduleThread
 from app.utils import StyleSheet, accounts, cfg
+from app.utils.cache import cacheManager
 from app.utils.migrate_data import account_data_directory
 from attendance.attendance import AttendanceWaterRecord, AttendanceFlow, WaterType, FlowRecordType
-from schedule import getAttendanceEndTime, getAttendanceStartTime
+from schedule import getAttendanceEndTime, getAttendanceStartTime, getClassStartTime, getClassEndTime
+from schedule.holiday import get_holiday_days
 from schedule.schedule_database import CourseInstance, CourseStatus
 from schedule.schedule_service import ScheduleService
 from schedule.xjtu_time import isSummerTime
@@ -61,10 +70,14 @@ class ScheduleInterface(ScrollArea):
         self.process_widget_attendance.connectMonitorThread(self.schedule_attendance_monitor_thread)
         self.schedule_attendance_monitor_thread.result.connect(self.onReceiveAttendance)
 
+        self.holiday_thread = HolidayThread()
+        self.holiday_thread.result.connect(self.onReceiveHoliday)
+
         self.commandFrame = QFrame(self)
         self.frameLayout = QHBoxLayout(self.commandFrame)
 
         self.termButton = TransparentPushButton(self)
+        self.termButton.setMaximumWidth(150)
         self.termButton.clicked.connect(self.onChangeTermClicked)
 
         self.getTableButton = PushButton(self.tr("获取课表"), parent=self)
@@ -88,7 +101,7 @@ class ScheduleInterface(ScrollArea):
         self.weekComboBox = ComboBox(self)
         self.weekComboBox.addItems([str(i) for i in range(1, 19)])
         self.weekComboBox.currentIndexChanged.connect(self.onWeekChanged)
-        self.weekComboBox.setMaximumWidth(60)
+        self.weekComboBox.setMaximumWidth(70)
         self.nextWeekButton = PushButton('>', parent=self)
         self.nextWeekButton.setFixedWidth(45)
         self.nextWeekButton.clicked.connect(self.onNextWeekClicked)
@@ -110,6 +123,13 @@ class ScheduleInterface(ScrollArea):
         self.changeTermAction = Action(FIF.EDIT, self.tr("修改学期..."))
         self.moreMenu.addAction(self.changeTermAction)
         self.changeTermAction.triggered.connect(self.onChangeTermClicked)
+        # 导出为 ics 菜单项
+        self.exportAction = Action(FIF.SHARE, self.tr("导出 ics..."))
+        self.moreMenu.addAction(self.exportAction)
+        self.exportAction.triggered.connect(self.onExportClicked)
+
+        self.stateToolTip = None
+        self._export_path = None
 
         self.table_widget = TableWidget(self)
         self.table_widget.setColumnCount(7)
@@ -290,6 +310,24 @@ class ScheduleInterface(ScrollArea):
                 self._onlyNotice = None
         self._onlyNotice = InfoBar.error(title, msg, duration=duration, position=position, parent=parent)
 
+    def warning(self, title, msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=None):
+        """
+        显示一个警告的通知。如果已经存在通知，已存在的通知会被立刻关闭。
+        :param duration: 通知显示时间
+        :param position: 通知显示位置
+        :param parent: 通知的父窗口
+        :param title: 通知标题
+        :param msg: 通知内容
+        """
+        if self._onlyNotice is not None:
+            try:
+                self._onlyNotice.close()
+            except RuntimeError:
+                # RuntimeError: wrapped C/C++ object of type InfoBar has been deleted
+                # 这个异常无所谓，忽略
+                self._onlyNotice = None
+        self._onlyNotice = InfoBar.warning(title, msg, duration=duration, position=position, parent=parent)
+
     @pyqtSlot(str)
     def onThreadSuccess(self, msg):
         self.success(self.tr("成功"), msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=self)
@@ -438,6 +476,106 @@ class ScheduleInterface(ScrollArea):
         if w.exec():
             self.schedule_service.setCurrentTerm(w.term_number)
             self.loadSchedule()
+
+    @pyqtSlot()
+    def onExportClicked(self):
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+
+        w = ExportCalendarDialog(self)
+        if w.exec():
+            if os.path.exists(os.path.dirname(w.result_path)) and not os.path.isdir(w.result_path):
+                self.exportICS(w.result_path, w.ignore_holiday)
+            else:
+                self.error("", self.tr("导出位置不存在"), parent=self)
+
+    def exportICS(self, path, ignore_holiday=True):
+        """
+        导出课程表为 ics 文件
+        :param path: 导出路径
+        :param ignore_holiday: 是否忽略节假日
+        """
+        self._export_path = path
+        if ignore_holiday:
+            ignore_data = cacheManager.read_expire_json("ignore_holiday.json", 7)
+            if ignore_data is not None:
+                for i in range(len(ignore_data)):
+                    ignore_data[i] = datetime.datetime.strptime(ignore_data[i], "%Y-%m-%d").date()
+            else:
+                self.stateToolTip = StateToolTip(self.tr("正在获取节假日信息..."), self.tr("请稍等..."), self)
+                self.stateToolTip.move(self.stateToolTip.getSuitablePos())
+                self.stateToolTip.show()
+                self.holiday_thread.start()
+                return
+
+        else:
+            ignore_data = []
+
+        self.export(path, ignore_data)
+
+    @pyqtSlot(list)
+    def onReceiveHoliday(self, data: list):
+        if self.stateToolTip is not None:
+            self.stateToolTip.setState(True)
+            self.stateToolTip.setContent(self.tr("获取节假日成功"))
+            self.stateToolTip = None
+
+        write_data = []
+        for one_date in data:
+            write_data.append(one_date.strftime("%Y-%m-%d"))
+        cacheManager.write_expire_json("ignore_holiday.json", write_data, True)
+        self.export(self._export_path, data)
+
+    def export(self, path, ignore_holidays: list[datetime.date]):
+        """
+        内部函数，实际实现导出功能
+        :param path: 导出目标的路径
+        :param ignore_holidays: 需要忽略的节假日日期
+        :return:
+        """
+        term_start = self.schedule_service.getStartOfTerm()
+        if term_start is None:
+            raise ValueError("学期开始时间为空")
+
+        cal = Calendar()
+
+        for course in self.schedule_service.getCourseInTerm():
+            e = Event()
+            e.add(
+                "description",
+                '课程名称：' + course.course.name +
+                ';上课地点：' + course.location
+            )
+            e.add('summary', course.course.name + '@' + course.location)
+
+            term_start_time = datetime.datetime(term_start.year, term_start.month, term_start.day)
+            date = term_start_time + datetime.timedelta(days=(course.week_number - 1) * 7 + course.day_of_week - 1)
+            if date.date() in ignore_holidays:
+                continue
+
+            begin_time = getClassStartTime(course.start_time, isSummerTime(date))
+            end_time = getClassEndTime(course.end_time, isSummerTime(date))
+
+            e.add(
+                "dtstart",
+                date.replace(
+                    hour=begin_time.hour,
+                    minute=begin_time.minute
+                )
+            )
+            e.add(
+                "dtend",
+                date.replace(
+                    hour=end_time.hour,
+                    minute=end_time.minute
+                )
+            )
+            cal.add_component(e)
+        with open(path, "wb") as f:
+            f.write(cal.to_ical())
+
+        self.success(self.tr("成功"), self.tr("导出日历成功"), parent=self)
 
     @pyqtSlot(dict)
     def onReceiveSchedule(self, schedule: dict):
