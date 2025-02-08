@@ -1,11 +1,14 @@
 from peewee import Model, CharField, ForeignKeyField, IntegerField, DatabaseProxy, Database
 from enum import Enum
+# 这边在 Pycharm 里虽然会报错，但是可以运行；这是一个 Pycharm 分析器的问题，不知道啥时候 Jetbrains 会修
+from playhouse.migrate import SqliteMigrator, migrate
 
 
 # 数据库当前版本
-DATABASE_VERSION = 2
+DATABASE_VERSION = 3
 
 database_proxy = DatabaseProxy()
+
 
 class CourseStatus(Enum):
     # 课程的不同状态
@@ -47,6 +50,8 @@ class CourseInstance(BaseModel):
     manual = IntegerField(default=0)
     # 学期编号
     term_number = CharField()
+    # 课程名称
+    name = CharField()
 
 
 class Config(BaseModel):
@@ -106,6 +111,18 @@ def _upgrade(old_version: int, new_version: int):
         with database:
             database.create_tables([Term])
         set_config("database_version", str(new_version))
+    if old_version == 2 and new_version == 3:
+        # 从版本 2 升级到版本 3
+        migrator = SqliteMigrator(database)
+        with database.atomic():
+            migrate(
+                migrator.add_column("courseinstance", "name", CharField(null=True))
+            )
+        # 更新课程实例的名称：从 Course 表中拉取信息
+        for instance in CourseInstance.select():
+            instance.name = instance.course.name
+            instance.save()
+        set_config("database_version", str(new_version))
 
 
 def upgrade(old_version: int, new_version: int):
@@ -133,6 +150,14 @@ def _downgrade(old_version: int, new_version: int):
         # 从版本 2 降级到版本 1
         with database:
             database.drop_tables([Term])
+        set_config("database_version", str(new_version))
+    if old_version == 3 and new_version == 2:
+        # 从版本 3 降级到版本 2
+        migrator = SqliteMigrator(database)
+        with database.atomic():
+            migrate(
+                migrator.drop_column("courseinstance", "name")
+            )
         set_config("database_version", str(new_version))
 
 

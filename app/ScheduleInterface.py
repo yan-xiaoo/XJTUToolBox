@@ -1,8 +1,6 @@
 import datetime
-import json
 import os.path
 
-import requests
 from icalendar import Calendar
 
 from PyQt5.QtCore import pyqtSlot, QPoint
@@ -10,7 +8,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHB
 from icalendar.cal import Event
 from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
     PushButton, InfoBarPosition, InfoBar, MessageBox, PrimaryPushButton, TransparentPushButton, RoundMenu, Action, \
-    CaptionLabel, StateToolTip
+    StateToolTip
 from qfluentwidgets import FluentIcon as FIF
 
 from app.components.ScheduleTable import ScheduleTableWidget
@@ -26,7 +24,6 @@ from app.utils.cache import cacheManager
 from app.utils.migrate_data import account_data_directory
 from attendance.attendance import AttendanceWaterRecord, AttendanceFlow, WaterType, FlowRecordType
 from schedule import getAttendanceEndTime, getAttendanceStartTime, getClassStartTime, getClassEndTime
-from schedule.holiday import get_holiday_days
 from schedule.schedule_database import CourseInstance, CourseStatus
 from schedule.schedule_service import ScheduleService
 from schedule.xjtu_time import isSummerTime
@@ -34,6 +31,7 @@ from schedule.xjtu_time import isSummerTime
 
 class ScheduleInterface(ScrollArea):
     """课程表界面"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -43,10 +41,11 @@ class ScheduleInterface(ScrollArea):
         self.view.setObjectName("view")
 
         self._onlyNotice = None
-        self.DAYS = [self.tr("周一"), self.tr("周二"), self.tr("周三"), self.tr("周四"), self.tr("周五"), self.tr("周六"), self.tr("周日")]
+        self.DAYS = [self.tr("周一"), self.tr("周二"), self.tr("周三"), self.tr("周四"), self.tr("周五"),
+                     self.tr("周六"), self.tr("周日")]
 
-        self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db"))\
-        if accounts.current else None
+        self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db")) \
+            if accounts.current else None
 
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
@@ -66,7 +65,8 @@ class ScheduleInterface(ScrollArea):
         self.schedule_attendance_thread.finished.connect(self.unlock)
 
         # 监视线程
-        self.schedule_attendance_monitor_thread = ScheduleAttendanceMonitorThread(self.schedule_attendance_thread, self.process_widget_attendance)
+        self.schedule_attendance_monitor_thread = ScheduleAttendanceMonitorThread(self.schedule_attendance_thread,
+                                                                                  self.process_widget_attendance)
         self.process_widget_attendance.connectMonitorThread(self.schedule_attendance_monitor_thread)
         self.schedule_attendance_monitor_thread.result.connect(self.onReceiveAttendance)
 
@@ -135,9 +135,10 @@ class ScheduleInterface(ScrollArea):
         self.table_widget.setColumnCount(7)
         self.table_widget.setHorizontalHeaderLabels(self.DAYS)
         self.table_widget.setRowCount(13)
-        self.table_widget.setVerticalHeaderLabels([self.tr("一"), self.tr("二"), self.tr("三"), self.tr("四"), self.tr("午休"),
-                                                   self.tr("五"), self.tr("六"), self.tr("七"), self.tr("八"), self.tr("晚休"),
-                                                   self.tr("九"), self.tr("十"), self.tr("十一")])
+        self.table_widget.setVerticalHeaderLabels(
+            [self.tr("一"), self.tr("二"), self.tr("三"), self.tr("四"), self.tr("午休"),
+             self.tr("五"), self.tr("六"), self.tr("七"), self.tr("八"), self.tr("晚休"),
+             self.tr("九"), self.tr("十"), self.tr("十一")])
         self.table_widget.setSpan(4, 0, 1, 7)
         self.table_widget.setSpan(9, 0, 1, 7)
         self.table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -366,10 +367,12 @@ class ScheduleInterface(ScrollArea):
         start_date = self.schedule_service.getStartOfTerm()
         if start_date is not None:
             self.table_widget.setHorizontalHeaderLabels(
-                [(start_date + datetime.timedelta(days=(week - 1) * 7 + i)).strftime("%m.%d") + "\t" + self.DAYS[i] for i in range(7)]
+                [(start_date + datetime.timedelta(days=(week - 1) * 7 + i)).strftime("%m.%d") + "\t" + self.DAYS[i] for
+                 i in range(7)]
             )
             today = datetime.date.today()
-            if start_date + datetime.timedelta(days=(week - 1) * 7) <= today < start_date + datetime.timedelta(days=week * 7):
+            if start_date + datetime.timedelta(days=(week - 1) * 7) <= today < start_date + datetime.timedelta(
+                    days=week * 7):
                 item = self.table_widget.horizontalHeaderItem(today.weekday())
                 item.setText("今天\t" + item.text())
 
@@ -377,21 +380,26 @@ class ScheduleInterface(ScrollArea):
 
         for i in range(13):
             for j in range(7):
+                widget = self.table_widget.cellWidget(i, j)
                 self.table_widget.removeCellWidget(i, j)
 
         for course in schedule:
+            widget = ScheduleTableWidget(course)
             # 如果课程的开始时间在第四节课前，说明是上午，放到 start_time - 1 行
             if course.start_time <= 4:
-                self.table_widget.setCellWidget(course.start_time - 1, course.day_of_week - 1, ScheduleTableWidget(course))
-                self.table_widget.setSpan(course.start_time - 1, course.day_of_week - 1, course.end_time - course.start_time + 1, 1)
+                self.table_widget.setCellWidget(course.start_time - 1, course.day_of_week - 1, widget)
+                self.table_widget.setSpan(course.start_time - 1, course.day_of_week - 1,
+                                          course.end_time - course.start_time + 1, 1)
             # 如果课程的开始时间在第五节课后，说明是下午，放到 start_time 行（因为有一行午休是不用的）
             elif course.start_time <= 8:
-                self.table_widget.setCellWidget(course.start_time, course.day_of_week - 1, ScheduleTableWidget(course))
-                self.table_widget.setSpan(course.start_time, course.day_of_week - 1, course.end_time - course.start_time + 1, 1)
+                self.table_widget.setCellWidget(course.start_time, course.day_of_week - 1, widget)
+                self.table_widget.setSpan(course.start_time, course.day_of_week - 1,
+                                          course.end_time - course.start_time + 1, 1)
             # 如果课程的开始时间在第九节课后，说明是晚上，放到 start_time + 1 行（因为有一行午休+一行晚休共计两行是不用的）
             else:
-                self.table_widget.setCellWidget(course.start_time + 1, course.day_of_week - 1, ScheduleTableWidget(course))
-                self.table_widget.setSpan(course.start_time + 1, course.day_of_week - 1, course.end_time - course.start_time + 1, 1)
+                self.table_widget.setCellWidget(course.start_time + 1, course.day_of_week - 1, widget)
+                self.table_widget.setSpan(course.start_time + 1, course.day_of_week - 1,
+                                          course.end_time - course.start_time + 1, 1)
         if schedule:
             self.table_widget.adjustSize()
 
@@ -544,10 +552,10 @@ class ScheduleInterface(ScrollArea):
             e = Event()
             e.add(
                 "description",
-                '课程名称：' + course.course.name +
+                '课程名称：' + course.name +
                 ';上课地点：' + course.location
             )
-            e.add('summary', course.course.name + '@' + course.location)
+            e.add('summary', course.name + '@' + course.location)
 
             term_start_time = datetime.datetime(term_start.year, term_start.month, term_start.day)
             date = term_start_time + datetime.timedelta(days=(course.week_number - 1) * 7 + course.day_of_week - 1)
@@ -596,10 +604,10 @@ class ScheduleInterface(ScrollArea):
         for record in records:
             try:
                 lesson = self.schedule_service.selectCourse(CourseInstance.week_number == record.week,
-                                                             CourseInstance.day_of_week == record.date.weekday() + 1,
-                                                             CourseInstance.start_time == record.start_time,
-                                                             CourseInstance.end_time == record.end_time,
-                                                             CourseInstance.term_number == record.term_string)[0]
+                                                            CourseInstance.day_of_week == record.date.weekday() + 1,
+                                                            CourseInstance.start_time == record.start_time,
+                                                            CourseInstance.end_time == record.end_time,
+                                                            CourseInstance.term_number == record.term_string)[0]
             except IndexError:
                 continue
             if record.status == WaterType.NORMAL:
@@ -627,7 +635,9 @@ class ScheduleInterface(ScrollArea):
                     if lesson.status != CourseStatus.UNKNOWN.value:
                         continue
                     # 比较打卡流水时间是否在考勤时间内
-                    if getAttendanceStartTime(lesson.start_time, isSummerTime(date)) <= water_time.time() <= getAttendanceEndTime(lesson.start_time, isSummerTime(date)):
+                    if getAttendanceStartTime(lesson.start_time,
+                                              isSummerTime(date)) <= water_time.time() <= getAttendanceEndTime(
+                            lesson.start_time, isSummerTime(date)):
                         lesson.status = CourseStatus.CHECKED.value
                         lesson.save()
                         updated.append(lesson)
@@ -651,7 +661,8 @@ class ScheduleInterface(ScrollArea):
             self.setAttendancePrimary(False)
         else:
             # 重载课表服务为当前账户的内容
-            self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db"))
+            self.schedule_service = ScheduleService(
+                os.path.join(account_data_directory(accounts.current), "schedule.db"))
             if self.schedule_service.getStartOfTerm() is not None:
                 self.setTablePrimary(False)
                 self.setAttendancePrimary(True)

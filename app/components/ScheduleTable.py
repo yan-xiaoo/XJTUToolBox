@@ -39,7 +39,7 @@ class ScheduleTableWidget(QWidget):
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        self.nameLabel = StrongBodyLabel(course.course.name)
+        self.nameLabel = StrongBodyLabel(course.name)
         self.placeLabel = BodyLabel(course.location)
         self.statusLabel = QLabel(self)
         font = getFont(13)
