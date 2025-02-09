@@ -126,6 +126,7 @@ class ScheduleService:
         """
         return CourseInstance.select(
             CourseInstance.course,
+            CourseInstance.name,
             fn.GROUP_CONCAT(CourseInstance.week_number).alias('week_numbers'),
             CourseInstance.day_of_week,
             CourseInstance.start_time,
@@ -231,6 +232,7 @@ class ScheduleService:
                     "location": location,
                     "teacher": teacher,
                     "week_number": week_no + 1,
+                    "name": course_json["KCM"],
                     "manual": 1 if manual else 0,
                     "term_number": course_json["XNXQDM"]}
                 )

@@ -356,6 +356,8 @@ class LessonCard(HeaderCardWidget):
         self.confirmBar.setVisible(False)
 
         self.editable = False
+        self.headerEdit.setVisible(False)
+        self.headerLabel.setVisible(True)
         self.table.setEditTriggers(TableWidget.NoEditTriggers)
 
     @pyqtSlot()
