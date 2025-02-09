@@ -1,6 +1,6 @@
 import datetime
 import os.path
-from peewee import SqliteDatabase, DoesNotExist
+from peewee import SqliteDatabase, DoesNotExist, fn
 
 from .schedule_database import Course, CourseInstance, create_tables, set_database, set_config, get_config, \
     DATABASE_VERSION, upgrade, downgrade, Term
@@ -110,11 +110,101 @@ class ScheduleService:
             term_number = self.getCurrentTerm()
         return CourseInstance.select().where(CourseInstance.week_number == week_number, CourseInstance.term_number == term_number)
 
+    def getSameCourseInOtherWeek(self, course: CourseInstance):
+        """
+        获得其他周中，和输入课程同日期同时间，且名称一致的其他课程
+        :param course: 输入课程
+        """
+        return CourseInstance.select().where(CourseInstance.day_of_week == course.day_of_week,
+                                             CourseInstance.start_time == course.start_time, CourseInstance.end_time == course.end_time,
+                                             CourseInstance.course == course.course, CourseInstance.term_number == course.term_number)
+
+    def getOtherCourseInSameTime(self, course: CourseInstance):
+        """
+        获得其他周中，和输入课程同一时间的其他（非同名）课程
+        :param course: 输入课程
+        """
+        return CourseInstance.select(
+            CourseInstance.course,
+            fn.GROUP_CONCAT(CourseInstance.week_number).alias('week_numbers'),
+            CourseInstance.day_of_week,
+            CourseInstance.start_time,
+            CourseInstance.end_time,
+            CourseInstance.term_number,
+            CourseInstance.location,
+            CourseInstance.teacher
+        ).where(
+            CourseInstance.start_time == course.start_time,
+            CourseInstance.end_time == course.end_time,
+            CourseInstance.course != course.course,
+            CourseInstance.term_number == course.term_number,
+            CourseInstance.day_of_week == course.day_of_week
+        ).group_by(
+            CourseInstance.course
+        )
+
+    def deleteCourseInWeeks(self, course: CourseInstance, weeks: list[int]):
+        """
+        删除课程表中的某几周的课程
+        :param course: 课程对象，将删除此对象对应课程的部分周数
+        :param weeks: 需要删除的周数
+        """
+        CourseInstance.delete().where(CourseInstance.course == course.course, CourseInstance.week_number.in_(weeks),
+                                      CourseInstance.term_number == course.term_number, CourseInstance.day_of_week == course.day_of_week,
+                                      CourseInstance.start_time == course.start_time, CourseInstance.end_time == course.end_time).execute()
+
+    def addCourseInWeeks(self, course: CourseInstance, weeks: list[int]):
+        """
+        添加课程表中的某几周的课程
+        :param course: 课程对象，将添加此对象对应课程的部分周数
+        :param weeks: 需要添加的周数
+        """
+        insertion = []
+        for week in weeks:
+            insertion.append({
+                "course": course.course,
+                "name": course.name,
+                "day_of_week": course.day_of_week,
+                "start_time": course.start_time,
+                "end_time": course.end_time,
+                "location": course.location,
+                "teacher": course.teacher,
+                "week_number": week,
+                "manual": 0,
+                "term_number": course.term_number
+            })
+        CourseInstance.insert_many(insertion).execute()
+
+    def editSingleCourse(self, course: CourseInstance, new_name: str, new_location: str, new_teacher: str):
+        """
+        修改课程表中的某一节课的名称、地点、教师
+        :param course: 课程对象
+        :param new_name: 新的课程名称
+        :param new_location: 新的地点
+        :param new_teacher: 新的教师
+        """
+        course.name = new_name
+        course.location = new_location
+        course.teacher = new_teacher
+        course.save()
+
+    def editMultiWeekCourse(self, course: CourseInstance, new_name: str, new_location: str, new_teacher: str):
+        """
+        修改课程表中的某一门课的名称、地点、教师。此操作会修改所有周数的课程
+        :param course: 课程对象
+        :param new_name: 新的课程名称
+        :param new_location: 新的地点
+        :param new_teacher: 新的教师
+        """
+        CourseInstance.update(name=new_name, location=new_location, teacher=new_teacher).where(
+            CourseInstance.course == course.course, CourseInstance.term_number == course.term_number,
+            CourseInstance.start_time == course.start_time, CourseInstance.end_time == course.end_time,
+            CourseInstance.name == course.name, CourseInstance.day_of_week == course.day_of_week).execute()
+
     def addCourseFromJson(self, course_json: dict, merge_with_existing: bool = False, manual: bool = False):
         """
         从 json 添加课程
         :param course_json: 课程的 json 字典
-        :param term_number: 学期编号，比如 2023-2024-1
         :param merge_with_existing: 如果已存在名称相同的课程，将当前课程视为此课程的实例，而不新建课程
         :param manual: 是否为手动添加的课程
         """

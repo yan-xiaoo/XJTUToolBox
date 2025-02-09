@@ -1,4 +1,4 @@
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsOpacityEffect, QLabel
 from qfluentwidgets import StrongBodyLabel, BodyLabel, qconfig, getFont, isDarkTheme, Theme
 
@@ -9,6 +9,8 @@ from schedule.schedule_database import CourseInstance, CourseStatus
 class ScheduleTableWidget(QWidget):
     LIGHT = "light"
     DARK = "dark"
+
+    clicked = pyqtSignal(CourseInstance)
 
     COLOR_DICTION = {
         LIGHT: {
@@ -82,7 +84,7 @@ class ScheduleTableWidget(QWidget):
         super().leaveEvent(event)
 
     def mouseReleaseEvent(self, a0):
-        pass
+        self.clicked.emit(self.course)
 
     @pyqtSlot(Theme)
     def onThemeChanged(self, _):

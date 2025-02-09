@@ -14,6 +14,7 @@ from qfluentwidgets import FluentIcon as FIF
 from app.components.ScheduleTable import ScheduleTableWidget
 from app.sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from app.sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
+from app.sub_interfaces.LessonDetailDialog import LessonDetailDialog
 from app.threads.HolidayThread import HolidayThread
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
@@ -156,6 +157,8 @@ class ScheduleInterface(ScrollArea):
         self.table_widget.entered.disconnect()
         self.table_widget.leaveEvent = lambda _: None
 
+        self.detailDialog = None
+
         self.vBoxLayout.addWidget(self.commandFrame)
         self.vBoxLayout.addWidget(self.process_widget_ehall)
         self.vBoxLayout.addWidget(self.process_widget_attendance)
@@ -246,6 +249,38 @@ class ScheduleInterface(ScrollArea):
         current = self.weekComboBox.currentIndex()
         if current > 0:
             self.weekComboBox.setCurrentIndex(current - 1)
+
+    @pyqtSlot(CourseInstance)
+    def onLessonDetailClicked(self, course):
+        """
+        课程详情按钮点击事件
+        """
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+        start = self.schedule_service.getStartOfTerm()
+        if start is None:
+            self.error("", self.tr("请先获取课表"), parent=self)
+            return
+        # 更新最新的信息
+        course = CourseInstance.get_by_id(course.id)
+        self.detailDialog = LessonDetailDialog(course, start, self, self)
+        self.detailDialog.rejected.connect(self.onCourseInfoFinished)
+        self.detailDialog.exec()
+
+    @pyqtSlot()
+    def onCourseInfoFinished(self):
+        if self.detailDialog.modified:
+            # 这个写法虽然很奇怪，但是直接调用 loadSchedule 会导致课程表大小变得很小，不知道为什么
+            # 这样做就没有问题
+            self.weekComboBox.setCurrentIndex(self.weekComboBox.currentIndex() + 1)
+            self.weekComboBox.setCurrentIndex(self.weekComboBox.currentIndex() - 1)
+
+    def getSameCourseInOtherWeek(self, course):
+        if self.schedule_service is None:
+            return None
+        else:
+            return self.schedule_service.getSameCourseInOtherWeek(course)
 
     @pyqtSlot()
     def lock(self):
@@ -381,10 +416,13 @@ class ScheduleInterface(ScrollArea):
         for i in range(13):
             for j in range(7):
                 widget = self.table_widget.cellWidget(i, j)
+                if widget is not None:
+                    widget.clicked.disconnect()
                 self.table_widget.removeCellWidget(i, j)
 
         for course in schedule:
             widget = ScheduleTableWidget(course)
+            widget.clicked.connect(self.onLessonDetailClicked)
             # 如果课程的开始时间在第四节课前，说明是上午，放到 start_time - 1 行
             if course.start_time <= 4:
                 self.table_widget.setCellWidget(course.start_time - 1, course.day_of_week - 1, widget)
