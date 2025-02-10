@@ -231,7 +231,7 @@ class LessonCard(HeaderCardWidget):
         self.table.setItem(3, 0, QTableWidgetItem(self.tr("地点")))
         self.table.setItem(3, 1, QTableWidgetItem(self.course.location))
         self.table.setItem(4, 0, QTableWidgetItem(self.tr("上课周")))
-        self.table.setItem(4, 1, QTableWidgetItem(f"{",".join(weeks)}"))
+        self.table.setItem(4, 1, QTableWidgetItem(f"{','.join(weeks)}"))
         self.table.adjustSize()
 
     @pyqtSlot()
