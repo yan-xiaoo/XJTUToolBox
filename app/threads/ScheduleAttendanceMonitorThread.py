@@ -78,5 +78,7 @@ class ScheduleAttendanceMonitorThread(ProcessThread):
         因此这个函数只会在被监视线程暴毙时被调用，但为了防止诡异的问题，还是用标志位来判断
         """
         if not self.monitor_succeeded:
-            self.result.emit(self.monitor_thread.records, self.monitor_thread.water_page)
+            # 如果有结果，说明其是获得结果后才暴毙的，返回结果；如果没有结果，那么就不反悔了
+            if self.monitor_thread.records or self.monitor_thread.water_page:
+                self.result.emit(self.monitor_thread.records, self.monitor_thread.water_page)
         self.can_run = False

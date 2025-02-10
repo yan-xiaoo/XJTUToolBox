@@ -304,8 +304,10 @@ class ScheduleInterface(ScrollArea):
         self.getWeekAttendanceButton.setEnabled(True)
         self.getTablePrimaryButton.setEnabled(True)
         self.getWeekAttendancePrimaryButton.setEnabled(True)
-        self.lastWeekButton.setEnabled(True)
-        self.nextWeekButton.setEnabled(True)
+        if self.week > 1:
+            self.lastWeekButton.setEnabled(True)
+        if self.week < 18:
+            self.nextWeekButton.setEnabled(True)
         self.weekComboBox.setEnabled(True)
         self.process_widget_attendance.setVisible(False)
         self.process_widget_ehall.setVisible(False)
@@ -500,13 +502,14 @@ class ScheduleInterface(ScrollArea):
         elif setting == cfg.AttendanceLoginMethod.NORMAL:
             self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
         else:
-            w = MessageBox(self.tr("获取考勤"), self.tr("您想使用什么方式登录考勤系统？"), self)
-            w.yesButton.setText(self.tr("WebVPN 登录"))
-            w.cancelButton.setText(self.tr("直接登录"))
-            if w.exec():
-                self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
-            else:
-                self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
+            if not self.schedule_attendance_thread.session.has_login:
+                w = MessageBox(self.tr("获取考勤"), self.tr("您想使用什么方式登录考勤系统？"), self)
+                w.yesButton.setText(self.tr("WebVPN 登录"))
+                w.cancelButton.setText(self.tr("直接登录"))
+                if w.exec():
+                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
+                else:
+                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
         self.lock()
         self.process_widget_attendance.setVisible(True)
         self.schedule_attendance_thread.start()

@@ -2,9 +2,9 @@ from datetime import date, timedelta
 
 from PyQt5.QtCore import pyqtProperty, Qt, pyqtSlot
 from PyQt5.QtGui import QFont
-from PyQt5.QtWidgets import QVBoxLayout, QWidget, QLabel, QHBoxLayout, QTableWidgetItem, QHeaderView
+from PyQt5.QtWidgets import QVBoxLayout, QWidget, QLabel, QHBoxLayout, QTableWidgetItem, QHeaderView, QFrame
 from qfluentwidgets import MessageBoxBase, SimpleCardWidget, setFont, FluentStyleSheet, \
-    FluentIcon, TransparentPushButton, TableWidget, ScrollArea, CommandBar, Action, FlyoutViewBase, FlowLayout, \
+    FluentIcon, TransparentPushButton, TableWidget, ScrollArea, FlyoutViewBase, FlowLayout, \
     CheckBox, Flyout, LineEdit, PrimaryPushButton, PushButton
 from qfluentwidgets.common.overload import singledispatchmethod
 from qfluentwidgets.components.widgets.card_widget import CardSeparator
@@ -159,37 +159,40 @@ class LessonCard(HeaderCardWidget):
         self.table.horizontalHeader().setVisible(False)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(TableWidget.NoEditTriggers)
         self.table.setWordWrap(True)
 
         self.viewLayout.addWidget(self.table)
 
-        self.functionBar = CommandBar(self)
-        self.functionBar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.editAction = Action(FluentIcon.EDIT, self.tr("编辑"), self)
-        self.functionBar.addAction(self.editAction)
-        self.deleteAction = Action(FluentIcon.DELETE, self.tr("删除"), self)
-        self.functionBar.addAction(self.deleteAction)
-        self.editAction.triggered.connect(self.startEdit)
+        self.functionFrame = QFrame(self)
+        self.functionFrame.setContentsMargins(0, 0, 0, 0)
+        self.functionLayout = QHBoxLayout(self.functionFrame)
+        self.editButton = TransparentPushButton(FluentIcon.EDIT, self.tr("编辑"), self)
+        self.functionLayout.addWidget(self.editButton)
+        self.deleteButton = TransparentPushButton(FluentIcon.DELETE, self.tr("删除"), self)
+        self.functionLayout.addWidget(self.deleteButton)
+        self.editButton.clicked.connect(self.startEdit)
 
-        self.viewLayout.addWidget(self.functionBar)
+        self.viewLayout.addWidget(self.functionFrame)
 
-        self.confirmBar = CommandBar(self)
-        self.confirmBar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.confirmAction = Action(FluentIcon.ACCEPT, self.tr("确定"), self)
-        self.confirmAction.triggered.connect(self.checkEdit)
+        self.confirmFrame = QFrame(self)
+        self.confirmFrame.setContentsMargins(0, 0, 0, 0)
+        self.confirmLayout = QHBoxLayout(self.confirmFrame)
+        self.confirmButton = TransparentPushButton(FluentIcon.ACCEPT, self.tr("确定"), self)
+        self.confirmButton.clicked.connect(self.checkEdit)
+        self.confirmLayout.addWidget(self.confirmButton)
 
-        self.confirmBar.addAction(self.confirmAction)
-        self.cancelAction = Action(FluentIcon.CLOSE, self.tr("取消"), self)
-        self.cancelAction.triggered.connect(self.cancelEdit)
-        self.confirmBar.addAction(self.cancelAction)
+        self.cancelButton = TransparentPushButton(FluentIcon.CLOSE, self.tr("取消"), self)
+        self.cancelButton.clicked.connect(self.cancelEdit)
+        self.confirmLayout.addWidget(self.cancelButton)
 
-        self.viewLayout.addWidget(self.confirmBar)
+        self.viewLayout.addWidget(self.confirmFrame)
 
         self.loadDataFromCourse()
         self.table.cellClicked.connect(self.onTableWidgetClicked)
 
-        self.confirmBar.setVisible(False)
+        self.confirmFrame.setVisible(False)
         self.table.setMinimumWidth(400)
 
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -234,8 +237,8 @@ class LessonCard(HeaderCardWidget):
     @pyqtSlot()
     def startEdit(self):
         super().startEdit()
-        self.functionBar.setVisible(False)
-        self.confirmBar.setVisible(True)
+        self.functionFrame.setVisible(False)
+        self.confirmFrame.setVisible(True)
 
         self.editable = True
         self.table.setEditTriggers(TableWidget.AllEditTriggers)
@@ -291,7 +294,7 @@ class LessonCard(HeaderCardWidget):
                 self.cancelEdit()
         else:
             self.confirm_flyout = Flyout.make(
-                target=self.confirmBar,
+                target=self.confirmButton,
                 view=ConfirmFlyoutView(),
                 parent=self
             )
@@ -352,8 +355,8 @@ class LessonCard(HeaderCardWidget):
         """
         结束编辑，但不重新加载内容
         """
-        self.functionBar.setVisible(True)
-        self.confirmBar.setVisible(False)
+        self.functionFrame.setVisible(True)
+        self.confirmFrame.setVisible(False)
 
         self.editable = False
         self.headerEdit.setVisible(False)
@@ -363,8 +366,8 @@ class LessonCard(HeaderCardWidget):
     @pyqtSlot()
     def cancelEdit(self):
         super().cancelEdit()
-        self.functionBar.setVisible(True)
-        self.confirmBar.setVisible(False)
+        self.functionFrame.setVisible(True)
+        self.confirmFrame.setVisible(False)
 
         self.editable = False
         self.table.setEditTriggers(TableWidget.NoEditTriggers)
