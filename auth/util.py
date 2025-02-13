@@ -99,13 +99,19 @@ def getOrdinaryUrl(url):
     pro = parts[3]
     key_cph = parts[4]
 
+    if '-' in pro:
+        pro, port = pro.split('-')
+    else:
+        port = ''
+
     if key_cph[:16] == hexlify(iv_).decode('utf-8'):
         print(key_cph[:32])
         return None
     else:
         hostname = getPlaintext(key_cph[32:])
         fold = '/'.join(parts[5:])
-
+        if port:
+            hostname += ':' + port
         return pro + "://" + hostname + '/' + fold
 
 

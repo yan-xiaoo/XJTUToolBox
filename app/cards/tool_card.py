@@ -16,6 +16,7 @@ class ToolCard(ElevatedCardWidget):
 
         self.titleLabel.setObjectName("titleLabel")
         self.contentLabel.setObjectName("contentLabel")
+        self.contentLabel.setWordWrap(True)
 
         StyleSheet.TOOL_CARD.apply(self)
 

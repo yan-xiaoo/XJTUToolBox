@@ -20,6 +20,7 @@ from .sessions.attendance_session import AttendanceSession
 from .sessions.ehall_session import EhallSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
+from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
 from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all
 
 
@@ -72,6 +73,7 @@ class MainWindow(MSFluentWindow):
         self.tool_box_interface = ToolBoxInterface(self, self)
         self.schedule_interface = ScheduleInterface(self)
         self.judge_interface = AutoJudgeInterface(self)
+        self.webvpn_convert_interface = WebVPNConvertInterface(self)
 
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
@@ -94,6 +96,10 @@ class MainWindow(MSFluentWindow):
         card = self.tool_box_interface.addCard(self.judge_interface, FIF.BOOK_SHELF, self.tr("一键评教"),
                                                self.tr("轻松完成每学期的评教问卷"))
         card.setFixedSize(200, 180)
+
+        webvpn_card = self.tool_box_interface.addCard(self.webvpn_convert_interface, FIF.GLOBE, self.tr("WebVPN 网址转换"),
+                                                      self.tr("将 WebVPN 网址转换为可直接访问的网址"))
+        webvpn_card.setFixedSize(210, 180)
 
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
