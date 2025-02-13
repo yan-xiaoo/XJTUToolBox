@@ -1,11 +1,12 @@
 from datetime import date, timedelta
+from typing import Optional
 
-from PyQt5.QtCore import pyqtProperty, Qt, pyqtSlot
+from PyQt5.QtCore import pyqtProperty, Qt, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import QVBoxLayout, QWidget, QLabel, QHBoxLayout, QTableWidgetItem, QHeaderView, QFrame
 from qfluentwidgets import MessageBoxBase, SimpleCardWidget, setFont, FluentStyleSheet, \
     FluentIcon, TransparentPushButton, TableWidget, ScrollArea, FlyoutViewBase, FlowLayout, \
-    CheckBox, Flyout, LineEdit, PrimaryPushButton, PushButton
+    CheckBox, Flyout, LineEdit, PrimaryPushButton, PushButton, BodyLabel
 from qfluentwidgets.common.overload import singledispatchmethod
 from qfluentwidgets.components.widgets.card_widget import CardSeparator
 
@@ -17,7 +18,14 @@ from schedule.xjtu_time import isSummerTime
 
 
 class WeekFlyoutView(FlyoutViewBase):
-    def __init__(self, weeks, parent=None):
+    def __init__(self, weeks, select_week=None, lock_weeks=None, parent=None):
+        """
+        创建一个用于选择周数的浮窗
+        :param weeks: 所有可选择的周数
+        :param select_week: 要强制某周为选择状态，传入该周的数字
+        :param lock_weeks: 要锁定（不允许选择）的周数，传入一个列表
+        :param parent: 父对象
+        """
         super().__init__(parent)
         self.weeks = set(weeks)
         self.weeksLayout = FlowLayout(self)
@@ -32,8 +40,15 @@ class WeekFlyoutView(FlyoutViewBase):
             checkbox.stateChanged.connect(self.onWeekChanged)
             self.weeksLayout.addWidget(checkbox)
             self.checkbox.append(checkbox)
+        if select_week is not None:
+            self.checkbox[select_week - 1].setChecked(True)
+            self.checkbox[select_week - 1].setEnabled(False)
+        if lock_weeks is not None:
+            for week in lock_weeks:
+                self.checkbox[week - 1].setEnabled(False)
+                self.checkbox[week - 1].setToolTip(self.tr("此周已有课程，无法修改"))
 
-    def onWeekChanged(self, state):
+    def onWeekChanged(self, _):
         for i, checkbox in enumerate(self.checkbox):
             if checkbox.isChecked():
                 self.weeks.add(i + 1)
@@ -50,6 +65,25 @@ class ConfirmFlyoutView(FlyoutViewBase):
         self.button_layout.addWidget(self.confirm_all_button)
         self.button_layout.addWidget(self.confirm_one_button)
 
+
+class DeleteFlyoutView(FlyoutViewBase):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.button_layout = QHBoxLayout(self)
+        self.confirm_all_button = PrimaryPushButton(self.tr("删除所有周"), self)
+        self.confirm_one_button = PushButton(self.tr("仅删除本周"), self)
+        self.button_layout.addWidget(self.confirm_all_button)
+        self.button_layout.addWidget(self.confirm_one_button)
+
+
+class DeleteAllFlyoutView(FlyoutViewBase):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.button_layout = QHBoxLayout(self)
+        self.confirm_button = PrimaryPushButton(self.tr("确认删除"), self)
+        self.cancel_button = PushButton(self.tr("取消"), self)
+        self.button_layout.addWidget(self.confirm_button)
+        self.button_layout.addWidget(self.cancel_button)
 
 
 class HeaderCardWidget(SimpleCardWidget):
@@ -117,14 +151,19 @@ class HeaderCardWidget(SimpleCardWidget):
 
 
 class LessonCard(HeaderCardWidget):
-    def __init__(self, course: CourseInstance, start_time: date, service: ScheduleService, ambiguous_time=False, on_edit_trigger=None, parent=None):
+    # 此卡片对应的课程被删除时，会发送的信息
+    courseDeleted = pyqtSignal(CourseInstance)
+
+    def __init__(self, course: CourseInstance, start_time: date, service: ScheduleService, ambiguous_time=False, delete_all=False,
+                 on_edit_trigger=None, parent=None):
         """
         创建一个用于展示课程的卡片
         :param course: 课程对象
-        :param start_time: 学期开始时间
+        :param start_time: 学期开始时间。如果设置 ambiguous_time 为 True，则直接传入 None 即可。
         :param service: schedule_service 的对象
         :param ambiguous_time: 是否使用模糊时间。如果是，则只显示课程开始-结束节次，不显示具体时间。
         如果需要显示具体时间（False），那么 course 的 week 属性不能为 None。
+        :param delete_all: 在删除时，是否默认删除所有周的课程。对于通过「展开」按钮创建的卡片，此选项应当设置为 True，因为此时删除当前周不会起效
         :param on_edit_trigger: 当课程被编辑时的回调函数
         :param parent: 父对象
         """
@@ -152,6 +191,8 @@ class LessonCard(HeaderCardWidget):
         self.weeks_flyout = None
         self.weeks = self.getAllWeeks()
         self.confirm_flyout = None
+        self.delete_flyout = None
+        self.delete_all = delete_all
 
         self.table = TableWidget(self)
         self.table.setColumnCount(2)
@@ -173,6 +214,7 @@ class LessonCard(HeaderCardWidget):
         self.deleteButton = TransparentPushButton(FluentIcon.DELETE, self.tr("删除"), self)
         self.functionLayout.addWidget(self.deleteButton)
         self.editButton.clicked.connect(self.startEdit)
+        self.deleteButton.clicked.connect(self.onDeleteClicked)
 
         self.viewLayout.addWidget(self.functionFrame)
 
@@ -188,6 +230,9 @@ class LessonCard(HeaderCardWidget):
         self.confirmLayout.addWidget(self.cancelButton)
 
         self.viewLayout.addWidget(self.confirmFrame)
+
+        self.other_courses = None
+        self.other_weeks = None
 
         self.loadDataFromCourse()
         self.table.cellClicked.connect(self.onTableWidgetClicked)
@@ -243,6 +288,16 @@ class LessonCard(HeaderCardWidget):
         self.editable = True
         self.table.setEditTriggers(TableWidget.AllEditTriggers)
 
+        # 重新生成其他周课程
+        self.other_courses = self.schedule_service.getOtherCourseInSameTime(self.course)
+        self.other_weeks = []
+        for course in self.other_courses:
+            if isinstance(course.week_numbers, int):
+                self.other_weeks.append(course.week_numbers)
+            else:
+                for one in course.week_numbers.split(","):
+                    self.other_weeks.append(int(one))
+
         if not self.table.isRowHidden(0):
             self.table.item(0, 0).setFlags(Qt.ItemIsEnabled)
             self.table.item(0, 1).setFlags(Qt.ItemIsEnabled)
@@ -260,7 +315,7 @@ class LessonCard(HeaderCardWidget):
             if self.editable:
                 self.weeks_flyout = Flyout.make(
                     target=self.table,
-                    view=WeekFlyoutView(weeks=self.weeks),
+                    view=WeekFlyoutView(weeks=self.weeks, lock_weeks=self.other_weeks, select_week=self.course.week_number),
                     parent=self
                 )
                 self.weeks_flyout.closed.connect(self.onWeekFlyoutClosed)
@@ -332,6 +387,7 @@ class LessonCard(HeaderCardWidget):
         new_location = self.table.item(3, 1).text()
 
         self.schedule_service.editSingleCourse(self.course, new_name, new_location, new_teacher)
+        self.headerLabel.setText(new_name)
         self.confirmWeekEdit()
         self.confirm_flyout.close()
 
@@ -348,8 +404,48 @@ class LessonCard(HeaderCardWidget):
         new_location = self.table.item(3, 1).text()
 
         self.schedule_service.editMultiWeekCourse(self.course, new_name, new_location, new_teacher)
+        self.headerLabel.setText(new_name)
         self.confirmWeekEdit()
         self.confirm_flyout.close()
+
+    @pyqtSlot()
+    def onDeleteClicked(self):
+        if self.delete_all:
+            self.delete_flyout = Flyout.make(
+                target=self.deleteButton,
+                view=DeleteAllFlyoutView(),
+                parent=self
+            )
+            self.delete_flyout.view.confirm_button.clicked.connect(self.confirmAllWeekDelete)
+            self.delete_flyout.view.cancel_button.clicked.connect(self.delete_flyout.close)
+        else:
+            self.delete_flyout = Flyout.make(
+                target=self.deleteButton,
+                view=DeleteFlyoutView(),
+                parent=self
+            )
+            self.delete_flyout.view.confirm_all_button.clicked.connect(self.confirmAllWeekDelete)
+            self.delete_flyout.view.confirm_one_button.clicked.connect(self.confirmOneWeekDelete)
+
+    @pyqtSlot()
+    def confirmOneWeekDelete(self):
+        """
+        删除当前周的课程
+        """
+        self.course.delete_instance(recursive=False)
+        self.finishEdit()
+        self.delete_flyout.close()
+        self.courseDeleted.emit(self.course)
+
+    @pyqtSlot()
+    def confirmAllWeekDelete(self):
+        """
+        删除当前时间段在所有周的课程
+        """
+        self.schedule_service.deleteMultiWeekCourse(self.course)
+        self.finishEdit()
+        self.delete_flyout.close()
+        self.courseDeleted.emit(self.course)
 
     def finishEdit(self):
         """
@@ -375,8 +471,181 @@ class LessonCard(HeaderCardWidget):
         self.loadDataFromCourse()
 
 
+class EmptyLessonCard(HeaderCardWidget):
+    """
+    用于展示空白节次的课程卡片。
+    """
+    # 添加课程后，传递被添加课程在本周的对象
+    # 由于 UI 设计，添加课程时一定会添加本周的周次
+    courseAdded = pyqtSignal(CourseInstance)
+
+    def __init__(self, week, day_of_week, start_time, end_time, service: ScheduleService, parent=None):
+        """
+        创建一个空白的课程卡片
+        :param week: 此卡片表示的周数
+        :param day_of_week: 此卡片表示的星期几
+        :param start_time: 此卡片表示的课程开始时间
+        :param end_time: 此卡片表示的课程结束时间
+        :param service: schedule_service 的对象
+        :param parent: 父对象
+        """
+        super().__init__(parent)
+        # 一般的界面
+        self.on_mouse_release = lambda ev: self.startEdit()
+        self.hintLabel = BodyLabel(self.tr("点击以添加课程"), self)
+        self.hintLabel.setMinimumWidth(400)
+        self.hintLabel.setMinimumHeight(200)
+        self.hintLabel.setAlignment(Qt.AlignCenter)
+        self.hintLabel.mouseReleaseEvent = self.on_mouse_release
+        self.viewLayout.addWidget(self.hintLabel)
+
+        self.headerEdit.setPlaceholderText(self.tr("请输入课程名称"))
+        self.current_week = week
+        self.day_of_week = day_of_week
+        self.start_time = start_time
+        self.end_time = end_time
+
+        # 添加课程的界面
+        self.table = TableWidget(self)
+        self.table.setColumnCount(2)
+        self.table.setRowCount(3)
+        self.table.horizontalHeader().setVisible(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(TableWidget.NoEditTriggers)
+        self.table.setWordWrap(True)
+        self.viewLayout.addWidget(self.table)
+        self.weeks = [week]
+        self.weeks_flyout = None
+
+        self.schedule_service = service
+
+        self.table.setItem(0, 0, QTableWidgetItem(self.tr("教师")))
+        self.table.setItem(0, 1, QTableWidgetItem(""))
+        self.table.setItem(1, 0, QTableWidgetItem(self.tr("地点")))
+        self.table.setItem(1, 1, QTableWidgetItem(""))
+        self.table.setItem(2, 0, QTableWidgetItem(self.tr("上课周")))
+        self.table.setItem(2, 1, QTableWidgetItem(f"{week}"))
+        self.table.adjustSize()
+
+        self.confirmFrame = QFrame(self)
+        self.confirmFrame.setContentsMargins(0, 0, 0, 0)
+        self.confirmLayout = QHBoxLayout(self.confirmFrame)
+        self.confirmButton = TransparentPushButton(FluentIcon.ACCEPT, self.tr("确定"), self)
+        self.confirmButton.clicked.connect(self.checkEdit)
+        self.confirmLayout.addWidget(self.confirmButton)
+
+        self.cancelButton = TransparentPushButton(FluentIcon.CLOSE, self.tr("取消"), self)
+        self.cancelButton.clicked.connect(self.cancelEdit)
+        self.confirmLayout.addWidget(self.cancelButton)
+        self.viewLayout.addWidget(self.confirmFrame)
+
+        self.table.cellClicked.connect(self.onTableWidgetClicked)
+
+        self.other_courses = None
+        self.other_weeks = None
+
+        self.confirmFrame.setVisible(False)
+        self.table.setMinimumWidth(400)
+
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        self.editable = False
+        self.switchTo(False)
+
+    def switchTo(self, editable: bool):
+        self.editable = editable
+        if editable:
+            self.hintLabel.setVisible(False)
+            self.table.setVisible(True)
+            self.confirmFrame.setVisible(True)
+        else:
+            self.hintLabel.setVisible(True)
+            self.table.setVisible(False)
+            self.confirmFrame.setVisible(False)
+
+    @pyqtSlot(int, int)
+    def onTableWidgetClicked(self, row, col):
+        if row == 2 and col == 1:
+            if self.editable:
+                self.weeks_flyout = Flyout.make(
+                    target=self.table,
+                    view=WeekFlyoutView(weeks=self.weeks, select_week=self.current_week, lock_weeks=self.other_weeks),
+                    parent=self
+                )
+                self.weeks_flyout.closed.connect(self.onWeekFlyoutClosed)
+
+    @pyqtSlot()
+    def onWeekFlyoutClosed(self):
+        self.weeks = list(self.weeks_flyout.view.weeks)
+        self.weeks.sort()
+        self.table.item(2, 1).setText(",".join(str(week) for week in self.weeks))
+
+    def startEdit(self):
+        super().startEdit()
+        self.table.setEditTriggers(TableWidget.AllEditTriggers)
+        self.table.item(0, 0).setFlags(Qt.ItemIsEnabled)
+        self.table.item(1, 0).setFlags(Qt.ItemIsEnabled)
+        self.table.item(2, 0).setFlags(Qt.ItemIsEnabled)
+        self.table.item(2, 1).setFlags(Qt.ItemIsEnabled)
+        # 重新获得已有课程的周数
+        self.other_courses = self.schedule_service.getCourseInCertainTime(self.day_of_week, self.start_time, self.end_time)
+        self.other_weeks = [course.week_number for course in self.other_courses]
+        self.switchTo(True)
+
+    def checkEdit(self):
+        if self.headerEdit.text() == "":
+            self.headerEdit.setError(True)
+            self.headerEdit.setFocus()
+            return
+        self.confirmEdit()
+
+    def confirmEdit(self):
+        super().confirmEdit()
+
+        name = self.headerEdit.text()
+        teacher = self.table.item(0, 1).text()
+        location = self.table.item(1, 1).text()
+        self.schedule_service.addCourse(name, self.day_of_week, self.start_time, self.end_time,
+                                        location, teacher, self.weeks)
+        courses = self.schedule_service.getCourseInCertainTime(self.day_of_week, self.start_time, self.end_time)
+        current_course = None
+        for course in courses:
+            if course.week_number == self.current_week:
+                current_course = course
+                break
+
+        self.switchTo(False)
+        self.courseAdded.emit(current_course)
+
+    def cancelEdit(self):
+        super().cancelEdit()
+        self.table.item(0, 1).setText("")
+        self.table.item(1, 1).setText("")
+        self.table.item(2, 1).setText("")
+        self.headerEdit.clear()
+        self.headerLabel.clear()
+        self.weeks = []
+        self.table.setEditTriggers(TableWidget.NoEditTriggers)
+        self.switchTo(False)
+
+
 class LessonDetailDialog(MessageBoxBase):
-    def __init__(self, course: CourseInstance, start_time: date, interface, parent=None):
+    @singledispatchmethod
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    @__init__.register
+    def _(self, course: CourseInstance, start_date: date, interface, parent=None):
+        """
+        创建一个课程详情对话框，且根据输入的课程信息初始化一张课程卡片
+        :param course: 作为初识卡片的课程信息
+        :param start_date: 学期开始时间
+        :param interface: 主界面的对象
+        :param parent: 父对象
+        """
         super().__init__(parent)
 
         self.expanded = False
@@ -393,30 +662,33 @@ class LessonDetailDialog(MessageBoxBase):
         self.view.setStyleSheet("background-color: transparent;")
 
         self.course = course
-        self.start_time = start_time
+        self.start_date = start_date
         self.parent_interface = interface
 
         self.other_courses = self.parent_interface.schedule_service.getOtherCourseInSameTime(self.course)
 
         self.lesson_cards = []
         self.on_edit = lambda: setattr(self, "modified", True)
-        lesson_card = LessonCard(course, start_time, interface.schedule_service, False, self.on_edit, self)
+        lesson_card = LessonCard(course, start_date, interface.schedule_service, False, False,
+                                 self.on_edit, self)
+        lesson_card.courseDeleted.connect(self.onCourseDeleted)
         self.lesson_cards.append(lesson_card)
 
-        if self.other_courses:
-            self.moreButton = TransparentPushButton(FluentIcon.DOWN, self.tr("展开"), self)
-            self.lessButton = TransparentPushButton(FluentIcon.UP, self.tr("收起"), self)
-            self.moreButton.clicked.connect(self.onExpandClicked)
-            self.lessButton.clicked.connect(self.onExpandClicked)
+        self.moreButton = TransparentPushButton(FluentIcon.DOWN, self.tr("展开"), self)
+        self.lessButton = TransparentPushButton(FluentIcon.UP, self.tr("收起"), self)
+        self.moreButton.clicked.connect(self.onExpandClicked)
+        self.lessButton.clicked.connect(self.onExpandClicked)
+        if not self.other_courses:
+            self.moreButton.setVisible(False)
+            self.lessButton.setVisible(False)
 
         self.buttonGroup.setVisible(False)
         self.setClosableOnMaskClicked(True)
 
         self.content_layout.addWidget(lesson_card)
-        if self.other_courses:
-            self.content_layout.addWidget(self.moreButton)
-            self.content_layout.addWidget(self.lessButton)
-            self.lessButton.setVisible(False)
+        self.content_layout.addWidget(self.moreButton)
+        self.content_layout.addWidget(self.lessButton)
+        self.lessButton.setVisible(False)
 
         self.content.setWidget(self.view)
         self.content.setWidgetResizable(True)
@@ -425,6 +697,66 @@ class LessonDetailDialog(MessageBoxBase):
         self.viewLayout.setSpacing(0)
         self.viewLayout.setContentsMargins(12, 12, 12, 12)
 
+        accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
+
+    @__init__.register
+    def _(self, week: int, day_of_week: int, start_time: int, end_time: int, start_date: Optional[date], interface, parent=None):
+        """
+        创建一个课程详情对话框，且包含一张空白的课程卡片
+        :param week: 对话框表示第几周的课程
+        :param day_of_week: 对话框表示星期几的课程
+        :param start_time: 对话框表示的课程开始时间
+        :param end_time: 对话框表示的课程结束时间
+        :param start_date: 学期开始时间，可以为空
+        :param interface: 主界面的对象
+        :param parent: 父对象
+        """
+        super().__init__(parent)
+
+        self.expanded = False
+        self.all_lessons_created = False
+        self.modified = False
+
+        self.content = ScrollArea(self)
+        self.view = QWidget(self.content)
+        self.content_layout = QVBoxLayout(self.view)
+        self.content.setStyleSheet("border: none;background-color: transparent;")
+        self.view.setStyleSheet("background-color: transparent;")
+
+        self.parent_interface = interface
+        self.start_date = start_date
+
+        self.lesson_cards = []
+        self.on_edit = lambda: setattr(self, "modified", True)
+        lesson_card = EmptyLessonCard(week, day_of_week, start_time, end_time, self.parent_interface.schedule_service, self)
+        self.lesson_cards.append(lesson_card)
+
+        self.other_courses = self.parent_interface.schedule_service.getCourseGroupInCertainTime(day_of_week, start_time, end_time)
+
+        self.moreButton = TransparentPushButton(FluentIcon.DOWN, self.tr("展开"), self)
+        self.lessButton = TransparentPushButton(FluentIcon.UP, self.tr("收起"), self)
+        self.moreButton.clicked.connect(self.onExpandClicked)
+        self.lessButton.clicked.connect(self.onExpandClicked)
+        if not self.other_courses:
+            self.moreButton.setVisible(False)
+            self.lessButton.setVisible(False)
+
+        self.buttonGroup.setVisible(False)
+        self.setClosableOnMaskClicked(True)
+
+        self.content_layout.addWidget(lesson_card)
+        self.content_layout.addWidget(self.moreButton)
+        self.content_layout.addWidget(self.lessButton)
+        self.lessButton.setVisible(False)
+
+        self.content.setWidget(self.view)
+        self.content.setWidgetResizable(True)
+
+        self.viewLayout.addWidget(self.content)
+        self.viewLayout.setSpacing(0)
+        self.viewLayout.setContentsMargins(12, 12, 12, 12)
+
+        lesson_card.courseAdded.connect(self.onCourseAdded)
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
     @pyqtSlot()
@@ -437,8 +769,9 @@ class LessonDetailDialog(MessageBoxBase):
                 self.content_layout.removeWidget(self.moreButton)
                 self.content_layout.removeWidget(self.lessButton)
                 for course in self.other_courses:
-                    lesson_card = LessonCard(course, self.start_time, self.parent_interface.schedule_service,
-                                             True, self.on_edit, self)
+                    lesson_card = LessonCard(course, self.start_date, self.parent_interface.schedule_service,
+                                             True, True, self.on_edit, self)
+                    lesson_card.courseDeleted.connect(self.onCourseDeleted)
                     self.lesson_cards.append(lesson_card)
                     self.content_layout.addWidget(lesson_card)
                 self.all_lessons_created = True
@@ -459,3 +792,47 @@ class LessonDetailDialog(MessageBoxBase):
 
     def __del__(self):
         accounts.currentAccountChanged.disconnect(self.onCurrentAccountChanged)
+
+    @pyqtSlot(CourseInstance)
+    def onCourseAdded(self, course):
+        card = self.lesson_cards.pop(0)
+        card.setVisible(False)
+        lesson_card = LessonCard(course, self.start_date, self.parent_interface.schedule_service, False,
+                                 False, self.on_edit, self)
+        lesson_card.courseDeleted.connect(self.onCourseDeleted)
+        self.lesson_cards.append(lesson_card)
+        self.content_layout.insertWidget(1, lesson_card)
+        self.lesson_cards[0].setVisible(True)
+        self.modified = True
+
+    @pyqtSlot(CourseInstance)
+    def onCourseDeleted(self, course):
+        card_number = -1
+        for card in self.lesson_cards:
+            card_number += 1
+            if hasattr(card, "course") and self.checkSameCourse(card.course, course):
+                card.setVisible(False)
+                self.lesson_cards.remove(card)
+                self.content_layout.removeWidget(card)
+                break
+
+        self.modified = True
+        if card_number == 0:
+            # 如果删除了第一张卡片，那么放置一张空白课程卡
+            lesson_card = EmptyLessonCard(course.week_number, course.day_of_week, course.start_time, course.end_time, self.parent_interface.schedule_service, self)
+            self.lesson_cards.insert(0, lesson_card)
+            self.content_layout.insertWidget(1, lesson_card)
+            lesson_card.setVisible(True)
+        # 重新获得其他课程列表
+        if hasattr(self, "course"):
+            self.other_courses = self.parent_interface.schedule_service.getOtherCourseInSameTime(self.course)
+        else:
+            self.other_courses = self.parent_interface.schedule_service.getCourseGroupInCertainTime(course.day_of_week, course.start_time, course.end_time)
+        if len(self.other_courses) == 0:
+            self.expanded = False
+            self.moreButton.setVisible(False)
+            self.lessButton.setVisible(False)
+
+    def checkSameCourse(self, course1, course2):
+        return (course1.name == course2.name and course1.start_time == course2.start_time and course1.end_time == course2.end_time
+                and course1.day_of_week == course2.day_of_week and course1.term_number == course2.term_number)

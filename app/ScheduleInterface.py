@@ -14,6 +14,7 @@ from qfluentwidgets import FluentIcon as FIF
 from app.components.ScheduleTable import ScheduleTableWidget
 from app.sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from app.sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
+from app.sub_interfaces.LessonConflictDialog import LessonConflictDialog
 from app.sub_interfaces.LessonDetailDialog import LessonDetailDialog
 from app.threads.HolidayThread import HolidayThread
 from app.threads.ProcessWidget import ProcessWidget
@@ -128,6 +129,10 @@ class ScheduleInterface(ScrollArea):
         self.exportAction = Action(FIF.SHARE, self.tr("导出 ics..."))
         self.moreMenu.addAction(self.exportAction)
         self.exportAction.triggered.connect(self.onExportClicked)
+        # 清空课程菜单项
+        self.clearAction = Action(FIF.CLOSE, self.tr("清空课程..."))
+        self.moreMenu.addAction(self.clearAction)
+        self.clearAction.triggered.connect(self.onClearClicked)
 
         self.stateToolTip = None
         self._export_path = None
@@ -156,6 +161,8 @@ class ScheduleInterface(ScrollArea):
         # 去除悬浮时高亮一行的效果，否则和合并的单元格放在一起很难看
         self.table_widget.entered.disconnect()
         self.table_widget.leaveEvent = lambda _: None
+
+        self.table_widget.cellClicked.connect(self.onCellClicked)
 
         self.detailDialog = None
 
@@ -267,6 +274,26 @@ class ScheduleInterface(ScrollArea):
         self.detailDialog = LessonDetailDialog(course, start, self, self)
         self.detailDialog.rejected.connect(self.onCourseInfoFinished)
         self.detailDialog.exec()
+
+    @pyqtSlot(int, int)
+    def onCellClicked(self, row, column):
+        cell_widget = self.table_widget.cellWidget(row, column)
+        # 忽略午休和晚休的点击
+        if row == 4 or row == 9 or row == 12:
+            return
+        if cell_widget is not None:
+            return
+        else:
+            if row < 4:
+                start_time = row + 1
+            elif row < 9:
+                start_time = row
+            else:
+                start_time = row - 1
+            start_date = self.schedule_service.getStartOfTerm()
+            self.detailDialog = LessonDetailDialog(self.week, column + 1, start_time, start_time + 1, start_date, self, self)
+            self.detailDialog.rejected.connect(self.onCourseInfoFinished)
+            self.detailDialog.exec()
 
     @pyqtSlot()
     def onCourseInfoFinished(self):
@@ -464,7 +491,7 @@ class ScheduleInterface(ScrollArea):
             self.lock()
             self.schedule_thread.start()
         else:
-            w = MessageBox(self.tr("获取课表"), self.tr("获取课表后，所有非手动添加的课程将会清空，是否继续？"), self)
+            w = MessageBox(self.tr("获取课表"), self.tr("获取课表后，所有非手动添加的课程及其考勤状态将会清空，是否继续？"), self)
             w.yesButton.setText(self.tr("确定"))
             w.cancelButton.setText(self.tr("取消"))
             if w.exec():
@@ -524,6 +551,21 @@ class ScheduleInterface(ScrollArea):
         w = ChangeTermDialog(self)
         if w.exec():
             self.schedule_service.setCurrentTerm(w.term_number)
+            self.loadSchedule()
+
+    @pyqtSlot()
+    def onClearClicked(self):
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+
+        w = MessageBox(self.tr("清空课程"), self.tr("是否清空本学期所有的课程及其考勤记录？"), self)
+        w.yesButton.setText(self.tr("确定"))
+        w.cancelButton.setText(self.tr("取消"))
+        if w.exec():
+            self.schedule_service.clearAllCourses()
+            self.setTablePrimary(True)
+            self.setAttendancePrimary(False)
             self.loadSchedule()
 
     @pyqtSlot()
@@ -626,14 +668,71 @@ class ScheduleInterface(ScrollArea):
 
         self.success(self.tr("成功"), self.tr("导出日历成功"), parent=self)
 
+    def checkCourse(self, course1, course2):
+        return course1.day_of_week == course2.day_of_week and course1.start_time == course2.start_time and course1.end_time == course2.end_time\
+               and course1.name == course2.name
+
     @pyqtSlot(dict)
     def onReceiveSchedule(self, schedule: dict):
         # 清除获取的新课表所在学期的所有非手动添加的课程
         self.schedule_service.setTermInfo(schedule["term_number"], schedule["start_date"], True)
         self.schedule_service.clearNonManualCourses()
 
+        conflicts = []
+        new_courses = []
         for lesson in schedule["lessons"]:
-            self.schedule_service.addCourseFromJson(lesson, merge_with_existing=True)
+            new_courses.append(self.schedule_service.getCourseGroupFromJson(lesson, manual=False))
+
+        for one_course in new_courses:
+            old_course = self.schedule_service.getCourseGroupInCertainTime(one_course.day_of_week, one_course.start_time,
+                                                                           one_course.end_time, one_course.term_number)
+            if old_course:
+                old_course = list(old_course)[0]
+                if isinstance(old_course.week_numbers, int):
+                    old_course.week_numbers = [old_course.week_numbers]
+                else:
+                    old_course.week_numbers = old_course.week_numbers.split(",")
+                    old_course.week_numbers = [int(i) for i in old_course.week_numbers]
+
+                for week in old_course.week_numbers[:]:
+                    if week not in one_course.week_numbers:
+                        old_course.week_numbers.remove(week)
+
+                if old_course.week_numbers:
+                    # 左侧为新的课程，右侧为已有的冲突课程
+                    conflicts.append((one_course, old_course))
+
+        if conflicts:
+            conflict_dialog = LessonConflictDialog(conflicts, self)
+            if conflict_dialog.exec():
+                for index, one_result in enumerate(conflict_dialog.selection):
+                    if one_result:
+                        # 删除已有的课程
+                        self.schedule_service.deleteCourseFromGroup(conflicts[index][1])
+                    else:
+                        new_course = None
+                        for course in new_courses:
+                            if self.checkCourse(course, conflicts[index][0]):
+                                new_course = course
+                                break
+                        for one_week in conflicts[index][1].week_numbers:
+                            new_course.week_numbers.remove(one_week)
+                for course in new_courses:
+                    if not course.week_numbers:
+                        continue
+                    course.manual = 0
+                    self.schedule_service.addCourseFromGroup(course, merge_with_existing=True)
+
+                self.setTablePrimary(False)
+                self.setAttendancePrimary(True)
+                self.loadSchedule()
+            else:
+                # 取消合并，那么就不添加新获取的课程了
+                return
+
+        else:
+            for lesson in schedule["lessons"]:
+                self.schedule_service.addCourseFromJson(lesson, merge_with_existing=True, manual=False)
 
         self.setTablePrimary(False)
         self.setAttendancePrimary(True)

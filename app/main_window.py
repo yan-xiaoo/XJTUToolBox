@@ -121,6 +121,7 @@ class MainWindow(MSFluentWindow):
         box.yesSignal.connect(
             lambda: QApplication.clipboard().setText(tracebackString)
         )
+        box.setClosableOnMaskClicked(True)
         box.exec()
         return sys.__excepthook__(ty, value, _traceback)
 
