@@ -42,7 +42,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox_windows.zip
+          name: XJTUToolbox-windows.zip
           path: ./dist/XJTUToolbox-windows.zip
       - name: Archive(macOS)
         if: runner.os == 'macOS'
@@ -56,17 +56,15 @@ jobs:
         with:
           name: XJTUToolbox-macOS-${{ runner.arch }}.zip
           path: ./dist/XJTUToolbox-macOS-*.zip
-      - name: Archive(Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Cleanup Folder(windows)
+        if: runner.os == 'Windows'
         run: |
-          ls dist/
-          tar -czvf ./dist/XJTUToolbox_ubuntu.tar.gz ./dist/XJTUToolbox
-      - name: Upload Artifacts(Ubuntu)
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: XJTUToolbox_ubuntu.tar.gz
-          path: ./dist/XJTUToolbox_ubuntu.tar.gz
+          Get-ChildItem -Path "dist" -Exclude "XJTUToolbox-windows.zip" | Remove-Item -Force -Recurse
+      - name: Cleanup Folder(macOS)
+        if: runner.os == 'macOS'
+        run: |
+          shopt -s extglob
+          rm -rf ./dist/!(XJTUToolbox-macOS-*.zip)
       - name: Prerelease app
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
