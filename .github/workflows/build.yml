@@ -14,7 +14,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: 'ubuntu-20.04'
           - os: 'windows-latest'
           - os: 'macos-13'
           - os: 'macos-latest'
@@ -68,3 +67,12 @@ jobs:
         with:
           name: XJTUToolbox_ubuntu.tar.gz
           path: ./dist/XJTUToolbox_ubuntu.tar.gz
+      - name: Prerelease app
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: XJTUToolbox ${{ github.ref_name }}
+          prerelease: true
+          files: "./dist/**"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,5 +1,5 @@
 name: 反馈问题
-description: 反馈问题
+description: 使用程序时遇到了问题
 title: "[Bug]: "
 labels: ["bug"]
 
@@ -13,7 +13,7 @@ body:
   - type: checkboxes
     id: checklist
     attributes:
-      label: 请先确认以下事项：
+      label: 请确保您已阅读注意事项，并勾选下方的确认框。
       options:
         - label: 我已仔细阅读了 [README](https://github.com/yan-xiaoo/XJTUToolbox#readme)
           required: true
