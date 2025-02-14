@@ -1,4 +1,6 @@
 import os
+
+from packaging.version import parse
 from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme, \
     EnumSerializer
 from enum import Enum
@@ -33,6 +35,20 @@ class Config(QConfig):
                                                          [AttendanceLoginMethod.NONE, AttendanceLoginMethod.NORMAL,
                                                           AttendanceLoginMethod.WEBVPN]),
                                                      EnumSerializer(AttendanceLoginMethod))
+    checkUpdateAtStartTime = OptionsConfigItem("Settings", "check_update_at_start_time",
+                                               False, OptionsValidator([True, False]), BooleanSerializer())
+    prereleaseEnable = OptionsConfigItem("Settings", "prerelease_enable",
+                                         False, OptionsValidator([True, False]), BooleanSerializer())
+
+    def __init__(self):
+        super().__init__()
+
+        try:
+            with open("./assets/version.txt", "r", encoding="utf-8") as f:
+                self.version = parse(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            # 找不到版本文件或者文件错误的话，通过设置一个不可能的版本号来禁止更新
+            self.version = parse("99.99.99")
 
 
 DEFAULT_CONFIG_PATH = os.path.join(DATA_DIRECTORY, "config.json")

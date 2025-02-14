@@ -6,7 +6,8 @@ import sys
 from PyQt5.QtCore import pyqtSlot, QUrl, Qt
 from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QApplication
-from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox
+from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox, InfoBadgePosition, \
+    InfoBadge
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import NavigationItemPosition, isDarkTheme
 
@@ -21,6 +22,7 @@ from .sessions.ehall_session import EhallSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
+from .threads.UpdateThread import UpdateThread, UpdateStatus
 from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all
 
 
@@ -48,6 +50,7 @@ class MainWindow(MSFluentWindow):
         cfg.themeChanged.connect(self.on_theme_changed)
 
         sys.excepthook = self.catchExceptions
+        self.setting_badge = None
 
         if migrate_all():
             box = MessageBox("需要重启",
@@ -57,6 +60,13 @@ class MainWindow(MSFluentWindow):
             box.cancelButton.setText(self.tr("关闭"))
             box.yesSignal.connect(lambda: sys.exit(0))
             box.exec()
+
+        self.setting_interface.updateClicked.connect(self.on_setting_button_clicked)
+        if cfg.checkUpdateAtStartTime.value:
+            self.update_thread = UpdateThread()
+            self.update_thread.updateSignal.connect(self.on_update_check)
+            self.update_thread.updateSignal.connect(self.setting_interface.onUpdateCheck)
+            self.update_thread.start()
 
     def initWindow(self):
         self.setWindowTitle("仙交百宝箱")
@@ -89,8 +99,8 @@ class MainWindow(MSFluentWindow):
                                            NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.account_interface, FIF.EDUCATION, self.tr("账户"),
                              position=NavigationItemPosition.BOTTOM)
-        self.addSubInterface(self.setting_interface, FIF.SETTING, self.tr("设置"),
-                             position=NavigationItemPosition.BOTTOM)
+        self.settingButton = self.addSubInterface(self.setting_interface, FIF.SETTING, self.tr("设置"),
+                                                  position=NavigationItemPosition.BOTTOM)
 
         # 添加评教界面作为工具箱界面的卡片
         card = self.tool_box_interface.addCard(self.judge_interface, FIF.BOOK_SHELF, self.tr("一键评教"),
@@ -137,3 +147,14 @@ class MainWindow(MSFluentWindow):
             self.setWindowIcon(self.dark_icon)
         else:
             self.setWindowIcon(self.light_icon)
+
+    @pyqtSlot(UpdateStatus)
+    def on_update_check(self, status: UpdateStatus):
+        if status == UpdateStatus.UPDATE_EXE_AVAILABLE or status == UpdateStatus.UPDATE_AVAILABLE:
+            self.setting_badge = InfoBadge.warning(1, parent=self.settingButton.parent(),
+                                                   target=self.settingButton, position=InfoBadgePosition.NAVIGATION_ITEM)
+
+    @pyqtSlot()
+    def on_setting_button_clicked(self):
+        if self.setting_badge:
+            self.setting_badge.close()

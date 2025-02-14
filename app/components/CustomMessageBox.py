@@ -1,6 +1,39 @@
-from PyQt5.QtCore import Qt, pyqtSlot
-from PyQt5.QtGui import QColor
-from qfluentwidgets import MessageBoxBase, SubtitleLabel, BodyLabel, LineEdit, CaptionLabel
+from PyQt5.QtCore import Qt, QUrl, pyqtSlot
+from PyQt5.QtGui import QDesktopServices, QColor
+from qfluentwidgets import BodyLabel, FluentStyleSheet, MessageBoxBase, SubtitleLabel, LineEdit, \
+    CaptionLabel
+
+
+class MessageBoxHtml(MessageBoxBase):
+    def __init__(self, title: str, content: str, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel(title, self)
+        self.contentLabel = BodyLabel(content, parent)
+        self.contentLabel.setObjectName("contentLabel")
+        self.contentLabel.setOpenExternalLinks(True)
+        self.contentLabel.linkActivated.connect(self.open_url)
+        self.contentLabel.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.contentLabel.setWordWrap(True)
+
+        FluentStyleSheet.DIALOG.apply(self.contentLabel)
+
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.contentLabel)
+
+    @pyqtSlot(str)
+    def open_url(self, url):
+        QDesktopServices.openUrl(QUrl(url))
+
+
+class MessageBoxUpdate(MessageBoxHtml):
+    def __init__(self, title: str, content: str, can_download: bool = True, parent=None):
+        super().__init__(title, content, parent)
+
+        if can_download:
+            self.yesButton.setText(self.tr('下载'))
+        else:
+            self.yesButton.setText(self.tr('前往更新'))
+        self.cancelButton.setText(self.tr('好的'))
 
 
 class ConfirmBox(MessageBoxBase):

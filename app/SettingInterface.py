@@ -1,13 +1,16 @@
-from PyQt5.QtCore import pyqtSlot, QUrlQuery, QUrl
+from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
-    setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox
+    setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
+    InfoBadge
 from qfluentwidgets import FluentIcon as FIF
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtGui import QColor, QDesktopServices
 
-from .components.ConfirmBox import ConfirmBox
+from .cards.custom_switch_card import CustomSwitchSettingCard
+from .components.CustomMessageBox import ConfirmBox
+from .threads.UpdateThread import checkUpdate, UpdateStatus
 from .utils.config import cfg
-from .utils import accounts, DEFAULT_CONFIG_PATH, LOG_DIRECTORY
+from .utils import accounts, LOG_DIRECTORY
 from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
 from .sub_interfaces.EncryptDialog import EncryptDialog, DecryptDialog
@@ -15,6 +18,8 @@ from .sub_interfaces.EncryptDialog import EncryptDialog, DecryptDialog
 
 class SettingInterface(ScrollArea):
     """设置界面"""
+    # 当自身的「检查更新」按钮被点击时，发出此信号，用于消除主界面的提醒元素
+    updateClicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -76,6 +81,27 @@ class SettingInterface(ScrollArea):
 
         # 关于组
         self.aboutGroup = SettingCardGroup(self.tr("关于"), self.view)
+
+        self.updateOnStartCard = CustomSwitchSettingCard(
+            FIF.UPDATE,
+            self.tr("启动时检查更新"),
+            self.tr("新版本将包含更多功能且更加稳定"),
+            cfg.checkUpdateAtStartTime,
+            self.aboutGroup
+        )
+        self.updateCard = PrimaryPushSettingCard(
+            self.tr("检查更新"),
+            FIF.INFO,
+            self.tr("关于"),
+            f"{self.tr('当前版本')} {cfg.version}",
+        )
+        self.prereleaseCard = CustomSwitchSettingCard(
+            FIF.CLOUD,
+            self.tr("获取预发布版本"),
+            self.tr("更新到可用的预发布版本"),
+            cfg.prereleaseEnable,
+            self.aboutGroup
+        )
         self.feedbackCard = PrimaryPushSettingCard(
             self.tr("提供反馈"),
             FIF.FEEDBACK,
@@ -93,6 +119,9 @@ class SettingInterface(ScrollArea):
 
         self.aboutGroup.addSettingCard(self.feedbackCard)
         self.aboutGroup.addSettingCard(self.logCard)
+        self.aboutGroup.addSettingCard(self.updateOnStartCard)
+        self.aboutGroup.addSettingCard(self.prereleaseCard)
+        self.aboutGroup.addSettingCard(self.updateCard)
 
         # 添加设置组到布局
         self.expandLayout.addWidget(self.accountGroup)
@@ -104,6 +133,8 @@ class SettingInterface(ScrollArea):
         self.expandLayout.setContentsMargins(36, 10, 36, 0)
 
         StyleSheet.SETTING_INTERFACE.apply(self)
+        # 更新小圆点
+        self.update_badge = None
 
         # 连接信号-槽
         self.themeCard.comboBox.currentIndexChanged.connect(lambda: setTheme(cfg.get(cfg.themeMode), lazy=True))
@@ -114,6 +145,7 @@ class SettingInterface(ScrollArea):
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
         self.clearCard.clicked.connect(self._onClearAccountsClicked)
+        self.updateCard.clicked.connect(self.onUpdateClicked)
         self.feedbackCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox/issues")))
         self.logCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("file:///" + LOG_DIRECTORY)))
 
@@ -171,3 +203,18 @@ class SettingInterface(ScrollArea):
         if w.exec():
             accounts.clear()
             InfoBar.success(title='', content="清除账户成功", parent=self)
+
+    @pyqtSlot(UpdateStatus)
+    def onUpdateCheck(self, status):
+        if status == UpdateStatus.UPDATE_EXE_AVAILABLE or status == UpdateStatus.UPDATE_AVAILABLE:
+            self.update_badge = InfoBadge.warning(1, parent=self.updateCard, target=self.updateCard.button,
+                                                  position=InfoBadgePosition.TOP_RIGHT)
+
+    @pyqtSlot()
+    def onUpdateClicked(self):
+        if self.update_badge:
+            self.update_badge.close()
+            self.update_badge = None
+
+        self.updateClicked.emit()
+        checkUpdate(self)
