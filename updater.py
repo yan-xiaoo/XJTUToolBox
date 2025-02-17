@@ -237,6 +237,12 @@ class Updater:
         self.cover_folder()
         self.cleanup()
         input("按回车键退出")
+        if platform.system() == "Windows":
+            # 尝试再次启动新程序
+            try:
+                subprocess.Popen(["./XJTUToolbox.exe"], creationflags=subprocess.DETACHED_PROCESS)
+            except OSError:
+                pass
 
 
 def check_temp_dir_and_run():
@@ -246,8 +252,8 @@ def check_temp_dir_and_run():
         sys.exit(1)
 
     system = platform.system()
-    if system != "Windows" and system != "Darwin":
-        print("更新程序仅支持 Windows 和 macOS")
+    if system != "Windows":
+        print("更新程序仅支持 Windows 系统")
         sys.exit(1)
 
     temp_path = os.path.abspath("./temp")

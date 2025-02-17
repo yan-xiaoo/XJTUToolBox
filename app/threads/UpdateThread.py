@@ -132,8 +132,8 @@ def checkUpdate(self, timeout=5):
                 box.cancelButton.setVisible(False)
                 if box.exec():
                     file_path = self.download_thread.download_file_path
-                    source_file = os.path.abspath("./XJTUToolbox Updater.exe")
-                    subprocess.Popen([source_file, file_path], creationflags=subprocess.DETACHED_PROCESS)
+                    source_file = os.path.abspath("../XJTUToolbox Updater.exe")
+                    subprocess.Popen([source_file, file_path], creationflags=subprocess.DETACHED_PROCESS, cwd="../")
                     sys.exit(0)
             elif system == "Darwin":
                 box = MessageBox(
