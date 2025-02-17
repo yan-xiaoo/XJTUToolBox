@@ -33,6 +33,9 @@ jobs:
       - name: Create Executable
         run: |
           pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" app.py
+      - name: Create Updater(Windows)
+        run: |
+          pyinstaller -F --distpath ./dist/XJTUToolbox -n "XJTUToolbox Updater" updater.py -y
       - name: Archive(windows)
         if: runner.os == 'Windows'
         run: |

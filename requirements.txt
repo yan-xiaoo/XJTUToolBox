@@ -8,3 +8,6 @@ peewee~=3.17.8
 icalendar~=6.1.0
 packaging~=24.2
 Markdown~=3.7
+colorama~=0.4.6
+psutil~=7.0.0
+tqdm~=4.67.1

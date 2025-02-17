@@ -1,9 +1,9 @@
 # coding:utf-8
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget, QHBoxLayout
+from PyQt5.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
-from qfluentwidgets import IconWidget, TextWrap, SingleDirectionScrollArea, isDarkTheme, FluentIconBase, FlowLayout
+from qfluentwidgets import IconWidget, TextWrap, ScrollArea, isDarkTheme, FluentIconBase, FlowLayout
 from ..utils.style_sheet import StyleSheet
 
 
@@ -85,11 +85,11 @@ class LinkCard(QFrame):
         self.cardClicked.emit()
 
 
-class LinkCardView(SingleDirectionScrollArea):
+class LinkCardView(ScrollArea):
     """ Link card view """
 
     def __init__(self, parent=None):
-        super().__init__(parent, Qt.Horizontal)
+        super().__init__(parent)
         self.view = QWidget(self)
         self.flowLayout = FlowLayout(self.view)
 
@@ -99,7 +99,6 @@ class LinkCardView(SingleDirectionScrollArea):
 
         self.setWidget(self.view)
         self.setWidgetResizable(True)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.view.setObjectName('view')

@@ -216,5 +216,7 @@ class SettingInterface(ScrollArea):
             self.update_badge.close()
             self.update_badge = None
 
+        self.bar = InfoBar.info(self.tr("正在检查更新"), self.tr("正在检查更新，请稍后"), parent=self)
+        self.bar.show()
         self.updateClicked.emit()
         checkUpdate(self)
