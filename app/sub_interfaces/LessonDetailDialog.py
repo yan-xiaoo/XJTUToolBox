@@ -656,6 +656,7 @@ class LessonDetailDialog(MessageBoxBase):
         self.modified = False
 
         self.content = ScrollArea(self)
+        self.content.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view = QWidget(self.content)
         self.content_layout = QVBoxLayout(self.view)
         self.content.setStyleSheet("border: none;background-color: transparent;")
@@ -718,6 +719,7 @@ class LessonDetailDialog(MessageBoxBase):
         self.modified = False
 
         self.content = ScrollArea(self)
+        self.content.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view = QWidget(self.content)
         self.content_layout = QVBoxLayout(self.view)
         self.content.setStyleSheet("border: none;background-color: transparent;")

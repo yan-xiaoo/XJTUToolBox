@@ -1,3 +1,4 @@
+import platform
 from traceback import format_exception
 from types import TracebackType
 from typing import Type
@@ -143,10 +144,13 @@ class MainWindow(MSFluentWindow):
 
     @pyqtSlot()
     def on_theme_changed(self):
-        if isDarkTheme():
-            self.setWindowIcon(self.dark_icon)
+        if platform.system() == "Darwin":
+            if isDarkTheme():
+                self.setWindowIcon(self.dark_icon)
+            else:
+                self.setWindowIcon(self.light_icon)
         else:
-            self.setWindowIcon(self.light_icon)
+            self.setWindowIcon(QIcon("assets/icons/main_icon.ico"))
 
     @pyqtSlot(UpdateStatus)
     def on_update_check(self, status: UpdateStatus):
