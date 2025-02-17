@@ -104,7 +104,6 @@ class Updater:
         if platform.system() == "Windows":
             version_path = "_internal/assets/version.txt"
         elif platform.system() == "Darwin":
-            # TODO
             version_path = "_internal/assets/version.txt"
         else:
             version_path = "_internal/assets/version.txt"
