@@ -157,6 +157,17 @@ def checkUpdate(self, timeout=5):
                 parent=self
             )
 
+    def handle_thread_error(title, content):
+        """处理线程错误。"""
+        InfoBar.error(
+            title=title,
+            content=content,
+            orient=Qt.Horizontal,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3000,
+            parent=self
+        )
+
     def handle_update(status):
         if status == UpdateStatus.UPDATE_EXE_AVAILABLE:
             # 显示更新对话框
@@ -171,6 +182,7 @@ def checkUpdate(self, timeout=5):
                 self.bar_widget = ProgressInfoBar(title="", content="正在下载更新...", parent=self, position=InfoBarPosition.BOTTOM_RIGHT)
                 self.download_thread = DownloadUpdateThread(self.update_thread.asset_url, total_size=self.update_thread.total_size)
                 self.bar_widget.connectToThread(self.download_thread)
+                self.download_thread.error.connect(handle_thread_error)
                 self.download_thread.start()
                 self.download_thread.hasFinished.connect(handle_cover)
                 self.bar_widget.show()

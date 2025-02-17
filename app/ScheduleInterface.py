@@ -74,6 +74,7 @@ class ScheduleInterface(ScrollArea):
 
         self.holiday_thread = HolidayThread()
         self.holiday_thread.result.connect(self.onReceiveHoliday)
+        self.holiday_thread.error.connect(self.onHolidayError)
 
         self.commandFrame = QFrame(self)
         self.frameLayout = QHBoxLayout(self.commandFrame)
@@ -277,6 +278,9 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot(int, int)
     def onCellClicked(self, row, column):
+        if self.schedule_service is None:
+            return
+
         cell_widget = self.table_widget.cellWidget(row, column)
         # 忽略午休和晚休的点击
         if row == 4 or row == 9 or row == 12:
@@ -322,6 +326,10 @@ class ScheduleInterface(ScrollArea):
         self.nextWeekButton.setEnabled(False)
         self.weekComboBox.setEnabled(False)
 
+        self.changeTermAction.setEnabled(False)
+        self.exportAction.setEnabled(False)
+        self.clearAction.setEnabled(False)
+
     @pyqtSlot()
     def unlock(self):
         """
@@ -338,6 +346,10 @@ class ScheduleInterface(ScrollArea):
         self.weekComboBox.setEnabled(True)
         self.process_widget_attendance.setVisible(False)
         self.process_widget_ehall.setVisible(False)
+
+        self.changeTermAction.setEnabled(True)
+        self.exportAction.setEnabled(True)
+        self.clearAction.setEnabled(True)
 
     def success(self, title, msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=None):
         """
@@ -604,6 +616,13 @@ class ScheduleInterface(ScrollArea):
             ignore_data = []
 
         self.export(path, ignore_data)
+
+    @pyqtSlot(str, str)
+    def onHolidayError(self, title, msg):
+        if self.stateToolTip is not None:
+            self.stateToolTip.setState(False)
+            self.stateToolTip.setContent(msg)
+            self.stateToolTip = None
 
     @pyqtSlot(list)
     def onReceiveHoliday(self, data: list):

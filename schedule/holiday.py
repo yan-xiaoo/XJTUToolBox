@@ -5,7 +5,7 @@ import datetime
 import requests
 
 
-def get_holidays():
+def get_holidays(session=None):
     """
     获得中国法定节假日信息，返回原始数据
     :return: 原始数据，实例：
@@ -30,16 +30,19 @@ def get_holidays():
         }
     }
     """
-    response = requests.get("https://www.shuyz.com/githubfiles/china-holiday-calender/master/holidayAPI.json")
+    if session is None:
+        response = requests.get("https://www.shuyz.com/githubfiles/china-holiday-calender/master/holidayAPI.json")
+    else:
+        response = session.get("https://www.shuyz.com/githubfiles/china-holiday-calender/master/holidayAPI.json")
     return response.json()
 
 
-def get_holiday_days() -> list[datetime.date]:
+def get_holiday_days(session=None) -> list[datetime.date]:
     """
     获得中国法定节假日日期列表
     :return: 日期列表
     """
-    holidays = get_holidays()
+    holidays = get_holidays(session)
     holiday_days = []
     for year in holidays["Years"]:
         for holiday in holidays["Years"][year]:
