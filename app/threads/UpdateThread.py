@@ -79,7 +79,7 @@ class UpdateThread(QThread):
                     if "x86_64" in asset["name"]:
                         return asset["browser_download_url"], asset["size"]
         else:
-            return None
+            return None, None
 
     def run(self):
         """执行更新检查逻辑。"""

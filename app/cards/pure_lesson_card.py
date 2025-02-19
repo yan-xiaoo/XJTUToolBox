@@ -49,7 +49,7 @@ class PureLessonCard(HeaderCardWidget):
 
         self.setTitle(course.name)
         self.table.setItem(0, 0, QTableWidgetItem(self.tr("时间")))
-        self.table.setItem(0, 1, QTableWidgetItem(f"{self.weekdays_dict[course.day_of_week]} {course.start_time} - {course.end_time} {self.tr("节")}"))
+        self.table.setItem(0, 1, QTableWidgetItem(f"{self.weekdays_dict[course.day_of_week]} {course.start_time} - {course.end_time} {self.tr('节')}"))
         self.table.setItem(1, 0, QTableWidgetItem(self.tr("教师")))
         self.table.setItem(1, 1, QTableWidgetItem(course.teacher))
         self.table.setItem(2, 0, QTableWidgetItem(self.tr("地点")))
