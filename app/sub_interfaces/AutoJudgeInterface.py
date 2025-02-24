@@ -195,7 +195,10 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot(str, str)
     def onThreadError(self, title, msg):
-        InfoBar.error(title, msg, duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        if self.window().isActiveWindow():
+            InfoBar.error(title, msg, duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        else:
+            InfoBar.error(title, msg, duration=-1, position=InfoBarPosition.TOP_RIGHT, isClosable=True, parent=self)
 
     @pyqtSlot()
     def onStartButtonClicked(self):
@@ -217,14 +220,22 @@ class AutoJudgeInterface(ScrollArea):
     @pyqtSlot()
     def onEditSuccess(self):
         questionnaire = self.thread_.questionnaire
-        InfoBar.success(self.tr("问卷编辑成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 编辑成功"),
-                        duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        if self.window().isActiveWindow():
+            InfoBar.success(self.tr("问卷编辑成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 编辑成功"),
+                            duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        else:
+            InfoBar.success(self.tr("问卷编辑成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 编辑成功"),
+                            duration=-1, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
 
     @pyqtSlot()
     def onSubmitSuccess(self):
         questionnaire = self.thread_.questionnaire
-        InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 评教成功"),
-                        duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        if self.window().isActiveWindow():
+            InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 评教成功"),
+                            duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        else:
+            InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 评教成功"),
+                            duration=-1, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
         for one in self.questionnaireWidgets:
             if one.questionnaire == questionnaire:
                 self.setQuestionnaireFinished(one)

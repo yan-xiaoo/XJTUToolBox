@@ -367,7 +367,10 @@ class ScheduleInterface(ScrollArea):
                 # RuntimeError: wrapped C/C++ object of type InfoBar has been deleted
                 # 这个异常无所谓，忽略
                 self._onlyNotice = None
-        self._onlyNotice = InfoBar.success(title, msg, duration=duration, position=position, parent=parent)
+        if self.window().isActiveWindow():
+            self._onlyNotice = InfoBar.success(title, msg, duration=duration, position=position, parent=parent)
+        else:
+            self._onlyNotice = InfoBar.success(title, msg, duration=-1, position=InfoBarPosition.TOP_RIGHT,parent=parent, isClosable=True)
 
     def error(self, title, msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=None):
         """
@@ -385,7 +388,10 @@ class ScheduleInterface(ScrollArea):
                 # RuntimeError: wrapped C/C++ object of type InfoBar has been deleted
                 # 这个异常无所谓，忽略
                 self._onlyNotice = None
-        self._onlyNotice = InfoBar.error(title, msg, duration=duration, position=position, parent=parent)
+        if self.window().isActiveWindow():
+            self._onlyNotice = InfoBar.error(title, msg, duration=duration, position=position, parent=parent)
+        else:
+            self._onlyNotice = InfoBar.error(title, msg, duration=-1, position=InfoBarPosition.TOP_RIGHT,parent=parent, isClosable=True)
 
     def warning(self, title, msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=None):
         """
@@ -403,7 +409,11 @@ class ScheduleInterface(ScrollArea):
                 # RuntimeError: wrapped C/C++ object of type InfoBar has been deleted
                 # 这个异常无所谓，忽略
                 self._onlyNotice = None
-        self._onlyNotice = InfoBar.warning(title, msg, duration=duration, position=position, parent=parent)
+        if self.window().isActiveWindow():
+            self._onlyNotice = InfoBar.warning(title, msg, duration=duration, position=position, parent=parent)
+        else:
+            self._onlyNotice = InfoBar.warning(title, msg, duration=-1, position=InfoBarPosition.TOP_RIGHT, parent=parent,
+                                             isClosable=True)
 
     @pyqtSlot(str)
     def onThreadSuccess(self, msg):
