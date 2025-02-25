@@ -43,3 +43,10 @@ class EhallUtil:
         if len(roles) == 0:
             raise ServerError(-1, "未找到任何角色")
         self.session.get(roles[0]["targetUrl"])
+
+    def getSemesterCode(self):
+        """
+        获得当前学期代码，比如 2024-2025-1
+        """
+        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/dqxnxq.do")
+        return response.json()['datas']['dqxnxq']['rows'][0]['DM']

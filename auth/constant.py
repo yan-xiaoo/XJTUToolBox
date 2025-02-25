@@ -15,3 +15,6 @@ ATTENDANCE_WEBVPN_URL = "http://bkkq.xjtu.edu.cn"
 
 # 没有 AppId 的考勤系统登录地址
 BASE_URL = "https://org.xjtu.edu.cn/openplatform/login.html"
+
+# 移动教务的登录地址
+JWAPP_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1370&redirectUri=http://jwapp.xjtu.edu.cn/app/index&responseType=code&scope=user_info&state=1234"
