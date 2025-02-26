@@ -40,9 +40,9 @@ class ProcessWidget(QFrame):
 
         self.progressBar = ProgressBar(self)
         self.indeterminateProgressBar = IndeterminateProgressBar(self)
-        self.indeterminateProgressBar.setVisible(False)
         self.vBoxLayout.addWidget(self.progressBar)
         self.vBoxLayout.addWidget(self.indeterminateProgressBar)
+        self.indeterminateProgressBar.setVisible(False)
 
         self.timer = QTimer(self)
         self.timer.setInterval(500)

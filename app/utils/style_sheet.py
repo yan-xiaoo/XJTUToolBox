@@ -17,6 +17,7 @@ class StyleSheet(StyleSheetBase, Enum):
     JUDGE_OPTION_INTERFACE = "judge_option_interface"
     TOOLBOX_INTERFACE = "toolbox_interface"
     SCHEDULE_INTERFACE = "schedule_interface"
+    SCORE_INTERFACE = "score_interface"
     WEBVPN_CONVERT_INTERFACE = "webvpn_convert_interface"
     TOOL_CARD = "tool_card"
 

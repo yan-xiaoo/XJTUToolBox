@@ -15,11 +15,13 @@ from qfluentwidgets import NavigationItemPosition, isDarkTheme
 from .HomeInterface import HomeInterface
 from .AccountInterface import AccountInterface
 from .ScheduleInterface import ScheduleInterface
+from .ScoreInterface import ScoreInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
 from .ToolBoxInterface import ToolBoxInterface
 from .sessions.attendance_session import AttendanceSession
 from .sessions.ehall_session import EhallSession
+from .sessions.jwapp_session import JwappSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
@@ -34,6 +36,7 @@ def registerSession():
     # ehall：ehall.xjtu.edu.cn 所用的 session
     SessionManager.global_register(EhallSession, "ehall")
     SessionManager.global_register(AttendanceSession, "attendance")
+    SessionManager.global_register(JwappSession, "jwapp")
 
 
 class MainWindow(MSFluentWindow):
@@ -71,7 +74,7 @@ class MainWindow(MSFluentWindow):
 
     def initWindow(self):
         self.setWindowTitle("仙交百宝箱")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(900, 671)
 
         self.show()
 
@@ -83,6 +86,7 @@ class MainWindow(MSFluentWindow):
         self.setting_interface = SettingInterface(self)
         self.tool_box_interface = ToolBoxInterface(self, self)
         self.schedule_interface = ScheduleInterface(self)
+        self.score_interface = ScoreInterface(self)
         self.judge_interface = AutoJudgeInterface(self)
         self.webvpn_convert_interface = WebVPNConvertInterface(self)
 
@@ -90,6 +94,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
         self.addSubInterface(self.schedule_interface, FIF.CALENDAR, self.tr("课表"))
         self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
+        self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",

@@ -17,7 +17,7 @@ from .util import EhallUtil
 #    "msg": "操作成功",
 #    "data": {
 #       "courseName": "生命科学基础I(BIOL200913)",
-#       "coursePoint": "3",
+#       "coursePoint": 3,
 #       "examType": "开卷",
 #       "majorFlag": "必修",
 #       "examProp": "初修",
@@ -65,7 +65,7 @@ class Score:
         self._util = EhallUtil(session)
         self._util.useApp("4768574631264620")
 
-    def grade(self, term: Union[List[str], str]=None, jwapp_format=True) -> List:
+    def grade(self, term: Union[List[str], str] = None, jwapp_format=True) -> List:
         """
         返回所有学期的成绩，可以选择返回原始格式还是移动教务格式
         :param term: 查询哪个学期的课程，传入课程的学年学期代码，如 "2024-2025-1"。默认为 None，表示查询所有学期。
@@ -114,7 +114,7 @@ class Score:
                         {
                             "itemName": "平时成绩",
                             "itemPercent": int(one_data["PSCJXS"]) / 100,
-                            "itemScore": int(one_data["PSCJ"])
+                            "itemScore": float(one_data["PSCJ"])
                         }
                     )
                 if one_data["SYCJ"] is not None:
@@ -122,7 +122,7 @@ class Score:
                         {
                             "itemName": "实验成绩",
                             "itemPercent": 0,
-                            "itemScore": int(one_data["SYCJ"])
+                            "itemScore": float(one_data["SYCJ"])
                         }
                     )
                 if one_data["QMCJ"] is not None:
@@ -130,7 +130,7 @@ class Score:
                         {
                             "itemName": "期末成绩",
                             "itemPercent": int(one_data["QMCJXS"]) / 100,
-                            "itemScore": int(one_data["QMCJ"])
+                            "itemScore": float(one_data["QMCJ"])
                         }
                     )
                 if one_data["QZCJ"] is not None:
@@ -138,7 +138,7 @@ class Score:
                         {
                             "itemName": "期中成绩",
                             "itemPercent": int(one_data["QZCJXS"]) / 100,
-                            "itemScore": int(one_data["QZCJ"])
+                            "itemScore": float(one_data["QZCJ"])
                         }
                     )
                 for i in range(1, 11):
@@ -147,7 +147,7 @@ class Score:
                             {
                                 "itemName": f"其他{i}",
                                 "itemPercent": 0,
-                                "itemScore": int(one_data[f"QTCJ{i}"])
+                                "itemScore": float(one_data[f"QTCJ{i}"])
                             }
                         )
                 # 如果只有一个百分比缺失，那么利用所有成绩的百分比之和为 1 的特性，补全缺失的百分比
@@ -169,7 +169,7 @@ class Score:
                 new_format_list.append(
                     {
                         "courseName": one_data["KCM"],
-                        "coursePoint": one_data["XF"],
+                        "coursePoint": float(one_data["XF"]),
                         "examType": one_data["KSLXDM_DISPLAY"],
                         "majorFlag": one_data["KCXZDM_DISPLAY"],
                         "examProp": one_data["CXCKDM_DISPLAY"],

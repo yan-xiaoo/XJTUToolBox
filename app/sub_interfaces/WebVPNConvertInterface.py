@@ -1,5 +1,3 @@
-import sys
-
 from PyQt5.QtCore import pyqtSlot, QTimer, QUrl
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QApplication
 from qfluentwidgets import ScrollArea, TransparentToolButton, \

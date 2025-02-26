@@ -1,3 +1,4 @@
+import datetime
 from enum import Enum
 
 import requests
@@ -26,7 +27,7 @@ class ScheduleAttendanceThread(ProcessThread):
         self.start_date = None
         self.end_date = None
         self.login_method = None
-        self.term_number = None
+        self.term_number = term_number
         self.term_map = None
         # 考勤流水（打卡信息）
         self.water_page = []
@@ -94,7 +95,11 @@ class ScheduleAttendanceThread(ProcessThread):
             self.setIndeterminate.emit(False)
             self.progressChanged.emit(33)
             self.messageChanged.emit(self.tr("正在查询考勤流水..."))
-            water_page = self.util.getFlowRecordByTime(self.start_date, self.end_date)
+            today = datetime.date.today()
+            if self.start_date <= today <= self.end_date:
+                water_page = self.util.getFlowRecordWithPage(1, 50)["data"]
+            else:
+                water_page = self.util.getFlowRecordByTime(self.start_date.strftime("%Y-%m-%d"), self.end_date.strftime("%Y-%m-%d"))
             self.water_page = water_page
             self.water_page_finished.emit()
 
@@ -108,7 +113,7 @@ class ScheduleAttendanceThread(ProcessThread):
             if self.term_map is None:
                 self.term_map = self.util.getTermNoMap()
 
-            records = self.util.attendanceDetailByTime(self.start_date, self.end_date, 1, 50,
+            records = self.util.attendanceDetailByTime(self.start_date.strftime("%Y-%m-%d"), self.end_date.strftime("%Y-%m-%d"), 1, 50,
                                                        termNo=self.term_map[self.term_number])
             self.records = records
             self.progressChanged.emit(100)

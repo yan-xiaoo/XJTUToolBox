@@ -15,6 +15,7 @@ class HomeFrame(QWidget):
         self.vBoxLayout = QVBoxLayout(self)
         self.title = TitleLabel(self.tr("仙交百宝箱"), self)
         self.vBoxLayout.addWidget(self.title, alignment=Qt.AlignTop)
+        self.vBoxLayout.addStretch(1)
         self.title.setContentsMargins(10, 15, 0, 0)
         self.vBoxLayout.setSpacing(0)
 
@@ -29,7 +30,6 @@ class HomeFrame(QWidget):
         accounts.accountCleared.connect(self.onAccountDecrypted)
 
         self.linkCardView = LinkCardView(self)
-        self.vBoxLayout.addWidget(self.linkCardView, alignment=Qt.AlignTop)
         if accounts.empty():
             self.accountCard = LinkCard("assets/icons/login.png", self.tr("开始使用"),
                                         self.tr("添加你的第一个账户"))
@@ -46,11 +46,19 @@ class HomeFrame(QWidget):
         self.attendanceCard.setBackgroundColor(LinkCard.LinkCardColor.PURPLE)
         self.attendanceCard.cardClicked.connect(lambda: main_window.switchTo(main_window.attendance_interface))
         self.linkCardView.addCard(self.attendanceCard)
+        self.scoreCard = LinkCard(FIF.EDUCATION.icon(theme=Theme.DARK), self.tr("成绩"),
+                                  self.tr("查看你各学期的成绩"))
+        self.scoreCard.setBackgroundColor(LinkCard.LinkCardColor.BLUE)
+        self.scoreCard.cardClicked.connect(lambda: main_window.switchTo(main_window.score_interface))
+        self.linkCardView.addCard(self.scoreCard)
         self.judgeCard = LinkCard(FIF.BOOK_SHELF.icon(theme=Theme.DARK), self.tr("评教"),
-                                 self.tr("快速完成本学期评教"))
+                                  self.tr("快速完成本学期评教"))
         self.judgeCard.setBackgroundColor(LinkCard.LinkCardColor.YELLOW)
         self.judgeCard.cardClicked.connect(lambda: main_window.switchTo(main_window.judge_interface))
         self.linkCardView.addCard(self.judgeCard)
+
+        self.vBoxLayout.addWidget(self.linkCardView, alignment=Qt.AlignTop)
+        self.vBoxLayout.addStretch(1)
 
     @pyqtSlot()
     def onAccountDecrypted(self):

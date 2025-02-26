@@ -49,7 +49,7 @@ class CacheManager:
             raise FileExistsError(f"File {file} exists and allow_overwrite is False.")
         self._makesure_exists()
         with open(self.path(file), "w", encoding="utf-8") as f:
-            f.write(json.dumps(content, indent=4))
+            f.write(json.dumps(content))
 
     def write_expire_json(self, file, content, allow_overwrite: bool = False):
         """
@@ -65,7 +65,7 @@ class CacheManager:
             f.write(json.dumps({
                 "timestamp": datetime.datetime.now().timestamp(),
                 "data": content
-            }, indent=4))
+            }))
 
     def read(self, filename: str, is_binary=False):
         with open(self.path(filename), "rb" if is_binary else "r") as f:
@@ -110,7 +110,7 @@ class DataManager:
             raise FileExistsError(f"File {file} exists and allow_overwrite is False.")
         self._makesure_exists()
         with open(self.path(file), "w", encoding="utf-8") as f:
-            f.write(json.dumps(content, indent=4))
+            f.write(json.dumps(content))
 
     def read(self, filename: str, is_binary=False):
         with open(self.path(filename), "rb" if is_binary else "r") as f:

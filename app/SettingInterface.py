@@ -62,6 +62,12 @@ class SettingInterface(ScrollArea):
                                                    parent=self.attendanceGroup)
         self.attendanceGroup.addSettingCard(self.loginMethodCard)
 
+        # 成绩查询组
+        self.scoreGroup = SettingCardGroup(self.tr("成绩查询"), self.view)
+        self.ignoreLateCard = CustomSwitchSettingCard(FIF.ERASE_TOOL, self.tr("忽略缓考课程"), self.tr("查询成绩时忽略缓考课程"),
+                                                      cfg.ignoreLateCourse, self.scoreGroup)
+        self.scoreGroup.addSettingCard(self.ignoreLateCard)
+
         # 个性化组
         self.personalGroup = SettingCardGroup(self.tr("个性化"), self.view)
         self.themeCard = ComboBoxSettingCard(cfg.themeMode, FIF.BRUSH, self.tr("应用主题"),
@@ -126,6 +132,7 @@ class SettingInterface(ScrollArea):
         # 添加设置组到布局
         self.expandLayout.addWidget(self.accountGroup)
         self.expandLayout.addWidget(self.attendanceGroup)
+        self.expandLayout.addWidget(self.scoreGroup)
         self.expandLayout.addWidget(self.personalGroup)
         self.expandLayout.addWidget(self.aboutGroup)
 

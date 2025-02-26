@@ -23,6 +23,8 @@ class LinkCardColor:
     DARK = "dark"
     PURPLE = 'purple'
     YELLOW = 'yellow'
+    BLUE = 'blue'
+    GREEN = 'green'
     colors = {
         LIGHT_BLUE: {
             "light": __light_color_base.format("118, 162, 185"),
@@ -39,6 +41,14 @@ class LinkCardColor:
         YELLOW: {
             "light": __light_color_base.format("173, 139, 115"),
             "dark": __dark_color_base.format("173, 139, 115")
+        },
+        BLUE: {
+            "light": __light_color_base.format("93, 116, 162"),
+            "dark": __dark_color_base.format("93, 116, 162")
+        },
+        GREEN: {
+            "light": __light_color_base.format("105, 169, 78"),
+            "dark": __dark_color_base.format("105, 169, 78")
         }
     }
 

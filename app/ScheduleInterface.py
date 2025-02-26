@@ -543,8 +543,8 @@ class ScheduleInterface(ScrollArea):
         term_number = self.schedule_service.getCurrentTerm()
         self.schedule_attendance_thread.term_number = term_number
 
-        self.schedule_attendance_thread.start_date = start_date.strftime("%Y-%m-%d")
-        self.schedule_attendance_thread.end_date = end_date.strftime("%Y-%m-%d")
+        self.schedule_attendance_thread.start_date = start_date
+        self.schedule_attendance_thread.end_date = end_date
         setting = cfg.get(cfg.defaultAttendanceLoginMethod)
         if setting == cfg.AttendanceLoginMethod.WEBVPN:
             self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
