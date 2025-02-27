@@ -1,12 +1,13 @@
 import datetime
 import json
 
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QTableWidgetItem
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, PrimaryPushButton, TableWidget, ToolTipFilter, \
-    ToolTipPosition, InfoBar, InfoBarPosition
+    ToolTipPosition, InfoBar, InfoBarPosition, TransparentPushButton
 
 from app.components.MultiSelectionComboBox import MultiSelectionComboBox
+from app.sub_interfaces.ScoreDetailDialog import ScoreDetailDialog
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScoreThread import ScoreThread
 from app.utils import StyleSheet, cfg, AccountDataManager, accounts
@@ -63,6 +64,7 @@ class ScoreInterface(ScrollArea):
         self.processWidget.setVisible(False)
         self.scoreThread.error.connect(self.onThreadError)
         self.scoreThread.scores.connect(self.onReceiveScore)
+        self.scoreThread.finished.connect(self.unlock)
 
         self._onlyNotice = None
         self.scores = None
@@ -116,6 +118,20 @@ class ScoreInterface(ScrollArea):
         if not self.termBox.selected:
             # 生成一个默认的学期
             self.termBox.addSelectIndex(self.termBox.findText(self.guess_last_term_string()))
+
+    def lock(self):
+        """
+        锁定和网络通信相关的元素
+        """
+        self.scoreButton.setEnabled(False)
+        self.termBox.setEnabled(False)
+
+    def unlock(self):
+        """
+        解锁和网络通信相关的元素
+        """
+        self.scoreButton.setEnabled(True)
+        self.termBox.setEnabled(True)
 
     def save(self):
         """
@@ -252,6 +268,7 @@ class ScoreInterface(ScrollArea):
                 self.warning("", self.tr("请选择至少一个学期"), parent=self)
                 return
 
+        self.lock()
         self.scoreThread.term_number = term_number
         self.scoreThread.start()
         self.processWidget.setVisible(True)
@@ -269,12 +286,20 @@ class ScoreInterface(ScrollArea):
             self.scoreTable.setItem(i, 1, QTableWidgetItem(str(score["coursePoint"])))
             self.scoreTable.setItem(i, 2, QTableWidgetItem(str(score["gpa"])))
             self.scoreTable.setItem(i, 3, QTableWidgetItem(str(score["score"])))
-            self.scoreTable.setItem(i, 4, QTableWidgetItem(self.tr("详情")))
+            self.scoreTable.setItem(i, 4, QTableWidgetItem(""))
+            button = TransparentPushButton(self.tr("详情"), self.view)
+            button.clicked.connect(lambda _, s=score: self.showDetailDialog(s))
+            self.scoreTable.setCellWidget(i, 4, button)
+            self.scoreTable.item(i, 4).setFlags(Qt.ItemIsEditable)
 
         self.onSelectScore()
         self.save()
         if show_success_message:
             self.success("", self.tr("查询成功"), parent=self)
+
+    def showDetailDialog(self, score):
+        dialog = ScoreDetailDialog(score, parent=self)
+        dialog.exec()
 
     @pyqtSlot()
     def onCurrentAccountChanged(self):

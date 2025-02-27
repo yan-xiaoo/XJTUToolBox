@@ -69,6 +69,9 @@ class MultiSelectionComboBox(LineEdit, ComboBoxBase):
         self.internalFrame.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.internalWidget = QWidget(self.internalFrame)
 
+        self.internalFrame.setStyleSheet("QScrollArea {border: none;background-color: transparent;}")
+        self.internalWidget.setStyleSheet("background-color: transparent;")
+
         self.internalLayout = QHBoxLayout(self.internalWidget)
         self.internalLayout.setContentsMargins(5, 3, 3, 5)
         self.internalLayout.setSpacing(5)
