@@ -82,8 +82,7 @@ class ScoreInterface(ScrollArea):
         self.scoreTable = TableWidget(self.view)
         # 随便先设置一个行数，后面会根据查询结果调整
         self.scoreTable.setToolTip(self.tr("单击选择课程以查看部分课程的统计信息"))
-        self.scoreTable.setToolTipDuration(3000)
-        self.scoreTable.installEventFilter(ToolTipFilter(self.scoreTable, showDelay=100, position=ToolTipPosition.TOP))
+        self.scoreTable.setToolTipDuration(2500)
         self.scoreTable.setRowCount(7)
         self.scoreTable.setColumnCount(5)
         self.scoreTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)

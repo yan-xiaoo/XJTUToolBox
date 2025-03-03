@@ -37,16 +37,48 @@ def get_holidays(session=None):
     return response.json()
 
 
+def get_holidays_nate(session=None, year=None):
+    """
+    获得中国法定节假日信息，返回原始数据
+    接口数据来源于仓库 https://github.com/NateScarlet/holiday-cn, 由 jsdelivr 大善人提供存储
+    """
+    if year is None:
+        year = datetime.date.today().year
+
+    if session is None:
+        response = requests.get(f"https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json")
+    else:
+        response = session.get(f"https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json")
+    return response.json()
+
+
 def get_holiday_days(session=None) -> list[datetime.date]:
     """
-    获得中国法定节假日日期列表
+    获得中国法定节假日日期列表，会尝试两个接口
     :return: 日期列表
     """
-    holidays = get_holidays(session)
-    holiday_days = []
-    for year in holidays["Years"]:
-        for holiday in holidays["Years"][year]:
-            start_date = datetime.datetime.strptime(holiday["StartDate"], "%Y-%m-%d").date()
-            end_date = datetime.datetime.strptime(holiday["EndDate"], "%Y-%m-%d").date()
-            holiday_days.extend([start_date + datetime.timedelta(days=i) for i in range((end_date - start_date).days + 1)])
+    try:
+        holidays = get_holidays(session)
+    except requests.exceptions.RequestException:
+        year = datetime.date.today().year
+        holidays_now = get_holidays_nate(session, year)
+        # 尝试多获取一年的数据
+        try:
+            holidays_next = get_holidays_nate(session, year + 1)
+        except requests.exceptions.RequestException:
+            holidays_next = {"days": {}}
+        holiday_days = []
+        for one in holidays_now["days"]:
+            if one['isOffDay']:
+                holiday_days.append(datetime.datetime.strptime(one['date'], "%Y-%m-%d").date())
+        for one in holidays_next["days"]:
+            if one['isOffDay']:
+                holiday_days.append(datetime.datetime.strptime(one['date'], "%Y-%m-%d").date())
+    else:
+        holiday_days = []
+        for year in holidays["Years"]:
+            for holiday in holidays["Years"][year]:
+                start_date = datetime.datetime.strptime(holiday["StartDate"], "%Y-%m-%d").date()
+                end_date = datetime.datetime.strptime(holiday["EndDate"], "%Y-%m-%d").date()
+                holiday_days.extend([start_date + datetime.timedelta(days=i) for i in range((end_date - start_date).days + 1)])
     return holiday_days

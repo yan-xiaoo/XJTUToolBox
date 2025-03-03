@@ -174,9 +174,9 @@ class JudgeOptionInterface(ScrollArea):
 
         self.textArea = PlainTextEdit(self.view)
         if "理论课" in questionnaire.WJMC:
-            self.textArea.setPlaceholderText(self.tr("请写下老师教学方面的优点或有待改进的地方，以及对所使用教材的意见（非必填）"))
+            self.textArea.setPlaceholderText(self.tr("（可以留空）请写下老师教学方面的优点或有待改进的地方，以及对所使用教材的意见"))
         else:
-            self.textArea.setPlaceholderText(self.tr("请写下老师教学方面的优点以及有待改进的地方（非必填）"))
+            self.textArea.setPlaceholderText(self.tr("（可以留空）请写下老师教学方面的优点以及有待改进的地方"))
 
         self.optionHLayout.addWidget(self.scoreBox)
         self.optionHLayout.addWidget(self.classTypeBox)
