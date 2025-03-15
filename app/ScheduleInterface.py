@@ -12,6 +12,7 @@ from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
 from qfluentwidgets import FluentIcon as FIF
 
 from app.components.ScheduleTable import ScheduleTableWidget
+from app.sessions.attendance_session import AttendanceSession
 from app.sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from app.sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
 from app.sub_interfaces.LessonConflictDialog import LessonConflictDialog
@@ -559,6 +560,11 @@ class ScheduleInterface(ScrollArea):
                     self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
                 else:
                     self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
+            else:
+                if self.schedule_attendance_thread.session.login_method == AttendanceSession.LoginMethod.NORMAL:
+                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
+                else:
+                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
         self.lock()
         self.process_widget_attendance.setVisible(True)
         self.schedule_attendance_thread.start()
