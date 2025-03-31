@@ -1,7 +1,7 @@
 from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
-    InfoBadge
+    InfoBadge, CaptionLabel
 from qfluentwidgets import FluentIcon as FIF
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtGui import QColor, QDesktopServices
@@ -60,7 +60,10 @@ class SettingInterface(ScrollArea):
                                                    texts=[self.tr("每次都询问"), self.tr("直接连接"),
                                                           self.tr("WebVPN 连接")],
                                                    parent=self.attendanceGroup)
+        self.autoRetryCard = CustomSwitchSettingCard(FIF.ACCEPT, self.tr("自动重试查询"),
+                                                     self.tr("在考勤系统查询失败时自动重试"), cfg.autoRetryAttendance, self.attendanceGroup)
         self.attendanceGroup.addSettingCard(self.loginMethodCard)
+        self.attendanceGroup.addSettingCard(self.autoRetryCard)
 
         # 成绩查询组
         self.scoreGroup = SettingCardGroup(self.tr("成绩查询"), self.view)

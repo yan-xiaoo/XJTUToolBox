@@ -36,11 +36,13 @@ class Config(QConfig):
                                                           AttendanceLoginMethod.WEBVPN]),
                                                      EnumSerializer(AttendanceLoginMethod))
     checkUpdateAtStartTime = OptionsConfigItem("Settings", "check_update_at_start_time",
-                                               False, OptionsValidator([True, False]), BooleanSerializer())
+                                               True, OptionsValidator([True, False]), BooleanSerializer())
     prereleaseEnable = OptionsConfigItem("Settings", "prerelease_enable",
                                          False, OptionsValidator([True, False]), BooleanSerializer())
     ignoreLateCourse = OptionsConfigItem("Settings", "ignore_late_course",
                                          True, OptionsValidator([True, False]), BooleanSerializer())
+    autoRetryAttendance = OptionsConfigItem("Settings", "auto_retry_attendance",
+                                            True, OptionsValidator([True, False]), BooleanSerializer())
 
     def __init__(self):
         super().__init__()

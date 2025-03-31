@@ -1,3 +1,4 @@
+import json
 from enum import Enum
 
 import requests
@@ -52,7 +53,18 @@ class AttendanceFlowThread(ProcessThread):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在查询考勤流水..."))
         lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN)
-        return lookup_wrapper.getFlowRecordWithPage(self.page, self.size)
+        while True:
+            try:
+                result = lookup_wrapper.getFlowRecordWithPage(self.page, self.size)
+            except (ServerError, json.JSONDecodeError, requests.Timeout):
+                if cfg.autoRetryAttendance.value:
+                    self.messageChanged.emit(self.tr("查询考勤流水失败，正在重试..."))
+                    continue
+                else:
+                    raise
+            else:
+                break
+        return result
 
     def login_again(self):
         """

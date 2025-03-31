@@ -1,4 +1,5 @@
 import datetime
+import json
 from enum import Enum
 
 import requests
@@ -8,12 +9,13 @@ from attendance import Attendance
 from auth import ServerError
 from .ProcessWidget import ProcessThread
 from ..sessions.attendance_session import AttendanceSession
-from ..utils import accounts, logger
+from ..utils import accounts, logger, cfg
 
 
 class AttendanceFlowLogin(Enum):
     WEBVPN_LOGIN = 0
     NORMAL_LOGIN = 1
+
 
 class ScheduleAttendanceThread(ProcessThread):
     # 返回的结果：第一个结果为考勤信息，第二个结果为考勤流水
@@ -79,6 +81,8 @@ class ScheduleAttendanceThread(ProcessThread):
         try:
             # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
             if self.session.has_login:
+                # 如果当前 session 已经登录，必须沿用当前登录方式。
+                self.login_method = AttendanceFlowLogin.NORMAL_LOGIN if self.session.login_method == self.session.LoginMethod.NORMAL else AttendanceFlowLogin.WEBVPN_LOGIN
                 self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN)
             else:
                 # 手动登录。
@@ -96,10 +100,22 @@ class ScheduleAttendanceThread(ProcessThread):
             self.progressChanged.emit(33)
             self.messageChanged.emit(self.tr("正在查询考勤流水..."))
             today = datetime.date.today()
-            if self.start_date <= today <= self.end_date:
-                water_page = self.util.getFlowRecordWithPage(1, 50)["data"]
-            else:
-                water_page = self.util.getFlowRecordByTime(self.start_date.strftime("%Y-%m-%d"), self.end_date.strftime("%Y-%m-%d"))
+            while True:
+                try:
+                    if self.start_date <= today <= self.end_date:
+                        water_page = self.util.getFlowRecordWithPage(1, 50)["data"]
+                    else:
+                        water_page = self.util.getFlowRecordByTime(self.start_date.strftime("%Y-%m-%d"), self.end_date.strftime("%Y-%m-%d"))
+                except (ServerError, requests.Timeout, json.JSONDecodeError):
+                    if cfg.autoRetryAttendance.value:
+                        self.error.emit("", self.tr("查询考勤流水失败，正在重试..."))
+                        logger.warning("查询考勤流水失败，正在重试...")
+                        continue
+                    else:
+                        raise
+                else:
+                    break
+
             self.water_page = water_page
             self.water_page_finished.emit()
 
