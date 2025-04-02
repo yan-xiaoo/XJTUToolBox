@@ -29,7 +29,7 @@ class GS(Crawler):
         :param clear_repeat: 是否清除重复的通知，默认 True。如果通知的标题，链接和来源相同，则认为是重复的通知
         """
         notifications = []
-        notifications.extend(self.one_part("http://gs.xjtu.edu.cn/tzgg/zsgz.htm", "招生工作"))
+        notifications.extend(self.one_part("https://gs.xjtu.edu.cn/tzgg/zsgz.htm", "招生工作"))
         notifications.extend(self.one_part("https://gs.xjtu.edu.cn/tzgg/pygz.htm", "培养工作"))
         notifications.extend(self.one_part("https://gs.xjtu.edu.cn/tzgg/gjjl.htm", "国际交流"))
         notifications.extend(self.one_part("https://gs.xjtu.edu.cn/tzgg/xwgz.htm", "学位工作"))
@@ -88,6 +88,6 @@ class GS(Crawler):
 
 if __name__ == '__main__':
     gs = GS(pages=2)
-    notifications = gs.crawl()
+    notifications = gs.get_notifications()
     for notification in notifications:
         print(notification.title, notification.link, notification.date, notification.tags, notification.source)
