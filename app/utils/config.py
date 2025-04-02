@@ -43,6 +43,8 @@ class Config(QConfig):
                                          True, OptionsValidator([True, False]), BooleanSerializer())
     autoRetryAttendance = OptionsConfigItem("Settings", "auto_retry_attendance",
                                             True, OptionsValidator([True, False]), BooleanSerializer())
+    openExternalBrowser = OptionsConfigItem("Settings", "open_external_browser",
+                                       False, OptionsValidator([True, False]), BooleanSerializer())
 
     def __init__(self):
         super().__init__()

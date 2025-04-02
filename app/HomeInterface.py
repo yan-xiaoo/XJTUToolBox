@@ -56,6 +56,11 @@ class HomeFrame(QWidget):
         self.judgeCard.setBackgroundColor(LinkCard.LinkCardColor.YELLOW)
         self.judgeCard.cardClicked.connect(lambda: main_window.switchTo(main_window.judge_interface))
         self.linkCardView.addCard(self.judgeCard)
+        self.noticeCard = LinkCard(FIF.DICTIONARY.icon(theme=Theme.DARK), self.tr("通知"),
+                                   self.tr("查看学校网站的新通知"))
+        self.noticeCard.setBackgroundColor(LinkCard.LinkCardColor.GREEN)
+        self.noticeCard.cardClicked.connect(lambda: main_window.switchTo(main_window.notice_interface))
+        self.linkCardView.addCard(self.noticeCard)
 
         self.vBoxLayout.addWidget(self.linkCardView, alignment=Qt.AlignTop)
         self.vBoxLayout.addStretch(1)
