@@ -4,11 +4,11 @@ from types import TracebackType
 from typing import Type
 import sys
 
-from PyQt5.QtCore import pyqtSlot, QUrl, Qt
+from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize
 from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox, InfoBadgePosition, \
-    InfoBadge
+    InfoBadge, SplashScreen
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import NavigationItemPosition, isDarkTheme
 
@@ -25,6 +25,7 @@ from .sessions.jwapp_session import JwappSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.NoticeInterface import NoticeInterface
+from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
 from .threads.UpdateThread import UpdateThread, UpdateStatus
 from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all
@@ -43,15 +44,22 @@ def registerSession():
 class MainWindow(MSFluentWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
+
         registerSession()
-        self.initWindow()
-        self.initInterface()
-        self.initNavigation()
 
         self.light_icon = QIcon("assets/icons/toolbox_light.png")
         self.dark_icon = QIcon("assets/icons/toolbox_dark.png")
 
         self.on_theme_changed()
+        self.initWindow()
+
+        self.splashScreen = SplashScreen(self.windowIcon(), self)
+        self.splashScreen.setIconSize(QSize(102, 102))
+        self.show()
+
+        self.initInterface()
+        self.initNavigation()
+
         cfg.themeChanged.connect(self.on_theme_changed)
 
         sys.excepthook = self.catchExceptions
@@ -73,11 +81,11 @@ class MainWindow(MSFluentWindow):
             self.update_thread.updateSignal.connect(self.setting_interface.onUpdateCheck)
             self.update_thread.start()
 
+        self.splashScreen.finish()
+
     def initWindow(self):
         self.setWindowTitle("仙交百宝箱")
         self.setMinimumSize(900, 671)
-
-        self.show()
 
     def initInterface(self):
         self.home_interface = HomeInterface(self, self)
@@ -90,7 +98,9 @@ class MainWindow(MSFluentWindow):
         self.score_interface = ScoreInterface(self)
         self.judge_interface = AutoJudgeInterface(self)
         self.webvpn_convert_interface = WebVPNConvertInterface(self)
-        self.notice_interface = NoticeInterface(self)
+        self.notice_interface = NoticeInterface(self, self)
+        self.notice_setting_interface = NoticeSettingInterface(self.notice_interface.noticeManager, self.notice_interface, self)
+        self.notice_setting_interface.quit.connect(self.notice_interface.onSettingQuit)
 
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
@@ -125,6 +135,9 @@ class MainWindow(MSFluentWindow):
 
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
+                                      position=NavigationItemPosition.BOTTOM)
+        button.setVisible(False)
+        button = self.addSubInterface(self.notice_setting_interface, FIF.SCROLL, self.tr("通知设置"),
                                       position=NavigationItemPosition.BOTTOM)
         button.setVisible(False)
 

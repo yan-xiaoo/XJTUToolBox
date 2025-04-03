@@ -21,6 +21,7 @@ class StyleSheet(StyleSheetBase, Enum):
     WEBVPN_CONVERT_INTERFACE = "webvpn_convert_interface"
     TOOL_CARD = "tool_card"
     NOTICE_INTERFACE = "notice_interface"
+    NOTICE_SETTING_INTERFACE = "notice_setting_interface"
 
     def path(self, theme=Theme.AUTO):
         theme = cfg.theme if theme == Theme.AUTO else theme

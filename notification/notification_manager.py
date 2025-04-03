@@ -52,7 +52,10 @@ class NotificationManager:
         if source not in self.subscription:
             raise ValueError(f"Source {source} not in subscription")
         self.subscription.remove(source)
-        del self.ruleset[source]
+        try:
+            del self.ruleset[source]
+        except KeyError:
+            pass
 
     def add_ruleset(self, source: Source, ruleset: Union[Iterable[Ruleset], Ruleset]):
         """
