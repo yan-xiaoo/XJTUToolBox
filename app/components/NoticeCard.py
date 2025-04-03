@@ -21,7 +21,7 @@ class NoticeCard(CardWidget):
         self.notice = notice
 
         self.titleLabel = BodyLabel(notice.title, self)
-        self.contentLabel = CaptionLabel(notice.source.value, self)
+        self.contentLabel = CaptionLabel(notice.source.value + "    " + notice.date.isoformat(), self)
 
         self.hBoxLayout = QHBoxLayout(self)
         self.vBoxLayout = QVBoxLayout()

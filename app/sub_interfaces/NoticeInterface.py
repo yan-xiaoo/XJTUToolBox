@@ -2,14 +2,15 @@ import json
 
 from PyQt5.QtCore import Qt, pyqtSlot, QUrl
 from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame
-from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QActionGroup
+from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton, \
+    TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType
 
 from ..components.NoticeCard import NoticeCard
 from ..threads.NoticeThread import NoticeThread
 from ..threads.ProcessWidget import ProcessWidget
-from ..utils import StyleSheet, logger, cfg
-from ..utils.cache import cacheManager
+from ..utils import StyleSheet, logger
+from ..utils.cache import cacheManager, dataManager
 from notification import NotificationManager, Notification
 
 
@@ -34,7 +35,40 @@ class NoticeInterface(ScrollArea):
         self.commandBar.addAction(self.editAction)
         self.commandBar.addAction(self.refreshAction)
         self.commandBar.addAction(self.confirmAction)
-        self.commandBar.setMinimumWidth(350)
+        # 排序菜单的按钮
+        button = TransparentDropDownPushButton(FluentIcon.SYNC, self.tr("排序方式"))
+        button.setFixedHeight(34)
+        setFont(button, 12)
+        # 几个排序选项
+        self.sortGroup = QActionGroup(self)
+        self.sourceTimeReverseAction = Action(FluentIcon.SEARCH, self.tr("来源-时间最新"), self.commandBar, checkable=True)
+        self.sourceTimeReverseAction.triggered.connect(lambda: self.sort_notices(source_primary=True, reverse_time=True))
+        self.sourceTimeAction = Action(FluentIcon.SEARCH, self.tr("来源-时间最旧"), self.commandBar, checkable=True)
+        self.sourceTimeAction.triggered.connect(lambda: self.sort_notices(source_primary=True, reverse_time=False))
+        self.timeReverseAction = Action(FluentIcon.UP, self.tr("时间最新"), self.commandBar, checkable=True)
+        self.timeReverseAction.triggered.connect(lambda: self.sort_notices(source_primary=False, reverse_time=True))
+        self.timeAction = Action(FluentIcon.DOWN, self.tr("时间最旧"), self.commandBar, checkable=True)
+        self.timeAction.triggered.connect(lambda: self.sort_notices(source_primary=False, reverse_time=False))
+
+        self.sortGroup.addAction(self.sourceTimeReverseAction)
+        self.sortGroup.addAction(self.sourceTimeAction)
+        self.sortGroup.addAction(self.timeReverseAction)
+        self.sortGroup.addAction(self.timeAction)
+        # 默认排序方式
+        self.timeReverseAction.setChecked(True)
+
+        # 排序菜单
+        self.sortMenu = CheckableMenu(parent=self, indicatorType=MenuIndicatorType.RADIO)
+        self.sortMenu.addActions([
+            self.sourceTimeReverseAction,
+            self.sourceTimeAction,
+            self.timeReverseAction,
+            self.timeAction
+        ])
+        button.setMenu(self.sortMenu)
+        self.commandBar.addWidget(button)
+
+        self.commandBar.setMinimumWidth(450)
         self.vBoxLayout.addWidget(self.commandBar, alignment=Qt.AlignTop | Qt.AlignHCenter)
 
         # 通知管理器
@@ -84,6 +118,7 @@ class NoticeInterface(ScrollArea):
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             notice_data = []
         self.notices = self.noticeManager.load_notifications(notice_data)
+        self.sort_by_selected_method()
         for notice in self.notices:
             # 创建通知卡片对象
             notice_card = NoticeCard(notice, self.noticeFrame)
@@ -134,6 +169,45 @@ class NoticeInterface(ScrollArea):
         # 更新通知列表
         self.save_notification()
 
+    def sort_notices(self, source_primary=True, reverse_time=True):
+        """
+        对通知进行排序。未读通知永远在最上方
+        :param source_primary: 是否先根据通知来源排序，再根据时间排序
+        :param reverse_time: 是否反向排序。True: 从最新-最旧；False: 从最旧-最新
+        """
+        if reverse_time:
+            self.notices.sort(key=lambda x: x.date, reverse=True)
+        else:
+            self.notices.sort(key=lambda x: x.date)
+
+
+        if source_primary:
+            self.notices.sort(key=lambda x: x.source.value, reverse=True)
+
+        self.notices.sort(key=lambda x: x.is_read, reverse=False)
+
+        # 更新通知列表
+        for one in self.noticeWidgets:
+            self.noticeFrameLayout.removeWidget(one)
+        if self.noticeWidgets:
+            self.noticeWidgets.sort(key=lambda x: self.notices.index(x.notice))
+        for one in self.noticeWidgets:
+            self.noticeFrameLayout.addWidget(one)
+        self.save_notification()
+
+    def sort_by_selected_method(self):
+        """
+        根据选中的排序方式对通知进行排序
+        """
+        if self.sourceTimeReverseAction.isChecked():
+            self.sort_notices(source_primary=True, reverse_time=True)
+        elif self.sourceTimeAction.isChecked():
+            self.sort_notices(source_primary=True, reverse_time=False)
+        elif self.timeReverseAction.isChecked():
+            self.sort_notices(source_primary=False, reverse_time=True)
+        elif self.timeAction.isChecked():
+            self.sort_notices(source_primary=False, reverse_time=False)
+
     @pyqtSlot(Notification)
     def onNoticeChanged(self, notice):
         """
@@ -166,14 +240,16 @@ class NoticeInterface(ScrollArea):
             # 忽略重复的通知
             if notice in self.notices:
                 continue
+            self.notices.append(notice)
+        self.sort_by_selected_method()
+        for notice in self.notices:
             # 创建通知卡片对象
             notice_card = NoticeCard(notice, self.noticeFrame)
             notice_card.noticeChanged.connect(self.onNoticeChanged)
             notice_card.noticeClicked.connect(self.onNoticeClicked)
-            # 添加到通知显示界面，倒序添加
-            self.noticeFrameLayout.insertWidget(0, notice_card)
+            # 添加到通知显示界面
+            self.noticeFrameLayout.addWidget(notice_card)
             # 添加到通知列表
-            self.notices.append(notice)
             self.noticeWidgets.append(notice_card)
         # 如果存在通知，切换到通知显示界面
         if self.notices:
@@ -211,7 +287,7 @@ class NoticeInterface(ScrollArea):
         从缓存中加载通知管理器，如果不存在则创建一个新的通知管理器
         """
         try:
-            config_file = cacheManager.read_json("notification_config.json")
+            config_file = dataManager.read_json("notification_config.json")
             manager = NotificationManager.load_or_create(config_file)
         except (FileNotFoundError, KeyError, json.JSONDecodeError):
             manager = NotificationManager()
