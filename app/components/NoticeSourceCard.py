@@ -15,6 +15,8 @@ class NoticeSourceCard(CardWidget):
     # checkChanged: bool, Source
     # 第一个参数为是否选中，第二个参数为对应的 Source
     checkChanged = pyqtSignal(bool, Source)
+    # 当设置规则按钮被点击时的信号
+    setRuleClicked = pyqtSignal(Source)
 
     def __init__(self, source: Source, checked=False, parent=None):
         super().__init__(parent)
@@ -47,7 +49,8 @@ class NoticeSourceCard(CardWidget):
 
         self.browseButton = PushButton(self.tr("前往"), self)
         self.browseButton.clicked.connect(self.onBrowseButtonClicked)
-        self.addRuleButton = PrimaryPushButton(self.tr("添加过滤规则"), self)
+        self.addRuleButton = PrimaryPushButton(self.tr("设置过滤规则"), self)
+        self.addRuleButton.clicked.connect(lambda: self.setRuleClicked.emit(self.source))
 
         self.hBoxLayout.addWidget(self.browseButton, 0, Qt.AlignRight)
         self.hBoxLayout.addWidget(self.addRuleButton, 0, Qt.AlignRight)

@@ -44,18 +44,20 @@ class NotificationManager:
                 self.ruleset[source] = []
             self.ruleset[source].extend(ruleset)
 
-    def remove_subscription(self, source: Source):
+    def remove_subscription(self, source: Source, remove_ruleset=True):
         """
         移除某个网站的通知订阅。尝试移除不存在的订阅会报错
         :param source: 需要移除的网站在 Source 类的枚举值
+        :param remove_ruleset: 是否同时移除该网站的所有规则，默认为 True
         """
         if source not in self.subscription:
             raise ValueError(f"Source {source} not in subscription")
         self.subscription.remove(source)
-        try:
-            del self.ruleset[source]
-        except KeyError:
-            pass
+        if remove_ruleset:
+            try:
+                del self.ruleset[source]
+            except KeyError:
+                pass
 
     def add_ruleset(self, source: Source, ruleset: Union[Iterable[Ruleset], Ruleset]):
         """
@@ -83,7 +85,7 @@ class NotificationManager:
             raise ValueError(f"Filter {ruleset} not in subscription")
         self.ruleset[source].remove(ruleset)
 
-    def remove_filters(self, source: Source):
+    def remove_rulesets(self, source: Source):
         """
         移除某个网站的所有规则。即使网站没有过滤规则也不会报错
         :param source: 需要移除规则的网站在 Source 类的枚举值
@@ -109,9 +111,13 @@ class NotificationManager:
                 for notification in notifications:
                     # 规则列表
                     rulesets = self.ruleset[subscription]
+                    # 规则全部未用时，直接加入通知
+                    if all([not ruleset.enable for ruleset in rulesets]):
+                        filtered_notifications.append(notification)
+                        continue
                     # 只要满足任意一条规则就加入通知
                     for ruleset in rulesets:
-                        if ruleset(notification):
+                        if ruleset.enable and ruleset(notification):
                             filtered_notifications.append(notification)
                             break
             else:
@@ -120,6 +126,56 @@ class NotificationManager:
             all_notifications.extend(filtered_notifications)
 
         return all_notifications
+
+    def filter_notifications(self, notifications: Iterable[Notification], clear_other_notice=True):
+        """
+        过滤已经获取的通知信息。仅返回符合当前过滤规则的通知。
+        满足任何一条规则的通知都会被保留。
+        :param notifications: 待过滤的通知列表
+        :param clear_other_notice: 是否清除不在当前订阅范围内的通知
+        """
+        filtered_notifications = []
+        for notification in notifications:
+            if notification.source not in self.subscription:
+                if clear_other_notice:
+                    continue
+                else:
+                    # 如果不清除其他通知，则直接加入
+                    filtered_notifications.append(notification)
+                    continue
+            if notification.source in self.ruleset:
+                rulesets = self.ruleset[notification.source]
+                # 只要满足任意一条规则就加入通知
+                for ruleset in rulesets:
+                    if ruleset.enable and ruleset(notification):
+                        filtered_notifications.append(notification)
+                        break
+        return filtered_notifications
+
+    def satisfy_filter(self, notification: Notification, clear_other_notice=True):
+        """
+        判断通知是否满足当前的过滤规则
+        :param notification: 待判断的通知
+        :param clear_other_notice: 如果此通知不在订阅范围内该如何处理。True：直接返回 False（表示不合格）；False: 直接返回 True（表示合格）
+        """
+        if notification.source not in self.subscription:
+            if clear_other_notice:
+                return False
+            else:
+                return True
+
+        if notification.source in self.ruleset:
+            rulesets = self.ruleset[notification.source]
+            if all([not ruleset.enable for ruleset in rulesets]):
+                # 如果所有规则都未用，则直接返回 True
+                return True
+            # 只要满足任意一条规则就加入通知
+            for ruleset in rulesets:
+                if ruleset.enable and ruleset(notification):
+                    return True
+        else:
+            return True
+        return False
 
     @staticmethod
     def dump_notifications(notifications: Iterable[Notification]) -> List:

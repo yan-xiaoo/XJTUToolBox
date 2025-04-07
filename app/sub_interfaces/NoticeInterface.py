@@ -4,7 +4,7 @@ from PyQt5.QtCore import Qt, pyqtSlot, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QActionGroup
 from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton, \
-    TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType, InfoBarPosition, InfoBar
+    TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType, InfoBarPosition, InfoBar, CaptionLabel
 
 from ..components.NoticeCard import NoticeCard
 from ..threads.NoticeThread import NoticeThread
@@ -84,6 +84,9 @@ class NoticeInterface(ScrollArea):
 
         self.commandBar.setMinimumWidth(450)
         self.vBoxLayout.addWidget(self.commandBar, alignment=Qt.AlignTop | Qt.AlignHCenter)
+        self.filterHintLabel = CaptionLabel(self.tr("已启用过滤规则"), self)
+        self.vBoxLayout.addWidget(self.filterHintLabel, alignment=Qt.AlignTop | Qt.AlignHCenter)
+        self.filterHintLabel.setVisible(False)
 
         # 通知管理器
         self.noticeManager = self.load_or_create_manager()
@@ -127,6 +130,8 @@ class NoticeInterface(ScrollArea):
         self.noticeWidgets = []
 
         self.vBoxLayout.addWidget(self.noticeFrame, stretch=1, alignment=Qt.AlignHCenter)
+
+        self.updateFilterHint()
 
         # 已有的通知
         try:
@@ -177,6 +182,22 @@ class NoticeInterface(ScrollArea):
         self.editAction.setEnabled(True)
         self.emptyButton.setEnabled(True)
         self.refreshAction.setEnabled(True)
+
+    def updateFilterHint(self):
+        """
+        根据当前是否真的启用过滤规则，决定是否显示过滤规则提示
+        """
+        if self.noticeManager.subscription:
+            for one in self.noticeManager.subscription:
+                if one in self.noticeManager.ruleset:
+                    if any([o.enable for o in self.noticeManager.ruleset[one]]):
+                        # 如果有规则集启用，则显示提示
+                        self.filterHintLabel.setVisible(True)
+                        break
+            else:
+                self.filterHintLabel.setVisible(False)
+        else:
+            self.filterHintLabel.setVisible(False)
 
     def error(self, title, msg, duration=2000, position=InfoBarPosition.TOP_RIGHT, parent=None):
         """
@@ -361,7 +382,7 @@ class NoticeInterface(ScrollArea):
             if index >= len(self.notices):
                 break
             one = self.notices[index]
-            if one.source not in self.noticeManager.subscription:
+            if not self.noticeManager.satisfy_filter(one):
                 self.notices.pop(index)
                 one_widget = self.noticeWidgets[index]
                 self.noticeFrameLayout.removeWidget(one_widget)
@@ -371,11 +392,14 @@ class NoticeInterface(ScrollArea):
             index += 1
 
         self.save_notification()
+        self.updateFilterHint()
         if not self.noticeManager.subscription:
             self.switchTo(self.startFrame)
         else:
             # 有通知配置但是没有通知时就切换到提示你获取通知的界面
             if self.notices:
                 self.switchTo(self.noticeFrame)
+                # 重新获取通知，以获得满足条件的通知
+                self.onGetNoticeButtonClicked()
             else:
                 self.switchTo(self.emptyFrame)

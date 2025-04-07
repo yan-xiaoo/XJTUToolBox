@@ -29,6 +29,12 @@ class Filter(ABC):
         该函数用于从配置文件中加载过滤器。
         """
 
+    @abstractmethod
+    def stringify(self):
+        """
+        将当前的过滤器给出一个简单的描述，比如“标题包含xxx“，”标签不包含xxx"
+        """
+
 
 class TitleIncludeFilter(Filter):
     """
@@ -70,6 +76,9 @@ class TitleIncludeFilter(Filter):
         :return: 过滤器对象
         """
         return cls(config["title"])
+
+    def stringify(self):
+        return f"标题包含 {self.title} "
 
 
 class TitleExcludeFilter(Filter):
@@ -113,6 +122,9 @@ class TitleExcludeFilter(Filter):
         """
         return cls(config["title"])
 
+    def stringify(self):
+        return f"标题不包含 {self.title} "
+
 
 class TagIncludeFilter(Filter):
     """
@@ -155,6 +167,54 @@ class TagIncludeFilter(Filter):
         """
         return cls(config["tag"])
 
+    def stringify(self):
+        return f"标签包含 {self.tag} "
+
+
+class TagExcludeFilter:
+    """
+    过滤器：标签不包含指定的字符串
+    """
+    def __init__(self, tag: str):
+        """
+        初始化过滤器
+        :param tag: 要排除的标签
+        """
+        self.tag = tag
+
+    def __call__(self, notification: Notification) -> bool:
+        """
+        判断通知的标签是否不包含指定的字符串
+        :param notification: 通知对象
+        :return: True 如果标签不包含指定的字符串，否则 False
+        """
+        return self.tag not in notification.tags
+
+    def __repr__(self):
+        return f"TagExcludeFilter(tag={self.tag})"
+
+    def dump(self):
+        """
+        将过滤器的配置以字典的形式返回
+        :return: 字典
+        """
+        return {
+            "class": CLASS_NAME[type(self)],
+            "tag": self.tag
+        }
+
+    @classmethod
+    def load(cls, config: dict):
+        """
+        从字典加载过滤器
+        :param config: 字典
+        :return: 过滤器对象
+        """
+        return cls(config["tag"])
+
+    def stringify(self):
+        return f"标签不包含 {self.tag} "
+
 
 # 从过滤器类转换为名称的字典
 CLASS_NAME = {
@@ -162,6 +222,7 @@ CLASS_NAME = {
     TitleIncludeFilter: "TitleIncludeFilter",
     TitleExcludeFilter: "TitleExcludeFilter",
     TagIncludeFilter: "TagIncludeFilter",
+    TagExcludeFilter: "TagExcludeFilter",
 }
 
 # 从名称转换为过滤器类的字典
@@ -170,4 +231,5 @@ NAME_CLASS = {
     "TitleIncludeFilter": TitleIncludeFilter,
     "TitleExcludeFilter": TitleExcludeFilter,
     "TagIncludeFilter": TagIncludeFilter,
+    "TagExcludeFilter": TagExcludeFilter,
 }

@@ -5,8 +5,10 @@ from PyQt5.QtWidgets import QStackedWidget, QWidget, QVBoxLayout
 from qfluentwidgets import ScrollArea, BreadcrumbBar
 
 from app.sub_interfaces.NoticeChoiceInterface import NoticeChoiceInterface
+from app.sub_interfaces.NoticeRuleInterface import NoticeRuleInterface
+from app.sub_interfaces.RuleSetInterface import RuleSetInterface
 from app.utils import StyleSheet
-from notification import NotificationManager
+from notification import NotificationManager, Source, Ruleset
 
 
 class NoticeSettingInterface(ScrollArea):
@@ -48,6 +50,8 @@ class NoticeSettingInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.stackedWidget, stretch=1, alignment=Qt.AlignHCenter)
 
         self.choiceInterface = None
+        self.ruleInterface = None
+        self.ruleSetInterface = None
 
         self.init_finished = False
         self.initWidgets()
@@ -81,11 +85,71 @@ class NoticeSettingInterface(ScrollArea):
         # 重建一下
         self.choiceInterface = NoticeChoiceInterface(self.manager, self.notice_interface.main_window, self)
         self.choiceInterface.quit.connect(self.onQuit)
+        self.choiceInterface.setRuleClicked.connect(self.onModifyRuleClicked)
+        self.ruleInterface = None
+        self.ruleSetInterface = None
         self.addInterface(self.choiceInterface, self.tr("设置查询网站"))
         self.init_finished = True
 
     def showEvent(self, a0):
         self.initWidgets()
+
+    @pyqtSlot()
+    def onCompleted(self):
+        """
+        移动到上一个页面，用于除了 NoticeChoiceInterface 外，其他界面“完成”键的槽函数
+        """
+        if len(self.breadcrumbBar.items) > 1:
+            self.breadcrumbBar.setCurrentIndex(len(self.breadcrumbBar.items) - 2)
+            self.children_.pop()
+            if len(self.children_) > 0:
+                self.switchInterface(self.children_[-1].objectName())
+
+    @pyqtSlot(Source)
+    def onModifyRuleClicked(self, source):
+        """
+        卡片的“设置过滤规则”按钮被点击时的槽函数
+        :param source: 需要设置规则的通知来源
+        """
+        if self.ruleInterface is not None:
+            try:
+                self.stackedWidget.removeWidget(self.ruleInterface)
+                self.children_.remove(self.ruleInterface)
+            except ValueError:
+                pass
+
+        self.ruleInterface = NoticeRuleInterface(self.manager, source, self)
+        self.ruleInterface.editRuleSet.connect(self.onRuleSetClicked)
+        self.ruleInterface.quit.connect(self.onCompleted)
+        self.addInterface(self.ruleInterface, self.tr("设置过滤规则"))
+        self.switchInterface(self.ruleInterface.objectName())
+
+    @pyqtSlot(Ruleset, Source)
+    def onRuleSetClicked(self, ruleset, source):
+        """
+        当“设置过滤规则”的“编辑规则”按钮被点击时的槽函数
+        :param ruleset: 需要编辑的规则集。内容为空时，表示添加新的规则集。之所以不允许传入 None，是因为 PyQt 对槽函数数据类型有检查
+        :param source: 通知来源
+        """
+        if self.ruleSetInterface is not None:
+            try:
+                self.stackedWidget.removeWidget(self.ruleSetInterface)
+                self.children_.remove(self.ruleSetInterface)
+            except ValueError:
+                pass
+
+        if not ruleset.filters:
+            ruleset = None
+        if source in self.manager.ruleset:
+            all_ruleset = self.manager.ruleset[source]
+        else:
+            all_ruleset = None
+        self.ruleSetInterface = RuleSetInterface(ruleset, all_ruleset, self)
+        self.ruleSetInterface.quit.connect(self.onCompleted)
+        if self.ruleInterface is not None:
+            self.ruleSetInterface.finishEdit.connect(self.ruleInterface.onEditFinish)
+        self.addInterface(self.ruleSetInterface, self.tr("编辑规则"))
+        self.switchInterface(self.ruleSetInterface.objectName())
 
     @pyqtSlot()
     def onQuit(self):

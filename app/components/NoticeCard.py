@@ -32,10 +32,22 @@ class NoticeCard(CardWidget):
         self.hBoxLayout.setContentsMargins(20, 11, 20, 11)
         self.hBoxLayout.setSpacing(15)
 
+        self.hTagLayout = QHBoxLayout()
+        self.hTagLayout.setContentsMargins(0, 0, 0, 0)
+        self.hTagLayout.setSpacing(10)
+        self.hTagLayout.addWidget(self.contentLabel, Qt.AlignLeft)
+        self.tagLabels = []
+        for one in notice.tags:
+            tagLabel = CaptionLabel(one, self)
+            tagLabel.setTextColor("#606060", "#d2d2d2")
+            tagLabel.setFixedHeight(20)
+            self.hTagLayout.addWidget(tagLabel, Qt.AlignVCenter)
+            self.tagLabels.append(tagLabel)
+
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
         self.vBoxLayout.setSpacing(0)
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignVCenter)
-        self.vBoxLayout.addWidget(self.contentLabel, 0, Qt.AlignVCenter)
+        self.vBoxLayout.addLayout(self.hTagLayout)
         self.vBoxLayout.setAlignment(Qt.AlignVCenter)
         self.hBoxLayout.addLayout(self.vBoxLayout)
 

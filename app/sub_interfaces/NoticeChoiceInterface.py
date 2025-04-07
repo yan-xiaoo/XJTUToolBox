@@ -12,6 +12,8 @@ class NoticeChoiceInterface(QFrame):
     """
     # 退出此界面
     quit = pyqtSignal()
+    # 设置规则键被点击
+    setRuleClicked = pyqtSignal(Source)
 
     def __init__(self, manager: NotificationManager, main_window, parent=None):
         """
@@ -36,12 +38,21 @@ class NoticeChoiceInterface(QFrame):
         for one_source in list(Source):
             card = NoticeSourceCard(one_source, one_source in self.manager.subscription, self)
             card.checkChanged.connect(self.onSourceStateChanged)
+            card.setRuleClicked.connect(self.onSetRuleClicked)
             self.vBoxLayout.addWidget(card)
 
         self.vBoxLayout.addStretch(2)
         self.returnButton = PrimaryPushButton(self.tr("完成"), self)
         self.returnButton.clicked.connect(self.onReturnButtonClicked)
         self.vBoxLayout.addWidget(self.returnButton)
+
+    @pyqtSlot(Source)
+    def onSetRuleClicked(self, source: Source):
+        """
+        当用户点击子卡片设置规则按钮时，发出信号的槽函数
+        :param source: 通知的来源
+        """
+        self.setRuleClicked.emit(source)
 
     @pyqtSlot(bool, Source)
     def onSourceStateChanged(self, state: bool, source: Source):
@@ -53,7 +64,8 @@ class NoticeChoiceInterface(QFrame):
         if state:
             self.manager.add_subscription(source)
         else:
-            self.manager.remove_subscription(source)
+            # 不要同时删除规则集合，否则会出现“取消勾选再勾选一个来源结果规则没了”的问题
+            self.manager.remove_subscription(source, remove_ruleset=False)
 
     @pyqtSlot()
     def onReturnButtonClicked(self):
