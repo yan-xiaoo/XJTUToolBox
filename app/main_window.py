@@ -19,6 +19,7 @@ from .ScoreInterface import ScoreInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
 from .ToolBoxInterface import ToolBoxInterface
+from .TrayInterface import TrayInterface
 from .sessions.attendance_session import AttendanceSession
 from .sessions.ehall_session import EhallSession
 from .sessions.jwapp_session import JwappSession
@@ -29,6 +30,7 @@ from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
 from .threads.UpdateThread import UpdateThread, UpdateStatus
 from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all
+from .utils.config import TraySetting
 
 
 def registerSession():
@@ -102,6 +104,17 @@ class MainWindow(MSFluentWindow):
         self.notice_setting_interface = NoticeSettingInterface(self.notice_interface.noticeManager, self.notice_interface, self)
         self.notice_setting_interface.quit.connect(self.notice_interface.onSettingQuit)
 
+        self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
+        self.tray_interface.main_interface.connect(lambda: self.show())
+        # 为了同时执行两个函数的一些诡异小技巧
+        self.tray_interface.schedule_interface.connect(lambda: self.switchTo(self.schedule_interface) or self.show())
+        self.tray_interface.attendance_interface.connect(lambda: self.switchTo(self.attendance_interface) or self.show())
+        self.tray_interface.score_interface.connect(lambda: self.switchTo(self.score_interface) or self.show())
+        self.tray_interface.judge_interface.connect(lambda: self.switchTo(self.judge_interface) or self.show())
+        self.tray_interface.notice_interface.connect(lambda: self.switchTo(self.notice_interface) or self.show())
+        if cfg.traySetting.value == TraySetting.MINIMIZE:
+            self.tray_interface.show()
+
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
         self.addSubInterface(self.schedule_interface, FIF.CALENDAR, self.tr("课表"))
@@ -165,6 +178,31 @@ class MainWindow(MSFluentWindow):
         box.setClosableOnMaskClicked(True)
         box.exec()
         return sys.__excepthook__(ty, value, _traceback)
+
+    def closeEvent(self, a0):
+        """
+        重写关闭事件
+        """
+        if cfg.traySetting.value == TraySetting.MINIMIZE:
+            a0.ignore()
+            self.tray_interface.show()
+            self.hide()
+        elif cfg.traySetting.value == TraySetting.QUIT:
+            self.tray_interface.hide()
+            a0.accept()
+        else:
+            box = MessageBox(self.tr("关闭窗口"), self.tr("您想要退出程序，还是最小化到托盘？\n稍后可以在设置-关于中修改您的选择"), parent=self)
+            box.yesButton.setText(self.tr("最小化到托盘"))
+            box.cancelButton.setText(self.tr("退出"))
+            if box.exec():
+                cfg.traySetting.value = TraySetting.MINIMIZE
+                a0.ignore()
+                self.tray_interface.show()
+                self.hide()
+            else:
+                cfg.traySetting.value = TraySetting.QUIT
+                self.tray_interface.hide()
+                a0.accept()
 
     @pyqtSlot()
     def on_theme_changed(self):

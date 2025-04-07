@@ -91,6 +91,14 @@ class SettingInterface(ScrollArea):
         # 关于组
         self.aboutGroup = SettingCardGroup(self.tr("关于"), self.view)
 
+        self.minimizeToTrayCard = ComboBoxSettingCard(
+            cfg.traySetting,
+            FIF.MINIMIZE,
+            self.tr("关闭程序时"),
+            self.tr("点击关闭按钮时的行为"),
+            texts=[self.tr("询问"), self.tr("直接退出"), self.tr("最小化到托盘")],
+            parent=self.aboutGroup
+        )
         self.updateOnStartCard = CustomSwitchSettingCard(
             FIF.UPDATE,
             self.tr("启动时检查更新"),
@@ -126,6 +134,7 @@ class SettingInterface(ScrollArea):
             self.aboutGroup
         )
 
+        self.aboutGroup.addSettingCard(self.minimizeToTrayCard)
         self.aboutGroup.addSettingCard(self.feedbackCard)
         self.aboutGroup.addSettingCard(self.logCard)
         self.aboutGroup.addSettingCard(self.updateOnStartCard)

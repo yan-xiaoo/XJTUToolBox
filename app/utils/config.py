@@ -24,6 +24,15 @@ class AttendanceLoginMethod(Enum):
     WEBVPN = 2
 
 
+class TraySetting(Enum):
+    # 未设置，需要询问
+    UNKNOWN = 0
+    # 直接关闭程序
+    QUIT = 1
+    # 最小化到托盘
+    MINIMIZE = 2
+
+
 class Config(QConfig):
     AttendanceLoginMethod = AttendanceLoginMethod
 
@@ -45,6 +54,10 @@ class Config(QConfig):
                                             True, OptionsValidator([True, False]), BooleanSerializer())
     openExternalBrowser = OptionsConfigItem("Settings", "open_external_browser",
                                        False, OptionsValidator([True, False]), BooleanSerializer())
+    traySetting = OptionsConfigItem("Settings", "tray_setting",
+                                    TraySetting.UNKNOWN,
+                                    OptionsValidator([TraySetting.UNKNOWN, TraySetting.QUIT, TraySetting.MINIMIZE]),
+                                    EnumSerializer(TraySetting))
 
     def __init__(self):
         super().__init__()
