@@ -30,9 +30,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pillow pyinstaller
-      - name: Create Executable
+      - name: Create Executable(Windows)
+        if: runner.os == 'Windows'
         run: |
-          pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" app.py
+          pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" --hidden-import plyer.platforms.win.notification app.py
+      - name: Install pyobjus(macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pip install Cython==3.0.12
+          git clone https://github.com/kivy/pyobjus.git
+          cd pyobjus
+          make build_ext
+          pip install .
+          cd ..
+      - name: Create Executable(macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" --hidden-import plyer.platforms.macosx.notification app.py
       - name: Create Updater(Windows)
         if: runner.os == 'Windows'
         run: |

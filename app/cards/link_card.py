@@ -111,6 +111,7 @@ class LinkCardView(ScrollArea):
         self.flowLayout.setContentsMargins(66, 0, 0, 0)
         self.flowLayout.setSpacing(12)
         self.flowLayout.setAlignment(Qt.AlignLeft)
+        self.setMinimumHeight(370)
 
         self.setWidget(self.view)
         self.setWidgetResizable(True)
