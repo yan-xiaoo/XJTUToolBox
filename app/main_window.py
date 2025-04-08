@@ -4,7 +4,7 @@ from types import TracebackType
 from typing import Type
 import sys
 
-from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize
+from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize, QTimer
 from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox, InfoBadgePosition, \
@@ -82,6 +82,14 @@ class MainWindow(MSFluentWindow):
             self.update_thread.updateSignal.connect(self.on_update_check)
             self.update_thread.updateSignal.connect(self.setting_interface.onUpdateCheck)
             self.update_thread.start()
+        # 通知定时查询
+        self.notice_timer = QTimer(self)
+        self.notice_timer.timeout.connect(self.notice_interface.onTimerSearch)
+        # 当设置了自动查询时，开始计时
+        cfg.noticeAutoSearch.valueChanged.connect(self.on_notice_search_value_changed)
+        if cfg.noticeAutoSearch.value:
+            # 60 秒检查一次时间
+            self.notice_timer.start(60 * 1000)
 
         self.splashScreen.finish()
 
@@ -101,6 +109,7 @@ class MainWindow(MSFluentWindow):
         self.judge_interface = AutoJudgeInterface(self)
         self.webvpn_convert_interface = WebVPNConvertInterface(self)
         self.notice_interface = NoticeInterface(self, self)
+        self.setting_interface.noticeCard.testButton.clicked.connect(lambda: self.notice_interface.startBackgroundSearch(force_push=True))
         self.notice_setting_interface = NoticeSettingInterface(self.notice_interface.noticeManager, self.notice_interface, self)
         self.notice_setting_interface.quit.connect(self.notice_interface.onSettingQuit)
 
@@ -224,3 +233,10 @@ class MainWindow(MSFluentWindow):
     def on_setting_button_clicked(self):
         if self.setting_badge:
             self.setting_badge.close()
+
+    @pyqtSlot(object)
+    def on_notice_search_value_changed(self, _):
+        if cfg.noticeAutoSearch.value:
+            self.notice_timer.start(60 * 1000)
+        else:
+            self.notice_timer.stop()

@@ -1,8 +1,9 @@
+import datetime
 import os
 
 from packaging.version import parse
 from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme, \
-    EnumSerializer
+    EnumSerializer, ConfigValidator
 from enum import Enum
 from .migrate_data import DATA_DIRECTORY
 
@@ -13,6 +14,53 @@ class BooleanSerializer(ConfigSerializer):
 
     def deserialize(self, value):
         return bool(value)
+
+
+class TimeValidator(ConfigValidator):
+    def __init__(self, default=datetime.time(hour=18, minute=0)):
+        super().__init__()
+        self.default = default
+
+    def validate(self, value):
+        return isinstance(value, datetime.time)
+
+    def correct(self, value):
+        return value if self.validate(value) else self.default
+
+
+class TimeSerializer(ConfigSerializer):
+    def serialize(self, value):
+        return value.strftime("%H:%M")
+
+    def deserialize(self, value):
+        try:
+            hour, minute = map(int, value.split(":"))
+            return datetime.time(hour=hour, minute=minute)
+        except ValueError:
+            return datetime.time(hour=18, minute=0)
+
+
+class DateTimeValidator(ConfigValidator):
+    def __init__(self, default=datetime.datetime(1970, 1, 1)):
+        super().__init__()
+        self.default = default
+
+    def validate(self, value):
+        return isinstance(value, datetime.datetime)
+
+    def correct(self, value):
+        return value if self.validate(value) else self.default
+
+
+class DateTimeSerializer(ConfigSerializer):
+    def serialize(self, value):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+
+    def deserialize(self, value):
+        try:
+            return datetime.datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return datetime.datetime(1970, 1, 1)
 
 
 class AttendanceLoginMethod(Enum):
@@ -58,6 +106,14 @@ class Config(QConfig):
                                     TraySetting.UNKNOWN,
                                     OptionsValidator([TraySetting.UNKNOWN, TraySetting.QUIT, TraySetting.MINIMIZE]),
                                     EnumSerializer(TraySetting))
+    noticeAutoSearch = OptionsConfigItem("Settings", "notice_auto_search",
+                          False, OptionsValidator([True, False]), BooleanSerializer())
+    noticeSearchTime = OptionsConfigItem("Settings", "notice_search_time",
+                                         datetime.time(hour=18, minute=0), TimeValidator(), TimeSerializer())
+    # 这其实不是个设置项目，只是用来存储上次搜索的时间
+    lastSearchTime = OptionsConfigItem("Settings", "last_search_time",
+                                         datetime.datetime(1970, 1, 1), DateTimeValidator(),
+                                         DateTimeSerializer())
 
     def __init__(self):
         super().__init__()

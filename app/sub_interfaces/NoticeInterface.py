@@ -1,15 +1,20 @@
+import datetime
 import json
+import platform
+import sys
 
 from PyQt5.QtCore import Qt, pyqtSlot, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QActionGroup
 from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton, \
-    TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType, InfoBarPosition, InfoBar, CaptionLabel
+    TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType, InfoBarPosition, InfoBar, CaptionLabel, \
+    MessageBox
+from plyer import notification
 
 from ..components.NoticeCard import NoticeCard
 from ..threads.NoticeThread import NoticeThread
 from ..threads.ProcessWidget import ProcessWidget
-from ..utils import StyleSheet
+from ..utils import StyleSheet, cfg
 from ..utils.cache import cacheManager, dataManager
 from notification import NotificationManager, Notification
 
@@ -122,6 +127,9 @@ class NoticeInterface(ScrollArea):
         self.emptyFrameLayout.addWidget(self.emptyButton, alignment=Qt.AlignHCenter)
 
         self.vBoxLayout.addWidget(self.emptyFrame, stretch=1, alignment=Qt.AlignVCenter | Qt.AlignHCenter)
+
+        self._lastNotices = None
+        self._forcePush = False
 
         # 通知显示界面
         self.noticeFrame = QFrame(self.view)
@@ -326,6 +334,92 @@ class NoticeInterface(ScrollArea):
             self.switchTo(self.noticeFrame)
         # 更新通知列表
         self.save_notification()
+
+    @pyqtSlot()
+    def onTimerSearch(self):
+        """
+        主界面定时搜索通知计时器超时时的函数
+        """
+        last_time = cfg.lastSearchTime.value
+        now = datetime.datetime.now()
+        scheduled_time = datetime.datetime.combine(now.date(), cfg.noticeSearchTime.value)
+        if now >= scheduled_time > last_time:
+            # 如果当前时间大于定时搜索时间，并且上次搜索时间小于当前时间
+            self.startBackgroundSearch()
+            # 更新上次搜索时间
+            cfg.lastSearchTime.value = now
+
+    def startBackgroundSearch(self, force_push=False):
+        """
+        启动定时获取通知的线程，开始后台搜索并推送通知
+        :param force_push: 是否一定在查询后推送通知，即使没有新通知
+        """
+        self._forcePush = force_push
+        self.noticeThread.pages = 1
+        self.noticeThread.notices.connect(self.onGetScheduledNotices)
+        self._lastNotices = self.notices[:]
+        # 检查一下 manager 里面有没有订阅
+        if not self.noticeManager.subscription:
+            if self.main_window.isVisible():
+                # 没有订阅就不获取通知
+                box = MessageBox(self.tr("无法获取通知"), self.tr("您还没有设置要获取通知的网站，请前往通知查询页面设置。"), self.main_window)
+                box.yesButton.hide()
+                box.cancelButton.setText(self.tr("好的"))
+                box.exec()
+            return
+        self.noticeThread.start()
+
+    @pyqtSlot(list)
+    def onGetScheduledNotices(self, notices):
+        """
+        定时获取通知时，获取到通知的处理函数
+        """
+        try:
+            self.noticeThread.notices.disconnect(self.onGetScheduledNotices)
+        except TypeError:
+            # 鬼知道为什么会取消连接失败
+            pass
+
+        filtered_notices = [notice for notice in notices if notice not in self._lastNotices]
+        sources = set()
+        count = len(filtered_notices)
+        for notice in filtered_notices:
+            sources.add(notice.source.value)
+        try:
+            if count > 0:
+                notification.notify(title=self.tr("西安交通大学网站有新的通知"), message=f"{self.tr('来自')} {', '.join(sources)} {self.tr('的')} {count} {self.tr('条新通知')}")
+            elif self._forcePush:
+                # 如果没有新通知，但是还是要推送通知
+                notification.notify(title="没有新的通知", message="现在的通知已经是最新的")
+        except NotImplementedError as e:
+            if platform.system() == "Darwin":
+                if getattr(sys, "frozen", False):
+                    # 打包版本不该有问题
+                    if self.main_window.isVisible():
+                        box = MessageBox(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e), self.main_window)
+                        box.yesButton.hide()
+                        box.cancelButton.setText(self.tr("好的"))
+                        box.exec()
+                    else:
+                        self.error(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e))
+                else:
+                    # macOS 源码运行时需要自己装库
+                    if self.main_window.isVisible():
+                        box = MessageBox(self.tr("推送通知失败"), self.tr("请跟随 GitHub 仓库中 README.md 的指引，安装 pyobjus 库"), self.main_window)
+                        box.yesButton.hide()
+                        box.cancelButton.setText(self.tr("好的"))
+                        box.exec()
+                    else:
+                        self.error(self.tr("推送通知失败"), self.tr("请跟随 GitHub 仓库中 README.md 的指引，安装 pyobjus 库"))
+            else:
+                # 其他系统
+                if self.main_window.isVisible():
+                    box = MessageBox(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e), self.main_window)
+                    box.yesButton.hide()
+                    box.cancelButton.setText(self.tr("好的"))
+                    box.exec()
+                else:
+                    self.error(self.tr("无法推送通知"), str(e))
 
     def save_notification(self):
         """

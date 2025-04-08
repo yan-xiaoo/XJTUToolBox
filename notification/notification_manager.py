@@ -127,6 +127,24 @@ class NotificationManager:
 
         return all_notifications
 
+    def get_new_notifications(self, notifications: Iterable[Notification], pages=1):
+        """
+        获取订阅的网站的通知。先获得当前订阅的所有网站的通知，然后根据规则表进行筛选。仅返回不在 notifications 中的通知。
+        满足任何一条规则的通知都会被保留。
+        :param notifications: 已经获取的通知列表
+        :param pages: 需要获取的页面数，默认为 1
+        """
+        new_notifications = self.get_notifications(pages)
+        filtered_notifications = []
+        for notification in new_notifications:
+            if notification in notifications:
+                # 如果已经获取过，则跳过
+                continue
+            else:
+                # 如果没有获取过，则加入
+                filtered_notifications.append(notification)
+        return filtered_notifications
+
     def filter_notifications(self, notifications: Iterable[Notification], clear_other_notice=True):
         """
         过滤已经获取的通知信息。仅返回符合当前过滤规则的通知。

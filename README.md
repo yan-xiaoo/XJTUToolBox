@@ -9,6 +9,7 @@
 - 考勤查询：查询整学期的考勤流水
 - 课表查询：查询整学期的课表，并查看每节课程的考勤信息
 - 成绩查询：查询多个学期的成绩，平均分，自选课程计算绩点
+- 通知订阅：订阅教务处、各个学院的消息，设置定时推送，快速查看网站的新通知
 
 如果遇到问题或有新功能建议，请在 [Issue](https://github.com/yan-xiaoo/XJTUToolBox/issues) 中提出
 
@@ -46,11 +47,24 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 - 安装依赖库：`pip install -r requirements.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt` （国内）
 - 运行：`python app.py`
 
+> 从源码运行时，macOS 系统的用户需要额外安装 pyobjus 库以实现通知发送。如果不安装，定时推送通知功能将无法使用。
+> 
+> 由于依赖库还没有在 pypi 上更新最新的版本，你需要手动编译安装最新的源代码版本。请在存放本软件的终端下依次执行以下命令：
+> 
+> `git clone https://github.com/kivy/pyobjus.git`
+> 
+> `pip install Cython==3.0.12`
+> 
+> `cd pyobjus`
+> 
+> `make build_ext`
+> 
+> `python setup.py install`
+
 更新代码：
 - `git pull`
 
 ## 未来规划
-- 通知订阅：订阅教务处、各个学院的消息，设置定时推送，快速查看网站的新通知
 - 考勤统计查询：查询整学期课程的考勤状态，快速找出缺勤的课程
 
 ## 开发相关

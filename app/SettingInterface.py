@@ -1,19 +1,103 @@
-from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal
+import datetime
+
+from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTime
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
-    InfoBadge, CaptionLabel
+    InfoBadge, ExpandGroupSettingCard, SwitchButton, IndicatorPosition, BodyLabel, TimePicker, PushButton
 from qfluentwidgets import FluentIcon as FIF
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtWidgets import QWidget, QHBoxLayout
 from PyQt5.QtGui import QColor, QDesktopServices
 
 from .cards.custom_switch_card import CustomSwitchSettingCard
 from .components.CustomMessageBox import ConfirmBox
 from .threads.UpdateThread import checkUpdate, UpdateStatus
-from .utils.config import cfg
+from .utils.config import cfg, TraySetting
 from .utils import accounts, LOG_DIRECTORY
 from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
 from .sub_interfaces.EncryptDialog import EncryptDialog, DecryptDialog
+
+
+class NoticeSearchCard(ExpandGroupSettingCard):
+    """
+    定时查询通知的设置卡片
+    """
+    def __init__(self, interface, parent=None):
+        super().__init__(icon=FIF.HISTORY, title="定期查询通知", parent=parent)
+
+        self.interface = interface
+        self.card.setTitle(self.tr("定期查询通知"))
+        self.card.setContent(self.tr("每天自动查询并推送新通知"))
+        self.enableLabel = BodyLabel(self.tr("定期查询通知"), self)
+        self.enableButton = SwitchButton(self.tr("关"), self, IndicatorPosition.RIGHT)
+        self.enableButton.setOnText(self.tr("开"))
+        self.enableButton.checkedChanged.connect(self.onEnableButtonClicked)
+
+        self.timeLabel = BodyLabel(self.tr("查询时间"), self)
+        self.timePicker = TimePicker(parent=self)
+        self.timePicker.timeChanged.connect(self.onTimeChanged)
+        time_ = cfg.noticeSearchTime.value
+        self.timePicker.setTime(QTime(time_.hour, time_.minute))
+
+        self.testLabel = BodyLabel(self.tr("立刻尝试推送通知"), self)
+        self.testButton = PushButton(self.tr("立刻推送"), self)
+
+        if not cfg.noticeAutoSearch.value:
+            self.enableButton.setChecked(False)
+            self.timePicker.setEnabled(False)
+            self.testButton.setEnabled(False)
+        else:
+            self.enableButton.setChecked(True)
+            self.timePicker.setEnabled(True)
+            self.testButton.setEnabled(True)
+
+        self.add(self.enableLabel, self.enableButton)
+        self.add(self.timeLabel, self.timePicker)
+        self.add(self.testLabel, self.testButton)
+
+    @pyqtSlot()
+    def onEnableButtonClicked(self):
+        if self.enableButton.isChecked():
+            if cfg.traySetting.value != TraySetting.MINIMIZE:
+                box = MessageBox(self.tr("开启定期查询"), self.tr("程序需要在后台运行以实现定时查询。\n是否允许程序常驻托盘？"),
+                                 parent=self.interface)
+                box.yesButton.setText(self.tr("确定"))
+                box.cancelButton.setText(self.tr("取消"))
+                if box.exec():
+                    cfg.traySetting.value = TraySetting.MINIMIZE
+                    self.timePicker.setEnabled(True)
+                    cfg.noticeAutoSearch.value = True
+                    self.testButton.setEnabled(True)
+                else:
+                    self.enableButton.setChecked(False)
+                    self.timePicker.setEnabled(False)
+                    cfg.noticeAutoSearch.value = False
+                    self.testButton.setEnabled(False)
+            else:
+                self.timePicker.setEnabled(True)
+                cfg.noticeAutoSearch.value = True
+                self.testButton.setEnabled(True)
+        else:
+            self.timePicker.setEnabled(False)
+            cfg.noticeAutoSearch.value = False
+            self.testButton.setEnabled(False)
+
+    @pyqtSlot(QTime)
+    def onTimeChanged(self, time: QTime):
+        """时间选择器的时间改变时触发"""
+        cfg.noticeSearchTime.value = datetime.time(hour=time.hour(), minute=time.minute())
+
+    def add(self, label, widget):
+        w = QWidget()
+
+        layout = QHBoxLayout(w)
+
+        layout.addWidget(label)
+        layout.addStretch(1)
+        layout.addWidget(widget)
+
+        # 添加组件到设置卡
+        self.addGroupWidget(w)
 
 
 class SettingInterface(ScrollArea):
@@ -70,6 +154,11 @@ class SettingInterface(ScrollArea):
         self.ignoreLateCard = CustomSwitchSettingCard(FIF.ERASE_TOOL, self.tr("忽略缓考课程"), self.tr("查询成绩时忽略缓考课程"),
                                                       cfg.ignoreLateCourse, self.scoreGroup)
         self.scoreGroup.addSettingCard(self.ignoreLateCard)
+
+        # 通知查询组
+        self.noticeGroup = SettingCardGroup(self.tr("通知查询"), self.view)
+        self.noticeCard = NoticeSearchCard(self, self.view)
+        self.noticeGroup.addSettingCard(self.noticeCard)
 
         # 个性化组
         self.personalGroup = SettingCardGroup(self.tr("个性化"), self.view)
@@ -145,6 +234,7 @@ class SettingInterface(ScrollArea):
         self.expandLayout.addWidget(self.accountGroup)
         self.expandLayout.addWidget(self.attendanceGroup)
         self.expandLayout.addWidget(self.scoreGroup)
+        self.expandLayout.addWidget(self.noticeGroup)
         self.expandLayout.addWidget(self.personalGroup)
         self.expandLayout.addWidget(self.aboutGroup)
 
