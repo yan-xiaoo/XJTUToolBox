@@ -44,7 +44,10 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 
 - 安装 Python 3.12 或以上版本。更低版本的 Python 可能可以运行本程序，但可能存在兼容性问题
 - 克隆本项目：`git clone https://github.com/yan-xiaoo/XJTUToolBox.git`
-- 安装依赖库：`pip install -r requirements.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt` （国内）
+- 安装依赖库：
+  - macOS 系统用户：`pip install -r requirements_osx.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements_osx.txt` （国内）
+  - 其他系统用户：`pip install -r requirements.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt` （国内）
+  > macOS 系统中，由于 PyCocoa 和 pyobjc 最新版本出现冲突，必须手动限制 pyobjc 的版本
 - 运行：`python app.py`
 
 > 从源码运行时，macOS 系统的用户需要额外安装 pyobjus 库以实现通知发送。如果不安装，定时推送通知功能将无法使用。
