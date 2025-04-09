@@ -239,6 +239,10 @@ class LessonCard(HeaderCardWidget):
 
         self.confirmFrame.setVisible(False)
         self.table.setMinimumWidth(400)
+        if ambiguous_time:
+            self.table.setMinimumHeight(150)
+        else:
+            self.table.setMinimumHeight(192)
 
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -698,6 +702,8 @@ class LessonDetailDialog(MessageBoxBase):
         self.viewLayout.setSpacing(0)
         self.viewLayout.setContentsMargins(12, 12, 12, 12)
 
+        self.content.setMinimumHeight(350)
+
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
     @__init__.register
@@ -757,6 +763,8 @@ class LessonDetailDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.content)
         self.viewLayout.setSpacing(0)
         self.viewLayout.setContentsMargins(12, 12, 12, 12)
+
+        self.content.setMinimumHeight(350)
 
         lesson_card.courseAdded.connect(self.onCourseAdded)
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
