@@ -39,7 +39,10 @@ class CommonLoginSession(requests.Session, metaclass=ABCMeta):
         此属性和 has_timeout 有所区别：has_timeout 在发起请求后便会变为 False，
         因此如果登录到一半被取消，has_timeout 已经从 True 变为 False，但其实现在没有登录成功,
         因此需要额外的标识位。
+        如果当前已经超时，那么查询 has_login 时，has_login 会变为 False。
         """
+        if self.has_timeout():
+            self._has_login = False
         return self._has_login
 
     @has_login.setter

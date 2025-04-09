@@ -31,7 +31,6 @@ class NoticeSearchCard(ExpandGroupSettingCard):
         self.enableLabel = BodyLabel(self.tr("定期查询通知"), self)
         self.enableButton = SwitchButton(self.tr("关"), self, IndicatorPosition.RIGHT)
         self.enableButton.setOnText(self.tr("开"))
-        self.enableButton.checkedChanged.connect(self.onEnableButtonClicked)
 
         self.timeLabel = BodyLabel(self.tr("查询时间"), self)
         self.timePicker = TimePicker(parent=self)
@@ -50,6 +49,8 @@ class NoticeSearchCard(ExpandGroupSettingCard):
             self.enableButton.setChecked(True)
             self.timePicker.setEnabled(True)
             self.testButton.setEnabled(True)
+        # 延迟链接
+        self.enableButton.checkedChanged.connect(self.onEnableButtonClicked)
 
         self.add(self.enableLabel, self.enableButton)
         self.add(self.timeLabel, self.timePicker)
@@ -251,12 +252,19 @@ class SettingInterface(ScrollArea):
         self.loginMethodCard.comboBox.currentIndexChanged.connect(lambda: cfg.set(cfg.defaultAttendanceLoginMethod,
                                                                                   cfg.AttendanceLoginMethod(
                                                                                       self.loginMethodCard.comboBox.currentIndex())))
+        cfg.traySetting.valueChanged.connect(self._onTraySettingChanged)
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
         self.clearCard.clicked.connect(self._onClearAccountsClicked)
         self.updateCard.clicked.connect(self.onUpdateClicked)
         self.feedbackCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox/issues")))
         self.logCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("file:///" + LOG_DIRECTORY)))
+
+    @pyqtSlot()
+    def _onTraySettingChanged(self):
+        if cfg.traySetting.value != TraySetting.MINIMIZE and cfg.noticeAutoSearch.value:
+            cfg.noticeAutoSearch.value = False
+            self.noticeCard.enableButton.setChecked(False)
 
     @pyqtSlot()
     def onEncryptAccountClicked(self):

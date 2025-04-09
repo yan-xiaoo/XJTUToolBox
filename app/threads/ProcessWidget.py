@@ -184,6 +184,7 @@ class ProcessDialog(MessageBoxBase):
 
         thread.hasFinished.connect(self.onThreadFinished)
         thread.canceled.connect(self.onThreadCanceled)
+        thread.finished.connect(self.onThreadFinished)
         # 线程被强行终止时发送信号
         widget.canceled.connect(self.onThreadCanceled)
 
