@@ -101,8 +101,6 @@ class AutoJudgeInterface(ScrollArea):
 
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
-        self.processDialog = ProcessDialog(self.thread_, parent, True)
-
         self.startFrame = QFrame(self.view)
         self.startFrameLayout = QVBoxLayout(self.startFrame)
         self.questionnaireFrame = QFrame(self.view)
@@ -136,6 +134,8 @@ class AutoJudgeInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.startFrame, 1, alignment=Qt.AlignVCenter)
         self.vBoxLayout.addWidget(self.questionnaireFrame, 1, alignment=Qt.AlignVCenter)
 
+        self.processDialog = None
+
         StyleSheet.AUTO_JUDGE_INTERFACE.apply(self)
 
         self.setWidget(self.view)
@@ -143,6 +143,9 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot()
     def onThreadStarted(self):
+        # 在使用前初始化对话框，否则会出现奇怪的问题
+        if self.processDialog is None:
+            self.processDialog = ProcessDialog(thread=self.thread_, parent=self, stoppable=True)
         self.processDialog.exec()
 
     @pyqtSlot()
