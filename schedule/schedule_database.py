@@ -1,4 +1,4 @@
-from peewee import Model, CharField, ForeignKeyField, IntegerField, DatabaseProxy, Database
+from peewee import Model, CharField, ForeignKeyField, IntegerField, DatabaseProxy, Database, TimeField
 from enum import Enum
 # 这边在 Pycharm 里虽然会报错，但是可以运行；这是一个 Pycharm 分析器的问题，不知道啥时候 Jetbrains 会修
 from playhouse.migrate import SqliteMigrator, migrate
@@ -36,6 +36,11 @@ class BaseModel(Model):
 class Course(BaseModel):
     name = CharField()
 
+class Exam(BaseModel):
+    name = CharField()
+    start_time = TimeField()
+    end_time = TimeField()
+
 
 class CourseInstance(BaseModel):
     course = ForeignKeyField(model=Course)
@@ -52,6 +57,7 @@ class CourseInstance(BaseModel):
     term_number = CharField()
     # 课程名称
     name = CharField()
+    Exam = ForeignKeyField(model=Exam, null=True)
 
 
 class Config(BaseModel):
@@ -73,7 +79,7 @@ class Term(BaseModel):
 def create_tables(new_database: Database):
     new_database.connect(reuse_if_open=True)
     with new_database:
-        new_database.create_tables([Course, CourseInstance, Config, Term])
+        new_database.create_tables([Course, CourseInstance, Config, Term, Exam])
     set_config("database_version", str(DATABASE_VERSION))
 
 
@@ -155,9 +161,7 @@ def _downgrade(old_version: int, new_version: int):
         # 从版本 3 降级到版本 2
         migrator = SqliteMigrator(database)
         with database.atomic():
-            migrate(
-                migrator.drop_column("courseinstance", "name")
-            )
+            migrate(migrator.drop_column("courseinstance", "name"))
         set_config("database_version", str(new_version))
 
 
