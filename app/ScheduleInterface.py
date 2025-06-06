@@ -561,7 +561,7 @@ class ScheduleInterface(ScrollArea):
                 if widget is not None:
                     widget.clicked.disconnect()
                 self.table_widget.removeCellWidget(i, j)
-
+        self.table_widget.clearSpans()
         for course in schedule:
             widget = ScheduleTableWidget(course)
             widget.clicked.connect(self.onLessonDetailClicked)
