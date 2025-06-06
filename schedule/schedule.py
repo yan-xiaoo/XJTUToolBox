@@ -4,7 +4,7 @@ import json
 
 
 class _ScheduleContainer:
-    def __init__(self, weeks=20, days=7, periods=11, lessons=None):
+    def __init__(self, weeks=22, days=7, periods=11, lessons=None):
         """
         :param weeks: 此课程表最多保存多少周的课程（默认20周）
         :param days: 此课程表最多保存每周多少天的课程（默认七天）
