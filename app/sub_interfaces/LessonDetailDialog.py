@@ -256,25 +256,38 @@ class LessonCard(HeaderCardWidget):
         """
         按照课程的信息，填充表格。此方法会重置当前课程被修改的信息。
         """
-        if self.ambiguous_time:
-            class_start_time = self.course.start_time
-            class_end_time = self.course.end_time
-        else:
-            is_summer_time = isSummerTime(
-                self.start_time + timedelta(days=((self.course.week_number - 1) * 7 + self.course.day_of_week - 1)))
-            class_start_time = getClassStartTime(self.course.start_time, is_summer_time).strftime("%H:%M")
-            class_end_time = getClassEndTime(self.course.end_time, is_summer_time).strftime("%H:%M")
-
+        '''
+        同样，增加考试的处理，这里需要保证展示的是真实的考试时间，而不是近似的课程时间。
+        '''
         self.weeks = self.getAllWeeks()
         weeks = [str(week) for week in self.weeks]
-
-        if self.ambiguous_time:
-            self.table.setRowHidden(0, True)
+        if self.course.Exam is not None:
+            class_start_time = self.course.Exam.start_time.strftime("%H:%M")
+            class_end_time = self.course.Exam.end_time.strftime("%H:%M")
         else:
-            self.table.setItem(0, 0, QTableWidgetItem(self.tr("状态")))
-            self.table.setItem(0, 1, QTableWidgetItem(self.status_dict.get(CourseStatus(self.course.status), self.tr("未知"))))
+            if self.ambiguous_time:
+                class_start_time = self.course.start_time
+                class_end_time = self.course.end_time
+            else:
+                is_summer_time = isSummerTime(self.start_time + timedelta(days=(
+                    (self.course.week_number - 1) * 7 + self.course.day_of_week -
+                    1)))
+                class_start_time = getClassStartTime(
+                    self.course.start_time, is_summer_time).strftime("%H:%M")
+                class_end_time = getClassEndTime(self.course.end_time,
+                                             is_summer_time).strftime("%H:%M")
+            if self.ambiguous_time:
+                self.table.setRowHidden(0, True)
+            else:
+                self.table.setItem(0, 0, QTableWidgetItem(self.tr("状态")))
+                self.table.setItem(
+                    0, 1,
+                    QTableWidgetItem(
+                        self.status_dict.get(CourseStatus(self.course.status),
+                                             self.tr("未知"))))
         self.table.setItem(1, 0, QTableWidgetItem(self.tr("时间")))
-        self.table.setItem(1, 1, QTableWidgetItem(f"{class_start_time} - {class_end_time}"))
+        self.table.setItem(
+            1, 1, QTableWidgetItem(f"{class_start_time} - {class_end_time}"))
         self.table.setItem(2, 0, QTableWidgetItem(self.tr("教师")))
         self.table.setItem(2, 1, QTableWidgetItem(self.course.teacher))
         self.table.setItem(3, 0, QTableWidgetItem(self.tr("地点")))
@@ -282,7 +295,6 @@ class LessonCard(HeaderCardWidget):
         self.table.setItem(4, 0, QTableWidgetItem(self.tr("上课周")))
         self.table.setItem(4, 1, QTableWidgetItem(f"{','.join(weeks)}"))
         self.table.adjustSize()
-
     @pyqtSlot()
     def startEdit(self):
         super().startEdit()
@@ -844,5 +856,8 @@ class LessonDetailDialog(MessageBoxBase):
             self.lessButton.setVisible(False)
 
     def checkSameCourse(self, course1, course2):
-        return (course1.name == course2.name and course1.start_time == course2.start_time and course1.end_time == course2.end_time
-                and course1.day_of_week == course2.day_of_week and course1.term_number == course2.term_number)
+        return (course1.name == course2.name
+                and course1.start_time == course2.start_time
+                and course1.end_time == course2.end_time
+                and course1.day_of_week == course2.day_of_week
+                and course1.term_number == course2.term_number)
