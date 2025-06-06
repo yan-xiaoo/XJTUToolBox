@@ -1,5 +1,6 @@
 import datetime
 import os.path
+import pytz
 
 from icalendar import Calendar
 
@@ -660,6 +661,7 @@ class ScheduleInterface(ScrollArea):
         :param ignore_holidays: 需要忽略的节假日日期
         :return:
         """
+        LOCAL_TIMEZONE = pytz.timezone("Asia/Shanghai") #设定为北京时间
         term_start = self.schedule_service.getStartOfTerm()
         if term_start is None:
             raise ValueError("学期开始时间为空")
@@ -685,17 +687,17 @@ class ScheduleInterface(ScrollArea):
 
             e.add(
                 "dtstart",
-                date.replace(
+                LOCAL_TIMEZONE.localize(date.replace(
                     hour=begin_time.hour,
                     minute=begin_time.minute
-                )
+                ))
             )
             e.add(
                 "dtend",
-                date.replace(
+                LOCAL_TIMEZONE.localize(date.replace(
                     hour=end_time.hour,
                     minute=end_time.minute
-                )
+                ))
             )
             cal.add_component(e)
         with open(path, "wb") as f:
