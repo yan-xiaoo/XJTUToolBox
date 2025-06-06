@@ -279,7 +279,7 @@ class ScheduleInterface(ScrollArea):
         下一周按钮点击事件
         """
         current = self.weekComboBox.currentIndex()
-        if current < 17:
+        if current < 23:
             self.weekComboBox.setCurrentIndex(current + 1)
 
     @pyqtSlot()
