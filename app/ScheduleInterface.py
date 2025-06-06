@@ -2,7 +2,7 @@ import datetime
 import os.path
 import pytz
 
-from icalendar import Calendar
+from icalendar import Calendar, Alarm
 
 from PyQt5.QtCore import pyqtSlot, QPoint
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHBoxLayout, QHeaderView
@@ -669,37 +669,68 @@ class ScheduleInterface(ScrollArea):
         cal = Calendar()
 
         for course in self.schedule_service.getCourseInTerm():
+
+            term_start_time = datetime.datetime(term_start.year,
+                                                term_start.month,
+                                                term_start.day)
+            date = term_start_time + datetime.timedelta(
+                days=(course.week_number - 1) * 7 + course.day_of_week - 1)
+
             e = Event()
-            e.add(
-                "description",
-                '课程名称：' + course.name +
-                ';上课地点：' + course.location
-            )
-            e.add('summary', course.name + '@' + course.location)
+            e.add("summary", course.name)
+            e.add("description", course.name + " " + course.location)
+            e.add('location', course.location)
+            if course.Exam == None:
 
-            term_start_time = datetime.datetime(term_start.year, term_start.month, term_start.day)
-            date = term_start_time + datetime.timedelta(days=(course.week_number - 1) * 7 + course.day_of_week - 1)
-            if date.date() in ignore_holidays:
-                continue
+                if date.date() in ignore_holidays:
+                    continue
 
-            begin_time = getClassStartTime(course.start_time, isSummerTime(date))
-            end_time = getClassEndTime(course.end_time, isSummerTime(date))
+                begin_time = getClassStartTime(course.start_time,
+                                               isSummerTime(date))
+                end_time = getClassEndTime(course.end_time, isSummerTime(date))
 
-            e.add(
-                "dtstart",
-                LOCAL_TIMEZONE.localize(date.replace(
-                    hour=begin_time.hour,
-                    minute=begin_time.minute
-                ))
-            )
-            e.add(
-                "dtend",
-                LOCAL_TIMEZONE.localize(date.replace(
-                    hour=end_time.hour,
-                    minute=end_time.minute
-                ))
-            )
-            cal.add_component(e)
+                e.add(
+                    "dtstart",
+                    LOCAL_TIMEZONE.localize(date.replace(hour=begin_time.hour,
+                                 minute=begin_time.minute)))
+                e.add("dtend",
+                      LOCAL_TIMEZONE.localize(date.replace(hour=end_time.hour, minute=end_time.minute)))
+
+                alarm = Alarm()
+                alarm.add("action", "display")
+                alarm.add("description", self.tr("上课提醒"))
+                alarm.add("trigger", datetime.timedelta(minutes=-15))
+                e.add_component(alarm)
+
+                aalarm = Alarm()
+                aalarm.add("action", "AUDIO")
+                aalarm.add("trigger", datetime.timedelta(minutes=-15))
+                e.add_component(aalarm)
+
+                cal.add_component(e)
+            else:
+                begin_time = course.Exam.start_time
+                end_time = course.Exam.end_time
+
+                e.add(
+                    "dtstart",
+                    LOCAL_TIMEZONE.localize(date.replace(hour=begin_time.hour,
+                                 minute=begin_time.minute)))
+                e.add("dtend",
+                      LOCAL_TIMEZONE.localize(date.replace(hour=end_time.hour, minute=end_time.minute)))
+
+                alarm = Alarm()
+                alarm.add("action", "display")
+                alarm.add("description", self.tr("考试提醒"))
+                alarm.add("trigger", datetime.timedelta(minutes=-30))
+                e.add_component(alarm)
+
+                aalarm = Alarm()
+                aalarm.add("action", "AUDIO")
+                aalarm.add("trigger", datetime.timedelta(minutes=-30))
+                e.add_component(aalarm)
+
+                cal.add_component(e)
         with open(path, "wb") as f:
             f.write(cal.to_ical())
 
