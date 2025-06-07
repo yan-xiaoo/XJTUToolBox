@@ -12,20 +12,20 @@ from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
     StateToolTip
 from qfluentwidgets import FluentIcon as FIF
 
-from app.components.ScheduleTable import ScheduleTableWidget
-from app.sessions.attendance_session import AttendanceSession
-from app.sub_interfaces.ChangeTermDialog import ChangeTermDialog
-from app.sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
-from app.sub_interfaces.LessonConflictDialog import LessonConflictDialog
-from app.sub_interfaces.LessonDetailDialog import LessonDetailDialog
-from app.threads.HolidayThread import HolidayThread
-from app.threads.ProcessWidget import ProcessWidget
-from app.threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
-from app.threads.ScheduleAttendanceThread import ScheduleAttendanceThread, AttendanceFlowLogin
-from app.threads.ScheduleThread import ScheduleThread
-from app.utils import StyleSheet, accounts, cfg
-from app.utils.cache import cacheManager
-from app.utils.migrate_data import account_data_directory
+from .components.ScheduleTable import ScheduleTableWidget
+from .sessions.attendance_session import AttendanceSession
+from .sub_interfaces.ChangeTermDialog import ChangeTermDialog
+from .sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
+from .sub_interfaces.LessonConflictDialog import LessonConflictDialog
+from .sub_interfaces.LessonDetailDialog import LessonDetailDialog
+from .threads.HolidayThread import HolidayThread
+from .threads.ProcessWidget import ProcessWidget
+from .threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
+from .threads.ScheduleAttendanceThread import ScheduleAttendanceThread, AttendanceFlowLogin
+from .threads.ScheduleThread import ScheduleThread
+from .utils import StyleSheet, accounts, cfg
+from .utils.cache import cacheManager
+from .utils.migrate_data import account_data_directory
 from attendance.attendance import AttendanceWaterRecord, AttendanceFlow, WaterType, FlowRecordType
 from schedule import getAttendanceEndTime, getAttendanceStartTime, getClassStartTime, getClassEndTime
 from schedule.schedule_database import CourseInstance, CourseStatus
@@ -258,7 +258,7 @@ class ScheduleInterface(ScrollArea):
         start = self.schedule_service.getStartOfTerm()
         current = datetime.date.today()
         if start is None or start > current or (current -
-                                                start).days // 7 >= 20:
+                                                start).days // 7 >= 23:
             return 1
         return min((current - start).days // 7 + 1, 22)
 
@@ -762,7 +762,7 @@ class ScheduleInterface(ScrollArea):
         :param ignore_holidays: 需要忽略的节假日日期
         :return:
         """
-        LOCAL_TIMEZONE = pytz.timezone("Asia/Shanghai")  #设定为北京时间
+        LOCAL_TIMEZONE = pytz.timezone("Asia/Shanghai")  # 设定为北京时间
         term_start = self.schedule_service.getStartOfTerm()
         if term_start is None:
             raise ValueError("学期开始时间为空")
@@ -807,11 +807,6 @@ class ScheduleInterface(ScrollArea):
                 alarm.add("trigger", datetime.timedelta(minutes=-15))
                 e.add_component(alarm)
 
-                aalarm = Alarm()
-                aalarm.add("action", "AUDIO")
-                aalarm.add("trigger", datetime.timedelta(minutes=-15))
-                e.add_component(aalarm)
-
                 cal.add_component(e)
             else:
                 begin_time = course.Exam.start_time
@@ -833,11 +828,6 @@ class ScheduleInterface(ScrollArea):
                 alarm.add("description", self.tr("考试提醒"))
                 alarm.add("trigger", datetime.timedelta(minutes=-30))
                 e.add_component(alarm)
-
-                aalarm = Alarm()
-                aalarm.add("action", "AUDIO")
-                aalarm.add("trigger", datetime.timedelta(minutes=-30))
-                e.add_component(aalarm)
 
                 cal.add_component(e)
         with open(path, "wb") as f:
