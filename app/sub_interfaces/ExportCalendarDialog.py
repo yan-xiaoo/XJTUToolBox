@@ -14,6 +14,7 @@ class ExportCalendarDialog(MessageBoxBase):
 
         self.result_path = None
         self.ignore_holiday = True
+        self.set_alarm = True
 
         self.title = TitleLabel(self.tr("导出课程表"), self)
         self.hint = CaptionLabel(self.tr("导出课程表为 ics 日历文件"), self)
@@ -35,12 +36,19 @@ class ExportCalendarDialog(MessageBoxBase):
         self.skipCheck.setToolTipDuration(10000)
         self.skipCheck.installEventFilter(ToolTipFilter(self.skipCheck, showDelay=1000, position=ToolTipPosition.TOP))
 
+        self.alarmCheck = CheckBox(self.tr("设置提醒事项"), self)
+        self.alarmCheck.setChecked(True)
+        self.alarmCheck.setToolTip(self.tr("在课程开始前 15 分钟提醒，考试开始前 30 分钟提醒"))
+        self.alarmCheck.setToolTipDuration(10000)
+        self.alarmCheck.installEventFilter(ToolTipFilter(self.alarmCheck, showDelay=1000, position=ToolTipPosition.TOP))
+
         self.hintLabel = CaptionLabel(self.tr("日历包含本学期所有课程，但不包含考勤状态\n日历不包含调休日的课程"), self)
 
         self.viewLayout.addWidget(self.title)
         self.viewLayout.addWidget(self.hint)
         self.viewLayout.addWidget(self.fileFrame)
         self.viewLayout.addWidget(self.skipCheck)
+        self.viewLayout.addWidget(self.alarmCheck)
         self.viewLayout.addWidget(self.hintLabel)
 
         self.yesButton.setText(self.tr("确定"))
@@ -59,6 +67,7 @@ class ExportCalendarDialog(MessageBoxBase):
 
         self.result_path = file_path
         self.ignore_holiday = self.skipCheck.isChecked()
+        self.set_alarm = self.alarmCheck.isChecked()
         self.accept()
 
     @pyqtSlot()

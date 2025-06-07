@@ -4,8 +4,19 @@ from typing import List
 
 from peewee import SqliteDatabase, DoesNotExist, fn
 
-from .schedule_database import Course, CourseInstance, create_tables, set_database, set_config, get_config, \
+from .schedule_database import Course, Exam, CourseInstance, create_tables, set_database, set_config, get_config, \
     DATABASE_VERSION, upgrade, downgrade, Term
+
+weekday_map = {
+    "星期一": 1,
+    "星期二": 2,
+    "星期三": 3,
+    "星期四": 4,
+    "星期五": 5,
+    "星期六": 6,
+    "星期日": 7,
+    "星期天": 7,  # 有些写法用“星期天”
+}
 
 
 class ScheduleService:
@@ -99,6 +110,16 @@ class ScheduleService:
         except DoesNotExist:
             return None
 
+    def getExamInTerm(self, term_number: str = None):
+        """
+        获取某个学期的考试安排
+        :param term_number: 学期编号
+        :return: 考试安排
+        """
+        if term_number is None:
+            term_number = self.getCurrentTerm()
+        return Exam.select().where(Exam.term_number == term_number)
+
     def getCourseInTerm(self, term_number: str = None):
         """
         获取某个学期的课程表
@@ -108,6 +129,17 @@ class ScheduleService:
         if term_number is None:
             term_number = self.getCurrentTerm()
         return CourseInstance.select().where(CourseInstance.term_number == term_number)
+
+    def getExamInWeek(self, week_number: int, term_number: str = None):
+        """
+        获取某一周的考试安排
+        :param week_number: 周数
+        :param term_number: 学期编号
+        :return: 考试安排
+        """
+        if term_number is None:
+            term_number = self.getCurrentTerm()
+        return Exam.select().where(Exam.week_number == week_number, Exam.term_number == term_number)
 
     def getCourseInWeek(self, week_number: int, term_number: str = None):
         """
@@ -251,9 +283,26 @@ class ScheduleService:
                 "week_number": week,
                 "manual": course.manual,
                 "status": 7 if course.manual else 1,
-                "term_number": course.term_number
+                "term_number": course.term_number,
+                "Exam": course.Exam
             })
         CourseInstance.insert_many(insertion).execute()
+
+    def editExam(self, exam: Exam, new_name: str, new_location: str, new_seat_number: str):
+        """
+        修改考试的名称、地点、座位号
+        """
+        exam.name = new_name
+        exam.location = new_location
+        exam.seat_number = new_seat_number
+        exam.save()
+
+    def deleteExam(self, exam: Exam):
+        """
+        删除考试
+        :param exam: 考试对象
+        """
+        exam.delete_instance()
 
     def editSingleCourse(self, course: CourseInstance, new_name: str, new_location: str, new_teacher: str):
         """
@@ -319,18 +368,26 @@ class ScheduleService:
         :param course_json: 课程的 json 字典
         :param manual: 课程的 manual 字段如何设置，即标记课程是不是手动添加的
         """
+        weeks = []
         teacher = course_json.get("SKJS", None)
         location = course_json.get("JASMC", None)
         day = int(course_json["SKXQ"])
         start_time = int(course_json["KSJC"])
         end_time = int(course_json["JSJC"])
-        weeks = []
         for week_no, single in enumerate(course_json["SKZC"]):
             if single == "1":
                 weeks.append(week_no + 1)
-        result = CourseInstance(course=None, name=course_json["KCM"], day_of_week=day, start_time=start_time,
-                                end_time=end_time, location=location, teacher=teacher, week_number=None, manual=1 if manual else 0,
-                                term_number=course_json["XNXQDM"], week_numbers=weeks)
+        result = CourseInstance(course=None,
+                                name=course_json["KCM"],
+                                day_of_week=day,
+                                start_time=start_time,
+                                end_time=end_time,
+                                location=location,
+                                teacher=teacher,
+                                week_number=None,
+                                manual=1 if manual else 0,
+                                term_number=course_json["XNXQDM"],
+                                week_numbers=weeks)
         return result
 
     def getCourseFromJson(self, course_json: dict, manual: bool = False) -> List[CourseInstance]:
@@ -339,19 +396,91 @@ class ScheduleService:
         :param course_json: 课程的 json 字典
         :param manual: 课程的 manual 字段如何设置，即标记课程是不是手动添加的
         """
+
+        result = []
         teacher = course_json.get("SKJS", None)
         location = course_json.get("JASMC", None)
         day = int(course_json["SKXQ"])
         start_time = int(course_json["KSJC"])
         end_time = int(course_json["JSJC"])
-        result = []
+        #
         for week_no, single in enumerate(course_json["SKZC"]):
             if single == "1":
-                result.append(CourseInstance(course=None,
-                                             name=course_json["KCM"], day_of_week=day, start_time=start_time,
-                                             end_time=end_time, location=location, teacher=teacher, week_number=week_no + 1,
-                                             manual=1 if manual else 0, term_number=course_json["XNXQDM"]))
+                result.append(
+                    CourseInstance(course=None,
+                                   name=course_json["KCM"],
+                                   day_of_week=day,
+                                   start_time=start_time,
+                                   end_time=end_time,
+                                   location=location,
+                                   teacher=teacher,
+                                   week_number=week_no + 1,
+                                   manual=1 if manual else 0,
+                                   term_number=course_json["XNXQDM"]))
+
         return result
+
+    def addExamFromJson(self, exam_json: dict):
+        """
+        从 json 文件中创建考试对象，
+        :param exam_json: 考试的 json 字典
+        """
+        result = []
+
+        exams = exam_json["exams"]
+        term_number = exam_json["term_number"]
+        for one in exams:
+            time_string = one.get("KSSJMS", "")
+            date_part, time_part = time_string.split(' ')
+            time_range = time_part.split('(')[0]  # 去掉 (星期二)
+            start_str, end_str = time_range.split('-')
+
+            location = one.get("JASMC", "")
+            seat_number = one.get("ZWH", "")
+
+            course = Course.get_or_create(name=one["KCM"])[0]
+
+            # 构造 datetime 对象
+            start_dt = datetime.datetime.fromisoformat(f"{date_part}T{start_str}")
+            end_dt = datetime.datetime.fromisoformat(f"{date_part}T{end_str}")
+
+            if Exam.select().where(Exam.course == course).count() != 0:
+                # 如果已经存在同名考试，则删除原先考试，重新添加
+                Exam.delete().where(Exam.course == course).execute()
+
+            '''
+            这里的时间是粗略的，毕竟考试的时间并不总是严格与课程节次重合
+            由于课表本身设计就不是用来展示任意时间的日程的，其实没办法精确展示。
+            '''
+            if 8 < start_dt.hour < 12:
+                start_time = start_dt.hour - 7
+            elif 12 <= start_dt.hour < 18:
+                start_time = start_dt.hour - 9
+            elif 18 <= start_dt.hour < 24:
+                start_time = start_dt.hour - 10
+            else:
+                start_time = 1
+
+            end_time = start_time + 1
+
+            week = (start_dt.date() - self.getStartOfTerm()).days // 7 + 1
+            day_of_week = start_dt.isoweekday()  # 获取 ISO 周几（1-7）
+
+            exam = Exam(name=one["KCM"] + "考试",
+                        week_number=week,
+                        course=course,
+                        location=location,
+                        seat_number=seat_number,
+                        day_of_week=day_of_week,
+                        start_time=start_time,
+                        end_time=end_time,
+                        term_number=term_number,
+                        start_exact_time=start_dt.time(),
+                        end_exact_time=end_dt.time())
+            result.append(exam)
+
+        with self.database.atomic():
+            Exam.bulk_create(result)
 
     def addCourseFromGroup(self, course_group, merge_with_existing: bool = False):
         """
@@ -367,10 +496,18 @@ class ScheduleService:
         # 解析 json 并添加课程实例表的内容
         insertion = []
         for week in course_group.week_numbers:
-            insertion.append(CourseInstance(course=course, name=course_group.name, day_of_week=course_group.day_of_week,
-                                            start_time=course_group.start_time, end_time=course_group.end_time,
-                                            location=course_group.location, teacher=course_group.teacher, week_number=week,
-                                            manual=course_group.manual, term_number=course_group.term_number))
+            insertion.append(
+                CourseInstance(course=course,
+                               name=course_group.name,
+                               day_of_week=course_group.day_of_week,
+                               start_time=course_group.start_time,
+                               end_time=course_group.end_time,
+                               location=course_group.location,
+                               teacher=course_group.teacher,
+                               week_number=week,
+                               manual=course_group.manual,
+                               term_number=course_group.term_number,
+                               Exam=course_group.Exam))
         with self.database.atomic():
             CourseInstance.bulk_create(insertion)
 
@@ -379,12 +516,20 @@ class ScheduleService:
         删除课程表的内容
         :param course_group: 课程的 json 字典，其中 week_numbers 字段表示课程要删除的所有周数
         """
-        CourseInstance.delete().where(CourseInstance.course == course_group.course, CourseInstance.term_number == course_group.term_number,
-                                      CourseInstance.start_time == course_group.start_time, CourseInstance.end_time == course_group.end_time,
-                                      CourseInstance.name == course_group.name, CourseInstance.day_of_week == course_group.day_of_week,
-                                      CourseInstance.week_number.in_(course_group.week_numbers)).execute()
+        CourseInstance.delete().where(
+            CourseInstance.course == course_group.course,
+            CourseInstance.term_number == course_group.term_number,
+            CourseInstance.start_time == course_group.start_time,
+            CourseInstance.end_time == course_group.end_time,
+            CourseInstance.name == course_group.name,
+            CourseInstance.day_of_week == course_group.day_of_week,
+            CourseInstance.week_number.in_(
+                course_group.week_numbers)).execute()
 
-    def addCourseFromJson(self, course_json: dict, merge_with_existing: bool = False, manual: bool = False):
+    def addCourseFromJson(self,
+                          course_json: dict,
+                          merge_with_existing: bool = False,
+                          manual: bool = False):
         """
         从 json 添加课程
         :param course_json: 课程的 json 字典
@@ -398,6 +543,8 @@ class ScheduleService:
             course = Course.create(name=course_json["KCM"])
         # 解析 json 并添加课程实例表的内容
         insertion = self.getCourseFromJson(course_json, manual)
+        if insertion is None:
+            return
         for item in insertion:
             item.course = course
         with self.database.atomic():
@@ -408,6 +555,10 @@ class ScheduleService:
         删除课程表中的某一门课的所有周数的课程
         :param course: 课程对象
         """
-        CourseInstance.delete().where(CourseInstance.course == course.course, CourseInstance.term_number == course.term_number,
-                                      CourseInstance.start_time == course.start_time, CourseInstance.end_time == course.end_time,
-                                      CourseInstance.name == course.name, CourseInstance.day_of_week == course.day_of_week).execute()
+        CourseInstance.delete().where(
+            CourseInstance.course == course.course,
+            CourseInstance.term_number == course.term_number,
+            CourseInstance.start_time == course.start_time,
+            CourseInstance.end_time == course.end_time,
+            CourseInstance.name == course.name,
+            CourseInstance.day_of_week == course.day_of_week).execute()

@@ -39,6 +39,26 @@ class Schedule:
         data = response.json()
         return data["datas"]["dqxnxq"]["rows"][0]["DM"]
 
+    def getExamSchedule(self, timestamp=None):
+        """
+        获取某一学期的考试安排
+        :param timestamp: 学年学期时间戳，比如 2020-2021-1。留空会自动获取当前学期
+        """
+        if timestamp is None:
+            if self._termString is None:
+                self._termString = self.getCurrentTerm()
+            timestamp = self._termString
+
+        response = self.session.post(
+            'https://ehall.xjtu.edu.cn/jwapp/sys/studentWdksapApp/modules/wdksap/wdksap.do',
+            data={
+                "XNXQDM": timestamp,
+                "*order": "-KSRQ,-KSSJMS"
+            }
+        )
+        data = response.json()
+        return data['datas']['wdksap']['rows']
+
     def getSchedule(self, timestamp=None):
         """
         获得某一学期的课程表
@@ -54,6 +74,7 @@ class Schedule:
                                          "XNXQDM": timestamp
                                      })
         data = response.json()
+
         return data["datas"]["xskcb"]["rows"]
 
     def getStartOfTerm(self, timestamp=None):
