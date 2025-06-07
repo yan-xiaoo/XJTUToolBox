@@ -221,3 +221,47 @@ start_date：学期的开始日期，实例：2024-09-09
 - course 表的字段 name 被废弃，但没有删除。
 
 版本 3 是为了支持对每节课课程名的修改而更新的。
+
+### 4
+
+版本 4 中，只新增了表 exam，已有的表没有发生任何变化。
+
+exam 表：
+
+| id   | name | location | seat_number | start_time | end_time | week_number | day_of_week | term_number | start_exact_time | end_exact_time | course_id |
+| ---- | ---- | -------- | ----------- | ---------- | -------- | ----------- | ----------- | ----------- | ---------------- | -------------- | --------- |
+|      |      |          |             |            |          |             |             |             |                  |                |           |
+
+每一行（每个实体）表示某时间段的一次考试
+
+id: 自增主键
+
+name：考试的名称
+
+course_id：外键，对应 course 表的 id，用于指定此考试对应的课程
+
+day_of_week：此考试位于星期几，取值 1-7
+
+week_number：此考试在第几周
+
+start_time：此考试大概在一天中的第几节开始，取值 1-11
+
+start_exact_time：TimeField，存储此考试的精确开始时间（时-分-秒）
+
+end_time：此考试大概在一天中的第几节结束，取值 1-11
+
+end_exact_time：TimeField，存储此考试的精确结束时间（时-分-秒）
+
+> start_time 和 end_time 是用于确定考试应该放在课程表中哪个位置的。
+
+location：此考试的地点
+
+seat_number：此考试的座位号
+
+term_number：考试位于哪个学期
+
+#### 修改
+
+新增了 `exam` 表以便存储考试信息。
+
+版本 4 是为了支持存储考试信息而更新的。
