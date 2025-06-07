@@ -325,7 +325,18 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot(Exam)
     def onExamDetailClicked(self, exam):
-        pass
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+        start = self.schedule_service.getStartOfTerm()
+        if start is None:
+            self.error("", self.tr("请先获取课表"), parent=self)
+            return
+        # 更新最新的信息
+        exam = Exam.get_by_id(exam.id)
+        self.detailDialog = LessonDetailDialog(exam, start, self, self)
+        self.detailDialog.rejected.connect(self.onCourseInfoFinished)
+        self.detailDialog.exec()
 
     @pyqtSlot(int, int)
     def onCellClicked(self, row, column):
@@ -879,7 +890,7 @@ class ScheduleInterface(ScrollArea):
                 days=(exam.week_number - 1) * 7 + exam.day_of_week - 1)
 
             e = Event()
-            e.add("summary", exam.name + self.tr("考试"))
+            e.add("summary", exam.name)
             e.add("description", self.tr("座位号:") + exam.seat_number)
             e.add('location', exam.location)
 
@@ -993,6 +1004,7 @@ class ScheduleInterface(ScrollArea):
     @pyqtSlot(dict)
     def onReceiveExam(self, exam: dict):
         self.schedule_service.addExamFromJson(exam)
+        self.loadSchedule()
 
     @pyqtSlot(list, list)
     def onReceiveAttendance(self, records: list[AttendanceWaterRecord],

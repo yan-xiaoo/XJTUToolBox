@@ -288,6 +288,22 @@ class ScheduleService:
             })
         CourseInstance.insert_many(insertion).execute()
 
+    def editExam(self, exam: Exam, new_name: str, new_location: str, new_seat_number: str):
+        """
+        修改考试的名称、地点、座位号
+        """
+        exam.name = new_name
+        exam.location = new_location
+        exam.seat_number = new_seat_number
+        exam.save()
+
+    def deleteExam(self, exam: Exam):
+        """
+        删除考试
+        :param exam: 考试对象
+        """
+        exam.delete_instance()
+
     def editSingleCourse(self, course: CourseInstance, new_name: str, new_location: str, new_teacher: str):
         """
         修改课程表中的某一节课的名称、地点、教师
@@ -429,7 +445,6 @@ class ScheduleService:
             end_dt = datetime.datetime.fromisoformat(f"{date_part}T{end_str}")
 
             if Exam.select().where(Exam.course == course).count() != 0:
-                print("Duplicate exam found for course:", one.get("KCM"))
                 # 如果已经存在同名考试，则删除原先考试，重新添加
                 Exam.delete().where(Exam.course == course).execute()
 
