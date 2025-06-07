@@ -57,9 +57,6 @@ class Schedule:
             }
         )
         data = response.json()
-        for item in data['datas']['wdksap']['rows']:
-            item['KCM'] = item['KCM'] + " " + item.get('KSMC','考试')
-            item['JASMC'] = item.get('JASMC', '未知教室') + " 座位号" + item.get('ZWH', '未知')
         return data['datas']['wdksap']['rows']
 
     def getSchedule(self, timestamp=None):
@@ -76,10 +73,9 @@ class Schedule:
                                      data={
                                          "XNXQDM": timestamp
                                      })
-
         data = response.json()
 
-        return data["datas"]["xskcb"]["rows"] + self.getExamSchedule(timestamp)
+        return data["datas"]["xskcb"]["rows"]
 
     def getStartOfTerm(self, timestamp=None):
         """

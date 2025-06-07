@@ -18,6 +18,7 @@ from .sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from .sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
 from .sub_interfaces.LessonConflictDialog import LessonConflictDialog
 from .sub_interfaces.LessonDetailDialog import LessonDetailDialog
+from .threads.ExamScheduleThread import ExamScheduleThread
 from .threads.HolidayThread import HolidayThread
 from .threads.ProcessWidget import ProcessWidget
 from .threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
@@ -28,7 +29,7 @@ from .utils.cache import cacheManager
 from .utils.migrate_data import account_data_directory
 from attendance.attendance import AttendanceWaterRecord, AttendanceFlow, WaterType, FlowRecordType
 from schedule import getAttendanceEndTime, getAttendanceStartTime, getClassStartTime, getClassEndTime
-from schedule.schedule_database import CourseInstance, CourseStatus
+from schedule.schedule_database import CourseInstance, CourseStatus, Exam
 from schedule.schedule_service import ScheduleService
 from schedule.xjtu_time import isSummerTime
 
@@ -63,7 +64,9 @@ class ScheduleInterface(ScrollArea):
         self.vBoxLayout = QVBoxLayout(self.view)
         self.schedule_thread = ScheduleThread()
         self.schedule_thread.schedule.connect(self.onReceiveSchedule)
+        self.schedule_thread.exam.connect(self.onReceiveExam)
         self.schedule_attendance_thread = ScheduleAttendanceThread()
+        self.schedule_exam_thread = ExamScheduleThread()
         self.process_widget_ehall = ProcessWidget(self.schedule_thread,
                                                   stoppable=True)
         self.process_widget_ehall.setVisible(False)
@@ -77,6 +80,12 @@ class ScheduleInterface(ScrollArea):
             self.onReceiveAttendance)
         self.schedule_attendance_thread.error.connect(self.onThreadError)
         self.schedule_attendance_thread.finished.connect(self.unlock)
+
+        self.process_widget_exam = ProcessWidget(self.schedule_exam_thread, stoppable=True)
+        self.process_widget_exam.setVisible(False)
+        self.schedule_exam_thread.error.connect(self.onThreadError)
+        self.schedule_exam_thread.finished.connect(self.unlock)
+        self.schedule_exam_thread.exam.connect(self.onReceiveExam)
 
         # 监视线程
         self.schedule_attendance_monitor_thread = ScheduleAttendanceMonitorThread(
@@ -141,6 +150,10 @@ class ScheduleInterface(ScrollArea):
 
         # 更多菜单
         self.moreMenu = RoundMenu(parent=self)
+        # 获得考试时间菜单项
+        self.getExamAction = Action(FIF.BOOK_SHELF, self.tr("获取考试信息"))
+        self.moreMenu.addAction(self.getExamAction)
+        self.getExamAction.triggered.connect(self.onGetExamClicked)
         # 修改学期菜单项
         self.changeTermAction = Action(FIF.EDIT, self.tr("修改学期..."))
         self.moreMenu.addAction(self.changeTermAction)
@@ -201,6 +214,7 @@ class ScheduleInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.commandFrame)
         self.vBoxLayout.addWidget(self.process_widget_ehall)
         self.vBoxLayout.addWidget(self.process_widget_attendance)
+        self.vBoxLayout.addWidget(self.process_widget_exam)
         self.vBoxLayout.addWidget(self.table_widget)
 
         # 加载可能存在的课表缓存到页面中
@@ -308,6 +322,10 @@ class ScheduleInterface(ScrollArea):
         self.detailDialog = LessonDetailDialog(course, start, self, self)
         self.detailDialog.rejected.connect(self.onCourseInfoFinished)
         self.detailDialog.exec()
+
+    @pyqtSlot(Exam)
+    def onExamDetailClicked(self, exam):
+        pass
 
     @pyqtSlot(int, int)
     def onCellClicked(self, row, column):
@@ -561,6 +579,7 @@ class ScheduleInterface(ScrollArea):
                 if widget is not None:
                     widget.clicked.disconnect()
                 self.table_widget.removeCellWidget(i, j)
+
         self.table_widget.clearSpans()
         for course in schedule:
             widget = ScheduleTableWidget(course)
@@ -586,7 +605,35 @@ class ScheduleInterface(ScrollArea):
                 self.table_widget.setSpan(
                     course.start_time + 1, course.day_of_week - 1,
                     course.end_time - course.start_time + 1, 1)
-        if schedule:
+
+        exams = self.schedule_service.getExamInWeek(week)
+
+        for exam in exams:
+            widget = ScheduleTableWidget(exam)
+            widget.clicked.connect(self.onExamDetailClicked)
+            # 如果课程的开始时间在第四节课前，说明是上午，放到 start_time - 1 行
+            if exam.start_time <= 4:
+                self.table_widget.setCellWidget(exam.start_time - 1,
+                                                exam.day_of_week - 1, widget)
+                self.table_widget.setSpan(
+                    exam.start_time - 1, exam.day_of_week - 1,
+                    exam.end_time - exam.start_time + 1, 1)
+            # 如果课程的开始时间在第五节课后，说明是下午，放到 start_time 行（因为有一行午休是不用的）
+            elif exam.start_time <= 8:
+                self.table_widget.setCellWidget(exam.start_time,
+                                                exam.day_of_week - 1, widget)
+                self.table_widget.setSpan(
+                    exam.start_time, exam.day_of_week - 1,
+                    exam.end_time - exam.start_time + 1, 1)
+            # 如果课程的开始时间在第九节课后，说明是晚上，放到 start_time + 1 行（因为有一行午休+一行晚休共计两行是不用的）
+            else:
+                self.table_widget.setCellWidget(exam.start_time + 1,
+                                                exam.day_of_week - 1, widget)
+                self.table_widget.setSpan(
+                    exam.start_time + 1, exam.day_of_week - 1,
+                    exam.end_time - exam.start_time + 1, 1)
+
+        if schedule or exams:
             self.table_widget.adjustSize()
 
         # 根据这学期是否有课程，设置按钮是否高亮
@@ -669,6 +716,19 @@ class ScheduleInterface(ScrollArea):
         self.schedule_attendance_monitor_thread.start()
 
     @pyqtSlot()
+    def onGetExamClicked(self):
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+        if not self.schedule_service.getCurrentTerm():
+            self.error(self.tr("未获取课表"), self.tr("请先获取课表"), parent=self)
+            return
+
+        self.process_widget_exam.setVisible(True)
+        self.lock()
+        self.schedule_exam_thread.start()
+
+    @pyqtSlot()
     def onChangeTermClicked(self):
         if self.schedule_service is None:
             self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
@@ -704,15 +764,16 @@ class ScheduleInterface(ScrollArea):
         if w.exec():
             if os.path.exists(os.path.dirname(
                     w.result_path)) and not os.path.isdir(w.result_path):
-                self.exportICS(w.result_path, w.ignore_holiday)
+                self.exportICS(w.result_path, w.ignore_holiday, w.set_alarm)
             else:
                 self.error("", self.tr("导出位置不存在"), parent=self)
 
-    def exportICS(self, path, ignore_holiday=True):
+    def exportICS(self, path, ignore_holiday=True, set_alarm=True):
         """
         导出课程表为 ics 文件
         :param path: 导出路径
         :param ignore_holiday: 是否忽略节假日
+        :param set_alarm: 是否在课程和考试事件中设置提醒
         """
         self._export_path = path
         if ignore_holiday:
@@ -733,7 +794,7 @@ class ScheduleInterface(ScrollArea):
         else:
             ignore_data = []
 
-        self.export(path, ignore_data)
+        self.export(path, ignore_data, set_alarm)
 
     @pyqtSlot(str, str)
     def onHolidayError(self, title, msg):
@@ -755,11 +816,12 @@ class ScheduleInterface(ScrollArea):
         cacheManager.write_expire_json("ignore_holiday.json", write_data, True)
         self.export(self._export_path, data)
 
-    def export(self, path, ignore_holidays: list[datetime.date]):
+    def export(self, path, ignore_holidays: list[datetime.date], set_alarm: bool = True):
         """
         内部函数，实际实现导出功能
         :param path: 导出目标的路径
         :param ignore_holidays: 需要忽略的节假日日期
+        :param set_alarm: 是否在课程和考试事件中设置提醒
         :return:
         """
         LOCAL_TIMEZONE = pytz.timezone("Asia/Shanghai")  # 设定为北京时间
@@ -781,55 +843,68 @@ class ScheduleInterface(ScrollArea):
             e.add("summary", course.name)
             e.add("description", course.name + " " + course.location)
             e.add('location', course.location)
-            if course.Exam == None:
 
-                if date.date() in ignore_holidays:
-                    continue
+            if date.date() in ignore_holidays:
+                continue
 
-                begin_time = getClassStartTime(course.start_time,
-                                               isSummerTime(date))
-                end_time = getClassEndTime(course.end_time, isSummerTime(date))
+            begin_time = getClassStartTime(course.start_time,
+                                           isSummerTime(date))
+            end_time = getClassEndTime(course.end_time, isSummerTime(date))
 
-                e.add(
-                    "dtstart",
-                    LOCAL_TIMEZONE.localize(
-                        date.replace(hour=begin_time.hour,
-                                     minute=begin_time.minute)))
-                e.add(
-                    "dtend",
-                    LOCAL_TIMEZONE.localize(
-                        date.replace(hour=end_time.hour,
-                                     minute=end_time.minute)))
+            e.add(
+                "dtstart",
+                LOCAL_TIMEZONE.localize(
+                    date.replace(hour=begin_time.hour,
+                                 minute=begin_time.minute)))
+            e.add(
+                "dtend",
+                LOCAL_TIMEZONE.localize(
+                    date.replace(hour=end_time.hour,
+                                 minute=end_time.minute)))
 
+            if set_alarm:
                 alarm = Alarm()
                 alarm.add("action", "display")
                 alarm.add("description", self.tr("上课提醒"))
                 alarm.add("trigger", datetime.timedelta(minutes=-15))
                 e.add_component(alarm)
 
-                cal.add_component(e)
-            else:
-                begin_time = course.Exam.start_time
-                end_time = course.Exam.end_time
+            cal.add_component(e)
 
-                e.add(
-                    "dtstart",
-                    LOCAL_TIMEZONE.localize(
-                        date.replace(hour=begin_time.hour,
-                                     minute=begin_time.minute)))
-                e.add(
-                    "dtend",
-                    LOCAL_TIMEZONE.localize(
-                        date.replace(hour=end_time.hour,
-                                     minute=end_time.minute)))
+        for exam in self.schedule_service.getExamInTerm():
+            term_start_time = datetime.datetime(term_start.year,
+                                                term_start.month,
+                                                term_start.day)
+            date = term_start_time + datetime.timedelta(
+                days=(exam.week_number - 1) * 7 + exam.day_of_week - 1)
 
+            e = Event()
+            e.add("summary", exam.name + self.tr("考试"))
+            e.add("description", self.tr("座位号:") + exam.seat_number)
+            e.add('location', exam.location)
+
+            begin_time = exam.start_exact_time
+            end_time = exam.end_exact_time
+
+            e.add(
+                "dtstart",
+                LOCAL_TIMEZONE.localize(
+                    date.replace(hour=begin_time.hour,
+                                 minute=begin_time.minute)))
+            e.add(
+                "dtend",
+                LOCAL_TIMEZONE.localize(
+                    date.replace(hour=end_time.hour,
+                                 minute=end_time.minute)))
+
+            if set_alarm:
                 alarm = Alarm()
                 alarm.add("action", "display")
                 alarm.add("description", self.tr("考试提醒"))
                 alarm.add("trigger", datetime.timedelta(minutes=-30))
                 e.add_component(alarm)
 
-                cal.add_component(e)
+            cal.add_component(e)
         with open(path, "wb") as f:
             f.write(cal.to_ical())
 
@@ -914,6 +989,10 @@ class ScheduleInterface(ScrollArea):
         self.setTablePrimary(False)
         self.setAttendancePrimary(True)
         self.loadSchedule()
+
+    @pyqtSlot(dict)
+    def onReceiveExam(self, exam: dict):
+        self.schedule_service.addExamFromJson(exam)
 
     @pyqtSlot(list, list)
     def onReceiveAttendance(self, records: list[AttendanceWaterRecord],

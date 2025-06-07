@@ -1,8 +1,10 @@
+import typing
+
 from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsOpacityEffect, QLabel
 from qfluentwidgets import StrongBodyLabel, BodyLabel, qconfig, getFont, isDarkTheme, Theme
 
-from schedule.schedule_database import CourseInstance, CourseStatus
+from schedule.schedule_database import CourseInstance, CourseStatus, Exam
 
 
 # 课程表表格中的每个元素
@@ -10,7 +12,7 @@ class ScheduleTableWidget(QWidget):
     LIGHT = "light"
     DARK = "dark"
 
-    clicked = pyqtSignal(CourseInstance)
+    clicked = pyqtSignal(object)
 
     COLOR_DICTION = {
         LIGHT: {
@@ -20,7 +22,8 @@ class ScheduleTableWidget(QWidget):
             CourseStatus.LEAVE: "#b5eaea",
             CourseStatus.LATE: "#ffeecc",
             CourseStatus.ABSENT: "#ffbcbc",
-            CourseStatus.NO_CHECK: "#b7c4cf"
+            CourseStatus.NO_CHECK: "#b7c4cf",
+            -1: "#ffbcbc"
         },
         DARK: {
             CourseStatus.UNKNOWN: "#eaeaea",
@@ -29,11 +32,12 @@ class ScheduleTableWidget(QWidget):
             CourseStatus.LEAVE: "#b5eaea",
             CourseStatus.LATE: "#ffeecc",
             CourseStatus.ABSENT: "#ffbcbc",
-            CourseStatus.NO_CHECK: "#b7c4cf"
+            CourseStatus.NO_CHECK: "#b7c4cf",
+            -1: "#ffbcbc"
         }
     }
 
-    def __init__(self, course: CourseInstance, parent=None):
+    def __init__(self, course: typing.Union[CourseInstance, Exam], parent=None):
         super().__init__(parent)
 
         self.course = course
@@ -47,7 +51,12 @@ class ScheduleTableWidget(QWidget):
         font = getFont(13)
         font.setBold(True)
         self.statusLabel.setFont(font)
-        self.setCourseStatus(course.status)
+
+        if isinstance(course, CourseInstance):
+            self.setCourseStatus(course.status)
+        else:
+            # -1 表示此内容为考试
+            self.setCourseStatus(-1, False)  # 考试默认状态为无需考勤
 
         # 设置不透明效果
         self.opacity_effect = QGraphicsOpacityEffect(self)
@@ -96,7 +105,7 @@ class ScheduleTableWidget(QWidget):
         :param status: 课程状态
         :param save: 是否同样保存状态到数据库中
         """
-        if isinstance(status, int):
+        if status != -1 and isinstance(status, int):
             status = CourseStatus(status)
         if status == CourseStatus.UNKNOWN:
             self.statusLabel.setText("未知")
@@ -112,6 +121,8 @@ class ScheduleTableWidget(QWidget):
             self.statusLabel.setText("缺勤")
         elif status == CourseStatus.NO_CHECK:
             self.statusLabel.setText("无需考勤")
+        elif status == -1:
+            self.statusLabel.setText("考试")
         else:
             self.statusLabel.setText("未知状态")
         self.statusLabel.setStyleSheet(self.getColoredStyleSheet(self.COLOR_DICTION[self.DARK if isDarkTheme() else self.LIGHT][status]))

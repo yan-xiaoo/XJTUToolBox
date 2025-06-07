@@ -5,7 +5,7 @@ from playhouse.migrate import SqliteMigrator, migrate
 
 
 # 数据库当前版本
-DATABASE_VERSION = 3
+DATABASE_VERSION = 4
 
 database_proxy = DatabaseProxy()
 
@@ -36,10 +36,21 @@ class BaseModel(Model):
 class Course(BaseModel):
     name = CharField()
 
+
 class Exam(BaseModel):
     name = CharField()
-    start_time = TimeField()
-    end_time = TimeField()
+    location = CharField(null=True)
+    week_number = IntegerField(index=True)
+    day_of_week = IntegerField()
+    seat_number = CharField(null=True)
+    # 考试开始的模糊时间（节次），用于放到课表中显示
+    start_time = IntegerField()
+    # 考试开始的具体时间
+    start_exact_time = TimeField()
+    end_time = IntegerField()
+    end_exact_time = TimeField()
+    term_number = CharField()
+    course = ForeignKeyField(model=Course, null=False)
 
 
 class CourseInstance(BaseModel):
@@ -57,7 +68,6 @@ class CourseInstance(BaseModel):
     term_number = CharField()
     # 课程名称
     name = CharField()
-    Exam = ForeignKeyField(model=Exam, null=True)
 
 
 class Config(BaseModel):
@@ -129,6 +139,11 @@ def _upgrade(old_version: int, new_version: int):
             instance.name = instance.course.name
             instance.save()
         set_config("database_version", str(new_version))
+    if old_version == 3 and new_version == 4:
+        # 从版本 3 升级到版本 4
+        with database:
+            database.create_tables([Exam])
+        set_config("database_version", str(new_version))
 
 
 def upgrade(old_version: int, new_version: int):
@@ -162,6 +177,14 @@ def _downgrade(old_version: int, new_version: int):
         migrator = SqliteMigrator(database)
         with database.atomic():
             migrate(migrator.drop_column("courseinstance", "name"))
+        set_config("database_version", str(new_version))
+    if old_version == 4 and new_version == 3:
+        # 从版本 4 降级到版本 3
+        migrator = SqliteMigrator(database)
+        with database.atomic():
+            migrate(
+                migrator.drop_table("exam")
+            )
         set_config("database_version", str(new_version))
 
 

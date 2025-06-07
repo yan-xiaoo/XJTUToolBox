@@ -9,13 +9,12 @@ from ..utils import logger
 from ..utils.account import accounts
 
 
-class ScheduleThread(ProcessThread):
+class ExamScheduleThread(ProcessThread):
     """
-    获取课表相关信息的线程
+    获取考试信息的线程。获得课表时会自动获得一次考试信息，所以使用此线程并不是完全必须的。
     """
-    # 获得课表成功后发送的数据
-    # {"lessons": 课表信息, "term_number": 学期编号, "start_date": 学期开始日期}
-    schedule = pyqtSignal(dict)
+    # 获得考试信息成功后发送的数据
+    # {"exams": 课表信息, "term_number": 学期编号}
     exam = pyqtSignal(dict)
 
     def __init__(self, term_number=None, parent=None):
@@ -87,10 +86,6 @@ class ScheduleThread(ProcessThread):
                     return
 
             self.progressChanged.emit(66)
-            self.messageChanged.emit("正在获取课表信息...")
-            result = self.util.getSchedule(timestamp=self.term_number)
-
-            self.progressChanged.emit(77)
             self.messageChanged.emit("正在获取考试时间...")
             exam = self.util.getExamSchedule(timestamp=self.term_number)
 
@@ -118,11 +113,6 @@ class ScheduleThread(ProcessThread):
             self.error.emit(self.tr("其他错误"), str(e))
             self.canceled.emit()
         else:
-            self.schedule.emit({
-                "lessons": result,
-                "term_number": self.term_number if self.term_number is not None else self.util.termString,
-                "start_date": date
-            })
             self.exam.emit({
                 "exams": exam,
                 "term_number": self.term_number if self.term_number is not None else self.util.termString

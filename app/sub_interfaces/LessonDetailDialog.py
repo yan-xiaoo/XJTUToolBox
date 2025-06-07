@@ -154,7 +154,8 @@ class LessonCard(HeaderCardWidget):
     # 此卡片对应的课程被删除时，会发送的信息
     courseDeleted = pyqtSignal(CourseInstance)
 
-    def __init__(self, course: CourseInstance, start_time: date, service: ScheduleService, ambiguous_time=False, delete_all=False,
+    def __init__(self, course: CourseInstance, start_time: date, service: ScheduleService, ambiguous_time=False,
+                 delete_all=False,
                  on_edit_trigger=None, parent=None):
         """
         创建一个用于展示课程的卡片
@@ -256,35 +257,28 @@ class LessonCard(HeaderCardWidget):
         """
         按照课程的信息，填充表格。此方法会重置当前课程被修改的信息。
         """
-        '''
-        同样，增加考试的处理，这里需要保证展示的是真实的考试时间，而不是近似的课程时间。
-        '''
         self.weeks = self.getAllWeeks()
         weeks = [str(week) for week in self.weeks]
-        if self.course.Exam is not None:
-            class_start_time = self.course.Exam.start_time.strftime("%H:%M")
-            class_end_time = self.course.Exam.end_time.strftime("%H:%M")
+        if self.ambiguous_time:
+            class_start_time = self.course.start_time
+            class_end_time = self.course.end_time
         else:
-            if self.ambiguous_time:
-                class_start_time = self.course.start_time
-                class_end_time = self.course.end_time
-            else:
-                is_summer_time = isSummerTime(self.start_time + timedelta(days=(
+            is_summer_time = isSummerTime(self.start_time + timedelta(days=(
                     (self.course.week_number - 1) * 7 + self.course.day_of_week -
                     1)))
-                class_start_time = getClassStartTime(
-                    self.course.start_time, is_summer_time).strftime("%H:%M")
-                class_end_time = getClassEndTime(self.course.end_time,
+            class_start_time = getClassStartTime(
+                self.course.start_time, is_summer_time).strftime("%H:%M")
+            class_end_time = getClassEndTime(self.course.end_time,
                                              is_summer_time).strftime("%H:%M")
-            if self.ambiguous_time:
-                self.table.setRowHidden(0, True)
-            else:
-                self.table.setItem(0, 0, QTableWidgetItem(self.tr("状态")))
-                self.table.setItem(
-                    0, 1,
-                    QTableWidgetItem(
-                        self.status_dict.get(CourseStatus(self.course.status),
-                                             self.tr("未知"))))
+        if self.ambiguous_time:
+            self.table.setRowHidden(0, True)
+        else:
+            self.table.setItem(0, 0, QTableWidgetItem(self.tr("状态")))
+            self.table.setItem(
+                0, 1,
+                QTableWidgetItem(
+                    self.status_dict.get(CourseStatus(self.course.status),
+                                         self.tr("未知"))))
         self.table.setItem(1, 0, QTableWidgetItem(self.tr("时间")))
         self.table.setItem(
             1, 1, QTableWidgetItem(f"{class_start_time} - {class_end_time}"))
@@ -295,6 +289,7 @@ class LessonCard(HeaderCardWidget):
         self.table.setItem(4, 0, QTableWidgetItem(self.tr("上课周")))
         self.table.setItem(4, 1, QTableWidgetItem(f"{','.join(weeks)}"))
         self.table.adjustSize()
+
     @pyqtSlot()
     def startEdit(self):
         super().startEdit()
@@ -331,7 +326,8 @@ class LessonCard(HeaderCardWidget):
             if self.editable:
                 self.weeks_flyout = Flyout.make(
                     target=self.table,
-                    view=WeekFlyoutView(weeks=self.weeks, lock_weeks=self.other_weeks, select_week=self.course.week_number),
+                    view=WeekFlyoutView(weeks=self.weeks, lock_weeks=self.other_weeks,
+                                        select_week=self.course.week_number),
                     parent=self
                 )
                 self.weeks_flyout.closed.connect(self.onWeekFlyoutClosed)
@@ -607,7 +603,8 @@ class EmptyLessonCard(HeaderCardWidget):
         self.table.item(2, 0).setFlags(Qt.ItemIsEnabled)
         self.table.item(2, 1).setFlags(Qt.ItemIsEnabled)
         # 重新获得已有课程的周数
-        self.other_courses = self.schedule_service.getCourseInCertainTime(self.day_of_week, self.start_time, self.end_time)
+        self.other_courses = self.schedule_service.getCourseInCertainTime(self.day_of_week, self.start_time,
+                                                                          self.end_time)
         self.other_weeks = [course.week_number for course in self.other_courses]
         self.switchTo(True)
 
@@ -719,7 +716,8 @@ class LessonDetailDialog(MessageBoxBase):
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
     @__init__.register
-    def _(self, week: int, day_of_week: int, start_time: int, end_time: int, start_date: Optional[date], interface, parent=None):
+    def _(self, week: int, day_of_week: int, start_time: int, end_time: int, start_date: Optional[date], interface,
+          parent=None):
         """
         创建一个课程详情对话框，且包含一张空白的课程卡片
         :param week: 对话框表示第几周的课程
@@ -748,10 +746,12 @@ class LessonDetailDialog(MessageBoxBase):
 
         self.lesson_cards = []
         self.on_edit = lambda: setattr(self, "modified", True)
-        lesson_card = EmptyLessonCard(week, day_of_week, start_time, end_time, self.parent_interface.schedule_service, self)
+        lesson_card = EmptyLessonCard(week, day_of_week, start_time, end_time, self.parent_interface.schedule_service,
+                                      self)
         self.lesson_cards.append(lesson_card)
 
-        self.other_courses = self.parent_interface.schedule_service.getCourseGroupInCertainTime(day_of_week, start_time, end_time)
+        self.other_courses = self.parent_interface.schedule_service.getCourseGroupInCertainTime(day_of_week, start_time,
+                                                                                                end_time)
 
         self.moreButton = TransparentPushButton(FluentIcon.DOWN, self.tr("展开"), self)
         self.lessButton = TransparentPushButton(FluentIcon.UP, self.tr("收起"), self)
@@ -841,7 +841,8 @@ class LessonDetailDialog(MessageBoxBase):
         self.modified = True
         if card_number == 0:
             # 如果删除了第一张卡片，那么放置一张空白课程卡
-            lesson_card = EmptyLessonCard(course.week_number, course.day_of_week, course.start_time, course.end_time, self.parent_interface.schedule_service, self)
+            lesson_card = EmptyLessonCard(course.week_number, course.day_of_week, course.start_time, course.end_time,
+                                          self.parent_interface.schedule_service, self)
             self.lesson_cards.insert(0, lesson_card)
             self.content_layout.insertWidget(1, lesson_card)
             lesson_card.setVisible(True)
@@ -849,7 +850,9 @@ class LessonDetailDialog(MessageBoxBase):
         if hasattr(self, "course"):
             self.other_courses = self.parent_interface.schedule_service.getOtherCourseInSameTime(self.course)
         else:
-            self.other_courses = self.parent_interface.schedule_service.getCourseGroupInCertainTime(course.day_of_week, course.start_time, course.end_time)
+            self.other_courses = self.parent_interface.schedule_service.getCourseGroupInCertainTime(course.day_of_week,
+                                                                                                    course.start_time,
+                                                                                                    course.end_time)
         if len(self.other_courses) == 0:
             self.expanded = False
             self.moreButton.setVisible(False)
