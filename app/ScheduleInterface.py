@@ -351,11 +351,19 @@ class ScheduleInterface(ScrollArea):
             return
         else:
             if row < 4:
-                start_time = row + 1
+                # 如果 0 行被点击，需要查看第一节课；1行被点击（第二节课的位置），仍然要查看第一节课。
+                if row % 2 == 0:
+                    start_time = row + 1
+                else:
+                    start_time = row
             elif row < 9:
-                start_time = row
+                if row % 2 == 1:
+                    start_time = row
+                else:
+                    start_time = row - 1
             else:
-                start_time = row - 1
+                # 晚上课程的点击写死为第九节课
+                start_time = 9
             start_date = self.schedule_service.getStartOfTerm()
             self.detailDialog = LessonDetailDialog(self.week, column + 1,
                                                    start_time, start_time + 1,

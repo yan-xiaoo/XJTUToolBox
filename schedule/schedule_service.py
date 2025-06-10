@@ -175,6 +175,7 @@ class ScheduleService:
             CourseInstance.end_time,
             CourseInstance.term_number,
             CourseInstance.location,
+            CourseInstance.manual,
             CourseInstance.teacher
         ).where(
             CourseInstance.start_time == course.start_time,
@@ -244,6 +245,7 @@ class ScheduleService:
             CourseInstance.end_time,
             CourseInstance.term_number,
             CourseInstance.location,
+            CourseInstance.manual,
             CourseInstance.teacher
         ).where(
             CourseInstance.day_of_week == day_of_week,
@@ -283,8 +285,7 @@ class ScheduleService:
                 "week_number": week,
                 "manual": course.manual,
                 "status": 7 if course.manual else 1,
-                "term_number": course.term_number,
-                "Exam": course.Exam
+                "term_number": course.term_number
             })
         CourseInstance.insert_many(insertion).execute()
 
