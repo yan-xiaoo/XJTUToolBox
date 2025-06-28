@@ -1,4 +1,5 @@
 import datetime
+import sys
 
 from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTime
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
@@ -11,6 +12,7 @@ from PyQt5.QtGui import QColor, QDesktopServices
 from .cards.custom_switch_card import CustomSwitchSettingCard
 from .components.CustomMessageBox import ConfirmBox
 from .threads.UpdateThread import checkUpdate, UpdateStatus
+from .utils.auto_start import add_to_startup, delete_from_startup
 from .utils.config import cfg, TraySetting
 from .utils import accounts, LOG_DIRECTORY
 from .utils.style_sheet import StyleSheet
@@ -189,6 +191,13 @@ class SettingInterface(ScrollArea):
             texts=[self.tr("询问"), self.tr("直接退出"), self.tr("最小化到托盘")],
             parent=self.aboutGroup
         )
+        self.autoStartCard = CustomSwitchSettingCard(
+            FIF.POWER_BUTTON,
+            self.tr("开机自启动"),
+            self.tr("在开机时自动启动 XJTUToolbox"),
+            cfg.autoStart,
+            self.aboutGroup
+        )
         self.updateOnStartCard = CustomSwitchSettingCard(
             FIF.UPDATE,
             self.tr("启动时检查更新"),
@@ -227,6 +236,7 @@ class SettingInterface(ScrollArea):
         self.aboutGroup.addSettingCard(self.minimizeToTrayCard)
         self.aboutGroup.addSettingCard(self.feedbackCard)
         self.aboutGroup.addSettingCard(self.logCard)
+        self.aboutGroup.addSettingCard(self.autoStartCard)
         self.aboutGroup.addSettingCard(self.updateOnStartCard)
         self.aboutGroup.addSettingCard(self.prereleaseCard)
         self.aboutGroup.addSettingCard(self.updateCard)
@@ -259,12 +269,30 @@ class SettingInterface(ScrollArea):
         self.updateCard.clicked.connect(self.onUpdateClicked)
         self.feedbackCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox/issues")))
         self.logCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("file:///" + LOG_DIRECTORY)))
+        self.autoStartCard.checkedChanged.connect(self._onAutoStartClicked)
+
+        if sys.platform == "darwin":
+            # macOS 不支持直接设置自动启动
+            cfg.autoStart.value = False
+            self.autoStartCard.setSwitchEnabled(False)
+            self.autoStartCard.showHint(self.tr("请前往设置-通用-登录项与扩展，在登录项中添加本程序，实现开机自启动"))
+        if not getattr(sys, "frozen", False):
+            # 非打包版本不支持自动启动
+            self.autoStartCard.setVisible(False)
 
     @pyqtSlot()
     def _onTraySettingChanged(self):
         if cfg.traySetting.value != TraySetting.MINIMIZE and cfg.noticeAutoSearch.value:
             cfg.noticeAutoSearch.value = False
             self.noticeCard.enableButton.setChecked(False)
+
+    @pyqtSlot(bool)
+    def _onAutoStartClicked(self, checked: bool):
+        """自动启动设置被修改时触发"""
+        if checked:
+            add_to_startup()
+        else:
+            delete_from_startup()
 
     @pyqtSlot()
     def onEncryptAccountClicked(self):

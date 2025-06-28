@@ -110,6 +110,8 @@ class Config(QConfig):
                           False, OptionsValidator([True, False]), BooleanSerializer())
     noticeSearchTime = OptionsConfigItem("Settings", "notice_search_time",
                                          datetime.time(hour=18, minute=0), TimeValidator(), TimeSerializer())
+    autoStart = OptionsConfigItem("Settings", "auto_start",
+                                  False, OptionsValidator([True, False]), BooleanSerializer())
     # 这其实不是个设置项目，只是用来存储上次搜索的时间
     lastSearchTime = OptionsConfigItem("Settings", "last_search_time",
                                          datetime.datetime(1970, 1, 1), DateTimeValidator(),
