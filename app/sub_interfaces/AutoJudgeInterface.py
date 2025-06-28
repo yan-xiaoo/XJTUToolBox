@@ -7,7 +7,7 @@ from ehall import Questionnaire, QuestionnaireTemplate
 from .JudgeOptionInterface import JudgeOptionMessageBox
 from ..utils import StyleSheet
 from ..threads.JudgeThread import JudgeThread, JudgeChoice
-from ..threads.ProcessWidget import ProcessDialog
+from ..threads.ProcessWidget import ProcessWidget
 from ..utils import accounts
 
 
@@ -99,6 +99,8 @@ class AutoJudgeInterface(ScrollArea):
         self.thread_.editSuccess.connect(self.onEditSuccess)
         self.thread_.started.connect(self.onThreadStarted)
 
+        self.processWidget = None
+
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
         self.startFrame = QFrame(self.view)
@@ -134,8 +136,6 @@ class AutoJudgeInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.startFrame, 1, alignment=Qt.AlignVCenter)
         self.vBoxLayout.addWidget(self.questionnaireFrame, 1, alignment=Qt.AlignVCenter)
 
-        self.processDialog = None
-
         StyleSheet.AUTO_JUDGE_INTERFACE.apply(self)
 
         self.setWidget(self.view)
@@ -143,10 +143,13 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot()
     def onThreadStarted(self):
-        # 在使用前初始化对话框，否则会出现奇怪的问题
-        if self.processDialog is None:
-            self.processDialog = ProcessDialog(thread=self.thread_, parent=self, stoppable=True)
-        self.processDialog.exec()
+        # 在使用前初始化进度条组件，否则会出现奇怪的问题
+        if self.processWidget is None:
+            self.processWidget = ProcessWidget(self.thread_, stoppable=True, hide_on_end=True)
+            # 将组件插入在 Commandbar 后面，Frame 前面
+            self.vBoxLayout.insertWidget(1, self.processWidget, alignment=Qt.AlignTop | Qt.AlignHCenter)
+
+        self.processWidget.setVisible(True)
 
     @pyqtSlot()
     def onViewEhallTriggered(self):
