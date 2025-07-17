@@ -1,4 +1,7 @@
+import hashlib
+import platform
 import time
+import uuid
 
 import requests
 from fake_useragent import UserAgent
@@ -113,6 +116,34 @@ def getOrdinaryUrl(url):
         if port:
             hostname += ':' + port
         return pro + "://" + hostname + '/' + fold
+
+
+def generate_fp_visitor_id():
+    """
+    生成类似 FingerprintJS 的设备指纹ID
+    通过收集系统信息生成一个相对稳定机器标识符，用于新的登录系统参数
+    代码仅使用获得的系统信息生成一个 SHA-256 哈希值，然后传输哈希值作为标识符，不会存储或直接传输系统信息。
+    """
+    # 收集系统特征信息
+    system_info = {
+        'platform': platform.platform(),
+        'machine': platform.machine(),
+        'processor': platform.processor(),
+        'python_version': platform.python_version(),
+        'mac_address': ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0,8*6,8)][::-1])
+    }
+
+    # 将系统信息转换为字符串
+    fingerprint_string = '|'.join([f"{k}:{v}" for k, v in sorted(system_info.items())])
+
+    # 生成 SHA-256 哈希
+    hash_object = hashlib.sha256(fingerprint_string.encode())
+    fingerprint_hash = hash_object.hexdigest()
+
+    # 取前16位作为 fpVisitorId (类似 FingerprintJS 的格式)
+    fp_visitor_id = fingerprint_hash[:16]
+
+    return fp_visitor_id
 
 
 if __name__ == '__main__':

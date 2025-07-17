@@ -5,7 +5,7 @@
 # ehall 教务系统登录地址
 EHALL_LOGIN_URL = "https://ehall.xjtu.edu.cn/login?service=https://ehall.xjtu.edu.cn/new/index.html?browser=no"
 # webvpn 登录地址
-WEBVPN_LOGIN_URL = "https://webvpn.xjtu.edu.cn/login?oauth_login=true"
+WEBVPN_LOGIN_URL = "https://webvpn.xjtu.edu.cn/login?cas_login=true"
 # 思源学堂登录地址
 BB_LOGIN_URL = "https://cas.xjtu.edu.cn/login?TARGET=https%3A%2F%2Fbb.xjtu.edu.cn%2Fwebapps%2Fbb-SSOIntegrationDemo-BBLEARN%2Findex.jsp"
 # 本科生考勤系统登录地址

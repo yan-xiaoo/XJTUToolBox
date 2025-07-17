@@ -12,6 +12,7 @@ PUBLIC_KEY = "0725@pwdorgopenp"
 class Login:
     """
     通过西安交通大学统一身份认证网站，登录目标网页。
+    此类用于 2025 年 7 月 17 日前的统一认证系统，即 org.xjtu.edu.cn/openplatform/login.html。
     对于统一身份认证网站登录的具体方式，请见 https://yan-xiaoo.github.io/blog/2024/02/24/%E8%A5%BF%E5%AE%89%E4%BA%A4%E9%80%9A%E5%A4%A7%E5%AD%A6%E7%99%BB%E5%BD%95%E7%B3%BB%E7%BB%9F%E8%87%AA%E5%8A%A8%E5%8C%96
     """
 

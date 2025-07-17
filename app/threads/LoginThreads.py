@@ -1,8 +1,12 @@
 from enum import Enum
 
+from requests import HTTPError
+
 from app.utils import logger
 from auth import Login, EHALL_LOGIN_URL, ServerError
 from PyQt5.QtCore import QThread, pyqtSignal
+
+from auth.new_login import NewLogin
 
 
 class LoginChoice(Enum):
@@ -36,9 +40,9 @@ class LoginThread(QThread):
 
     def run(self):
         try:
-            self.login = self.login or Login(EHALL_LOGIN_URL)
+            self.login = self.login or NewLogin(EHALL_LOGIN_URL)
             if self.choice == LoginChoice.GET_SHOW_CAPTCHA:
-                result = self.login.isShowJCaptchaCode(self.username)
+                result = self.login.isShowJCaptchaCode()
                 self.isShowCaptcha.emit(result)
 
             elif self.choice == LoginChoice.GET_CAPTCHA_CODE:
@@ -55,12 +59,15 @@ class LoginThread(QThread):
                     self.loginSuccess.emit()
             elif self.choice == LoginChoice.GET_STUDENT_ID:
                 try:
-                    self.login.getUserIdentity()
-                except ServerError as e:
-                    logger.error("服务器错误", exc_info=True)
-                    self.loginFailed.emit(True, e.message)
+                    info = self.login.session.get("https://ehall.xjtu.edu.cn/jsonp/userDesktopInfo.json").json()
+                except HTTPError as e:
+                    logger.error("网络错误", exc_info=True)
+                    self.loginFailed.emit(False, str(e))
+                except Exception as e:
+                    logger.error("其他错误", exc_info=True)
+                    self.loginFailed.emit(False, str(e))
                 else:
-                    self.studentID.emit(self.login.personNo)
+                    self.studentID.emit(info["userId"])
             else:
                 raise ValueError("Invalid choice")
         except ServerError as e:

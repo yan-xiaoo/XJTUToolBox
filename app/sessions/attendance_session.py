@@ -1,7 +1,7 @@
 import enum
 
 from app.sessions.common_session import CommonLoginSession
-from attendance import AttendanceLogin, AttendanceWebVPNLogin
+from attendance.attendance import AttendanceNewLogin, AttendanceNewWebVPNLogin
 
 
 class AttendanceSession(CommonLoginSession):
@@ -17,9 +17,8 @@ class AttendanceSession(CommonLoginSession):
         self.login_method = None
 
     def login(self, username, password):
-        login_util = AttendanceLogin(self)
+        login_util = AttendanceNewLogin(self)
         login_util.login(username, password)
-        login_util.post_login()
 
         self.login_method = self.LoginMethod.NORMAL
 
@@ -27,9 +26,8 @@ class AttendanceSession(CommonLoginSession):
         self.has_login = True
 
     def webvpn_login(self, username, password):
-        login_util = AttendanceWebVPNLogin(self)
+        login_util = AttendanceNewWebVPNLogin(self)
         login_util.login(username, password)
-        login_util.post_login()
 
         self.login_method = self.LoginMethod.WEBVPN
 

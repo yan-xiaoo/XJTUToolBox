@@ -1,11 +1,12 @@
 import requests
 from PyQt5.QtCore import pyqtSignal
 
+from auth.new_login import NewLogin
 from ehall.score import Score
 from ..sessions.ehall_session import EhallSession
 from ..threads.ProcessWidget import ProcessThread
 from ..utils import accounts, logger
-from auth import EHALL_LOGIN_URL, Login, ServerError
+from auth import EHALL_LOGIN_URL, ServerError
 
 
 class ScoreThread(ProcessThread):
@@ -40,7 +41,7 @@ class ScoreThread(ProcessThread):
         self.progressChanged.emit(0)
         self.messageChanged.emit(self.tr("正在登录 EHALL..."))
         self.progressChanged.emit(10)
-        login = Login(EHALL_LOGIN_URL, session=self.session)
+        login = NewLogin(EHALL_LOGIN_URL, session=self.session)
         self.messageChanged.emit(self.tr("正在验证身份..."))
         self.progressChanged.emit(33)
         if not self.can_run:
@@ -50,7 +51,6 @@ class ScoreThread(ProcessThread):
             return False
         self.progressChanged.emit(66)
         self.messageChanged.emit(self.tr("正在完成登录..."))
-        login.post_login()
         self.progressChanged.emit(88)
 
         self.session.has_login = True

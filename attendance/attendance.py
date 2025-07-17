@@ -8,6 +8,7 @@ import requests
 
 from auth import Login, ATTENDANCE_URL, ServerError, WebVPNLogin, ATTENDANCE_WEBVPN_URL, get_session, getVPNUrl, \
     get_timestamp, WEBVPN_LOGIN_URL
+from auth.new_login import NewLogin, extract_alert_message, NewWebVPNLogin
 from schedule import Schedule, WeekSchedule, Lesson
 
 
@@ -116,6 +117,55 @@ class AttendanceLogin(Login):
         return self.session
 
 
+class AttendanceNewLogin(NewLogin):
+    """
+        考勤系统在登录后的每一个请求的头部都需要添加一个特殊的 header: "Synjones-Auth"
+        此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
+        """
+
+    def __init__(self, session: requests.Session = None):
+        super().__init__(ATTENDANCE_URL, session)
+
+    def login(self, username, password, jcaptcha="") -> requests.Session:
+        """
+        登录并添加 token 到 session 头部
+        """
+        encrypt_password = self.encrypt_password(password)
+        login_response = self._post(self.post_url,
+                                    data={"username": username,
+                                          "password": encrypt_password,
+                                          "execution": self.execution_input,
+                                          "_eventId": "submit",
+                                          "submit1": "Login1",
+                                          "fpVisitorId": self.fp_visitor_id,
+                                          "captcha": jcaptcha,
+                                          "currentMenu": "1",
+                                          "failN": str(self.fail_count),
+                                          "mfaState": "",
+                                          "geolocation": "",
+                                          "trustAgent": ""}, allow_redirects=False)
+        if login_response.status_code == 401:
+            raise ServerError(401, "登录失败，用户名或密码错误。")
+        else:
+            login_response.raise_for_status()
+            message = extract_alert_message(login_response.text)
+            if message:
+                # 如果有错误提示，说明登录失败
+                self.fail_count += 1
+                raise ServerError(400, f"登录失败: {message['title']}")
+            else:
+                # 登录成功，重置失败次数
+                self.fail_count = 0
+                try:
+                    token = login_response.headers["Location"].split("token=")[1].split('&')[0]
+                except IndexError:
+                    raise ServerError(500, "登录失败：服务器出现错误。")
+                self.session.headers.update({"Synjones-Auth": "bearer " + token})
+                self._get(login_response.headers["Location"], allow_redirects=True)
+
+        return self.session
+
+
 class AttendanceWebVPNLogin(WebVPNLogin):
     """
     此类用于在挂 webvpn 的情况下进行登录考勤系统。
@@ -150,6 +200,56 @@ class AttendanceWebVPNLogin(WebVPNLogin):
         response = self._get(url)
         token = response.url.split("token=")[1].split('&')[0]
         self.session.headers.update({"Synjones-Auth": "bearer " + token})
+        return self.session
+
+
+class AttendanceNewWebVPNLogin(NewWebVPNLogin):
+    """
+        考勤系统在登录后的每一个请求的头部都需要添加一个特殊的 header: "Synjones-Auth"
+        此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
+        """
+
+    def __init__(self, session: requests.Session = None):
+        super().__init__(WEBVPN_LOGIN_URL, session=session)
+
+    def login(self, username, password, jcaptcha="") -> requests.Session:
+        """
+        登录并添加 token 到 session 头部
+        """
+        encrypt_password = self.encrypt_password(password)
+        login_response = self._post(self.post_url,
+                                    data={"username": username,
+                                          "password": encrypt_password,
+                                          "execution": self.execution_input,
+                                          "_eventId": "submit",
+                                          "submit1": "Login1",
+                                          "fpVisitorId": self.fp_visitor_id,
+                                          "captcha": jcaptcha,
+                                          "currentMenu": "1",
+                                          "failN": str(self.fail_count),
+                                          "mfaState": "",
+                                          "geolocation": "",
+                                          "trustAgent": ""}, allow_redirects=True)
+        if login_response.status_code == 401:
+            raise ServerError(401, "登录失败，用户名或密码错误。")
+        else:
+            login_response.raise_for_status()
+            message = extract_alert_message(login_response.text)
+            if message:
+                # 如果有错误提示，说明登录失败
+                self.fail_count += 1
+                raise ServerError(400, f"登录失败: {message['title']}")
+            else:
+                # 登录成功，重置失败次数
+                self.fail_count = 0
+
+        response = self._get(ATTENDANCE_WEBVPN_URL, allow_redirects=True)
+        try:
+            token = response.url.split("token=")[1].split('&')[0]
+        except IndexError:
+            raise ServerError(500, "登录失败：服务器出现错误。")
+        self.session.headers.update({"Synjones-Auth": "bearer " + token})
+
         return self.session
 
 

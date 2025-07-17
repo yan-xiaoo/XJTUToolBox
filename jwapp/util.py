@@ -2,6 +2,7 @@ import datetime
 
 import requests
 from auth import Login, JWAPP_URL, ServerError
+from auth.new_login import NewLogin, extract_alert_message
 
 
 class JwappLogin(Login):
@@ -21,6 +22,55 @@ class JwappLogin(Login):
         response = self._get(url)
         token = response.url.split("token=")[1].split('&')[0]
         self.session.headers.update({"Authorization": token})
+        return self.session
+
+
+class JwappNewLogin(NewLogin):
+    """移动教务系统的登录类。此系统和考勤系统类似，都需要在登录后，从 header 中添加一个 token"""
+
+    def __init__(self, session=None):
+        super().__init__(JWAPP_URL, session=session)
+
+    def login(self, username, password, jcaptcha="") -> requests.Session:
+        """
+        登录并添加 token 到 session 头部
+        :return: session 对象，其实就是 requests.Session 对象
+        """
+        encrypt_password = self.encrypt_password(password)
+        login_response = self._post(self.post_url,
+                                    data={"username": username,
+                                          "password": encrypt_password,
+                                          "execution": self.execution_input,
+                                          "_eventId": "submit",
+                                          "submit1": "Login1",
+                                          "fpVisitorId": self.fp_visitor_id,
+                                          "captcha": jcaptcha,
+                                          "currentMenu": "1",
+                                          "failN": str(self.fail_count),
+                                          "mfaState": "",
+                                          "geolocation": "",
+                                          "trustAgent": ""}, allow_redirects=True)
+        # 神人系统用返回值 401 判断是否登录失败
+        if login_response.status_code == 401:
+            raise ServerError(401, "登录失败，用户名或密码错误。")
+        else:
+            login_response.raise_for_status()
+            # 更加神人的是，系统在验证码错误等问题时只会返回 200，你得从返回的 html 里解析错误提示组件才知道错误是啥
+            # 这系统前后端分离了，但好像也没分离
+            message = extract_alert_message(login_response.text)
+            if message:
+                # 如果有错误提示，说明登录失败
+                self.fail_count += 1
+                raise ServerError(400, f"登录失败: {message['title']}")
+            else:
+                # 登录成功，重置失败次数
+                self.fail_count = 0
+                try:
+                    token = login_response.url.split("token=")[1].split('&')[0]
+                except IndexError:
+                    raise ServerError(500, "服务器出现内部错误。")
+                self.session.headers.update({"Authorization": token})
+
         return self.session
 
 

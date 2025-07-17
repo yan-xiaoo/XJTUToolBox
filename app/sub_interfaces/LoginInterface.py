@@ -212,11 +212,14 @@ class LoginInterface(ScrollArea):
             w.cancelButton.setText(self.tr("取消"))
             if w.exec():
                 self.loginSuccess.emit(id_, self.__password)
+                # 清除一下旧的 Session，不然就没法再登录了
+                self.__thread.login = None
                 self._unlock(True)
             else:
                 self._unlock(False)
         else:
             self.loginSuccess.emit(id_, self.__password)
+            self.__thread.login = None
             self._unlock(True)
 
     @pyqtSlot(bool)
