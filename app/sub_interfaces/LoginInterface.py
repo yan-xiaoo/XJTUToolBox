@@ -216,6 +216,8 @@ class LoginInterface(ScrollArea):
                 self.__thread.login = None
                 self._unlock(True)
             else:
+                # 不管怎么样，都需要清除 Session，否则系统不允许再发送登录认证请求
+                self.__thread.login = None
                 self._unlock(False)
         else:
             self.loginSuccess.emit(id_, self.__password)

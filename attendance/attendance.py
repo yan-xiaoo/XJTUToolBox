@@ -143,7 +143,7 @@ class AttendanceNewLogin(NewLogin):
                                           "failN": str(self.fail_count),
                                           "mfaState": "",
                                           "geolocation": "",
-                                          "trustAgent": ""}, allow_redirects=False)
+                                          "trustAgent": ""}, allow_redirects=True)
         if login_response.status_code == 401:
             raise ServerError(401, "登录失败，用户名或密码错误。")
         else:
@@ -156,12 +156,13 @@ class AttendanceNewLogin(NewLogin):
             else:
                 # 登录成功，重置失败次数
                 self.fail_count = 0
-                try:
-                    token = login_response.headers["Location"].split("token=")[1].split('&')[0]
-                except IndexError:
-                    raise ServerError(500, "登录失败：服务器出现错误。")
-                self.session.headers.update({"Synjones-Auth": "bearer " + token})
-                self._get(login_response.headers["Location"], allow_redirects=True)
+
+        response = self._get(ATTENDANCE_URL, allow_redirects=True)
+        try:
+            token = response.url.split("token=")[1].split('&')[0]
+        except IndexError:
+            raise ServerError(500, "登录失败：服务器出现错误。")
+        self.session.headers.update({"Synjones-Auth": "bearer " + token})
 
         return self.session
 
