@@ -36,21 +36,23 @@ class ChangeTermDialog(MessageBoxBase):
             for year in range(current_date.year - 3, current_date.year):
                 self.termBox.addItem(f"{year}-{year + 1}-1")
                 self.termBox.addItem(f"{year}-{year + 1}-2")
+                self.termBox.addItem(f"{year}-{year + 1}-3")
             self.termBox.addItem(f"{current_date.year}-{current_date.year + 1}-1")
             # 设置编号为当前学期
             if current_date.month < 8:
-                self.termBox.setCurrentIndex(5)
+                self.termBox.setCurrentIndex(8)
             else:
-                self.termBox.setCurrentIndex(6)
+                self.termBox.setCurrentIndex(9)
         # 七月之前为下半学期，显示前推四年的学期和当前整年
         else:
             for year in range(current_date.year - 4, current_date.year):
                 self.termBox.addItem(f"{year}-{year + 1}-1")
                 self.termBox.addItem(f"{year}-{year + 1}-2")
+                self.termBox.addItem(f"{year}-{year + 1}-3")
             if current_date.month <= 1:
-                self.termBox.setCurrentIndex(6)
+                self.termBox.setCurrentIndex(9)
             else:
-                self.termBox.setCurrentIndex(7)
+                self.termBox.setCurrentIndex(10)
         # 系统中有数据的最新学期
         self.max_term_number = self.termBox.items[-1].text
 
@@ -80,9 +82,9 @@ class ChangeTermDialog(MessageBoxBase):
                 correct = False
                 self.showError(self.tr("学期编号格式错误，示例: 2020-2021-1"))
             else:
-                if no not in (1, 2):
+                if no not in (1, 2, 3):
                     correct = False
-                    self.showError(self.tr("学期编号最后一位必须为 1 或 2"))
+                    self.showError(self.tr("学期编号最后一位必须为 1、2 或 3"))
                 elif start >= end:
                     correct = False
                     self.showError(self.tr("结束年份必须大于开始年份"))

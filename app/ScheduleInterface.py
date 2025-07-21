@@ -130,7 +130,7 @@ class ScheduleInterface(ScrollArea):
         self.lastWeekButton = PushButton('<', parent=self)
         self.lastWeekButton.setFixedWidth(45)
         self.weekComboBox = ComboBox(self)
-        self.weekComboBox.addItems([str(i) for i in range(1, 23)])
+        self.weekComboBox.addItems([str(i) for i in range(1, self.getWeekLength() + 1)])
         self.weekComboBox.currentIndexChanged.connect(self.onWeekChanged)
         self.weekComboBox.setMaximumWidth(70)
         self.nextWeekButton = PushButton('>', parent=self)
@@ -264,6 +264,21 @@ class ScheduleInterface(ScrollArea):
     def week(self):
         return self.weekComboBox.currentIndex() + 1
 
+    def getWeekLength(self):
+        """
+        获得每个学期的周数长度。目前设置一般学期（编号 2020-2021-1/2020-2021-2）长度为 22 周，小学期（2020-2021-3）长度为 8 周
+        """
+        # 默认 22 周
+        if self.schedule_service is None:
+            return 22
+        term = self.schedule_service.getCurrentTerm()
+        if term is None:
+            return 22
+        # 在学期编号为 3 结尾的情况下（小学期），长度为 8 周
+        if term.endswith("-3"):
+            return 8
+        return 22
+
     def getCurrentWeek(self):
         """
         获取当前周数，如果学期开始时间为空或大于当前日期，或者当前日期超过了学期结束时间，则返回 1。结果不会超过 22 周
@@ -272,9 +287,9 @@ class ScheduleInterface(ScrollArea):
         start = self.schedule_service.getStartOfTerm()
         current = datetime.date.today()
         if start is None or start > current or (current -
-                                                start).days // 7 >= 23:
+                                                start).days // 7 >= self.getWeekLength():
             return 1
-        return min((current - start).days // 7 + 1, 22)
+        return min((current - start).days // 7 + 1, self.getWeekLength())
 
     @pyqtSlot(int)
     def onWeekChanged(self, week: int):
@@ -293,7 +308,7 @@ class ScheduleInterface(ScrollArea):
         下一周按钮点击事件
         """
         current = self.weekComboBox.currentIndex()
-        if current < 23:
+        if current < self.getWeekLength() + 1:
             self.weekComboBox.setCurrentIndex(current + 1)
 
     @pyqtSlot()
@@ -415,7 +430,7 @@ class ScheduleInterface(ScrollArea):
         self.getWeekAttendancePrimaryButton.setEnabled(True)
         if self.week > 1:
             self.lastWeekButton.setEnabled(True)
-        if self.week < 22:
+        if self.week < self.getWeekLength():
             self.nextWeekButton.setEnabled(True)
         self.weekComboBox.setEnabled(True)
         self.process_widget_attendance.setVisible(False)
@@ -567,7 +582,7 @@ class ScheduleInterface(ScrollArea):
             self.lastWeekButton.setEnabled(False)
         else:
             self.lastWeekButton.setEnabled(True)
-        if week == 22:
+        if week == self.getWeekLength():
             self.nextWeekButton.setEnabled(False)
         else:
             self.nextWeekButton.setEnabled(True)
@@ -756,6 +771,9 @@ class ScheduleInterface(ScrollArea):
         w = ChangeTermDialog(self)
         if w.exec():
             self.schedule_service.setCurrentTerm(w.term_number)
+            # 重新根据学期长度设置下拉框
+            self.weekComboBox.clear()
+            self.weekComboBox.addItems([str(i) for i in range(1, self.getWeekLength() + 1)])
             self.loadSchedule()
 
     @pyqtSlot()
