@@ -108,12 +108,14 @@ class SettingInterface(ScrollArea):
     # 当自身的「检查更新」按钮被点击时，发出此信号，用于消除主界面的提醒元素
     updateClicked = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, main_window, parent=None):
         super().__init__(parent)
 
         self.setObjectName("SettingInterface")
         self.view = QWidget(self)
         self.view.setObjectName("scrollWidget")
+
+        self.main_window = main_window
 
         self.expandLayout = ExpandLayout(self.view)
 
@@ -133,9 +135,17 @@ class SettingInterface(ScrollArea):
                                            self.accountGroup)
         self.clearCard = PushSettingCard(self.tr("清除"), FIF.CLEAR_SELECTION,
                                          self.tr("清除所有账户"), self.tr("清除本地存储的所有账户信息并撤销账户加密"))
+        self.showAvatarCard = CustomSwitchSettingCard(
+            FIF.EDUCATION,
+            self.tr("显示当前账户头像"),
+            self.tr("在侧边栏显示当前使用账户的头像"),
+            cfg.showAvatarOnSideBar,
+            self.accountGroup
+        )
         self.accountGroup.addSettingCard(self.encryptCard)
         self.accountGroup.addSettingCard(self.decryptCard)
         self.accountGroup.addSettingCard(self.clearCard)
+        self.accountGroup.addSettingCard(self.showAvatarCard)
 
         self._onUpdateEncryptStatus()
 
@@ -270,6 +280,7 @@ class SettingInterface(ScrollArea):
         self.feedbackCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox/issues")))
         self.logCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("file:///" + LOG_DIRECTORY)))
         self.autoStartCard.checkedChanged.connect(self._onAutoStartClicked)
+        self.showAvatarCard.checkedChanged.connect(self._showAvatarClicked)
 
         if sys.platform == "darwin":
             # macOS 不支持直接设置自动启动
@@ -348,6 +359,10 @@ class SettingInterface(ScrollArea):
         if w.exec():
             accounts.clear()
             InfoBar.success(title='', content="清除账户成功", parent=self)
+
+    @pyqtSlot()
+    def _showAvatarClicked(self):
+        self.main_window.on_avatar_update()
 
     @pyqtSlot(UpdateStatus)
     def onUpdateCheck(self, status):

@@ -27,7 +27,7 @@ def depad(text):
 
 class Account:
     """保存曾经登录过的用户名，密码，名称（自定义）等信息"""
-    def __init__(self, username: str, password: str, nickname: str = None, uuid=None):
+    def __init__(self, username: str, password: str, nickname: str = None, uuid=None, avatar_path="avatar.png", origin_avatar_path="origin_avatar.png"):
         """
         创建一个账户记录。
         :param username: 用户名（学号/手机号/邮箱）
@@ -38,15 +38,43 @@ class Account:
         self.password = password
         self.nickname = nickname
         self.uuid = uuid or str(uuid4())
+        # 以下路径是相对账户的主文件夹的路径
+        self.avatar_path = avatar_path  # 头像路径，默认是 avatar.png
+        self.origin_avatar_path = origin_avatar_path  # 原始未裁剪头像路径，默认是 origin_avatar.png
         # 存储当前账号用于访问各个需要登录网站的 session
         self.session_manager = SessionManager()
+        # 存一个 AccountDataManager 对象来计算头像的实际路径
+        from .cache import AccountDataManager
+        self.data_manager = AccountDataManager(self)
+
+    def avatar_exists(self):
+        return os.path.exists(self.data_manager.path(self.avatar_path)) and os.path.isfile(self.data_manager.path(self.avatar_path))
+
+    def remove_avatar(self):
+        """删除头像文件"""
+        avatar_path = self.data_manager.path(self.avatar_path)
+        if os.path.exists(avatar_path):
+            os.remove(avatar_path)
+        origin_avatar_path = self.data_manager.path(self.origin_avatar_path)
+        if os.path.exists(origin_avatar_path):
+            os.remove(origin_avatar_path)
+
+    @property
+    def avatar_full_path(self):
+        return self.data_manager.path(self.avatar_path)
+
+    @property
+    def origin_avatar_full_path(self):
+        return self.data_manager.path(self.origin_avatar_path)
 
     def to_diction(self):
-        return {"username": self.username, "password": self.password, "nickname": self.nickname, "uuid": self.uuid}
+        return {"username": self.username, "password": self.password, "nickname": self.nickname, "uuid": self.uuid,
+                "avatar_path": self.avatar_path, "origin_avatar_path": self.origin_avatar_path}
 
     @classmethod
     def from_diction(cls, data: dict):
-        return cls(data["username"], data["password"], data["nickname"], data.get("uuid", None))
+        return cls(data["username"], data["password"], data["nickname"], data.get("uuid", None),
+                   data.get("avatar_path", "avatar.png"), data.get("origin_avatar_path", "origin_avatar.png"))
 
     def save(self) -> str:
         return json.dumps(self.to_diction())

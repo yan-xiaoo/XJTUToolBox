@@ -91,6 +91,10 @@ class MainWindow(MSFluentWindow):
             # 60 秒检查一次时间
             self.notice_timer.start(60 * 1000)
 
+        accounts.currentAccountChanged.connect(self.on_avatar_update)
+        self.account_interface.avatarChanged.connect(self.on_avatar_update)
+        self.on_avatar_update()
+
         self.splashScreen.finish()
 
     def initWindow(self):
@@ -102,7 +106,7 @@ class MainWindow(MSFluentWindow):
         self.login_interface = LoginInterface(self)
         self.attendance_interface = AttendanceInterface(self, self)
         self.account_interface = AccountInterface(accounts, self, self)
-        self.setting_interface = SettingInterface(self)
+        self.setting_interface = SettingInterface(self, self)
         self.tool_box_interface = ToolBoxInterface(self, self)
         self.schedule_interface = ScheduleInterface(self)
         self.score_interface = ScoreInterface(self)
@@ -137,8 +141,8 @@ class MainWindow(MSFluentWindow):
                                            lambda: QDesktopServices.openUrl(
                                                QUrl("https://github.com/yan-xiaoo/XJTUToolbox")),
                                            NavigationItemPosition.BOTTOM)
-        self.addSubInterface(self.account_interface, FIF.EDUCATION, self.tr("账户"),
-                             position=NavigationItemPosition.BOTTOM)
+        self.account_item = self.addSubInterface(self.account_interface, FIF.EDUCATION, self.tr("账户"),
+                                                 position=NavigationItemPosition.BOTTOM)
         self.settingButton = self.addSubInterface(self.setting_interface, FIF.SETTING, self.tr("设置"),
                                                   position=NavigationItemPosition.BOTTOM)
 
@@ -240,3 +244,16 @@ class MainWindow(MSFluentWindow):
             self.notice_timer.start(60 * 1000)
         else:
             self.notice_timer.stop()
+
+    @pyqtSlot()
+    def on_avatar_update(self, _=None):
+        """
+        当当前账户发生变化时，更新托盘图标
+        """
+        if cfg.showAvatarOnSideBar.value:
+            if accounts.current is not None and accounts.current.avatar_exists():
+                self.account_item.setIcon(QIcon(accounts.current.avatar_full_path))
+            else:
+                self.account_item.setIcon(QIcon("assets/icons/default_avatar.png"))
+        else:
+            self.account_item.setIcon(FIF.EDUCATION)

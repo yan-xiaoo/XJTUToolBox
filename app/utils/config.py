@@ -116,6 +116,8 @@ class Config(QConfig):
     lastSearchTime = OptionsConfigItem("Settings", "last_search_time",
                                          datetime.datetime(1970, 1, 1), DateTimeValidator(),
                                          DateTimeSerializer())
+    showAvatarOnSideBar = OptionsConfigItem("Settings", "show_avatar_on_sidebar",
+                                    True, OptionsValidator([True, False]), BooleanSerializer())
 
     def __init__(self):
         super().__init__()

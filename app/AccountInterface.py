@@ -1,12 +1,13 @@
 from PyQt5.QtCore import Qt, QPoint, pyqtSlot, pyqtSignal
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame
 from qfluentwidgets import ScrollArea, TitleLabel, VBoxLayout, StrongBodyLabel, BodyLabel, SubtitleLabel, LineEdit, \
     CardWidget, IconWidget, CaptionLabel, PushButton, TransparentToolButton, FluentIcon, RoundMenu, Action, MessageBox, \
     MessageBoxBase, InfoBar
 
+from .sub_interfaces.AvatarDialog import AvatarDialog
 from .sub_interfaces.EncryptDialog import DecryptFrame
-from .utils import StyleSheet, cfg, AccountDataManager
+from .utils import StyleSheet, cfg, AccountDataManager, accounts
 from .utils.account import Account, AccountManager
 
 
@@ -40,15 +41,31 @@ class AccountCard(CardWidget):
     accountChanged = pyqtSignal()
     accountDeleted = pyqtSignal(Account)
     accountCurrentChanged = pyqtSignal(Account)
+    # 头像变化
+    avatarChanged = pyqtSignal(Account)
 
-    def __init__(self, account: Account, icon, title, content, main_window, parent=None):
+    default_icon = None
+
+    def __init__(self, account: Account, title, content, main_window, parent=None):
         super().__init__(parent)
         self.account = account
         # 获得主窗口的引用，用于切换界面
         self.main_window = main_window
         self.parent_ = parent
 
+        if account.avatar_exists():
+            icon = QIcon(account.avatar_full_path)
+            if icon.isNull():
+                if self.__class__.default_icon is None:
+                    self.__class__.default_icon = QIcon("assets/icons/default_avatar.png")
+                icon = self.__class__.default_icon
+        else:
+            if self.__class__.default_icon is None:
+                self.__class__.default_icon = QIcon("assets/icons/default_avatar.png")
+            icon = self.__class__.default_icon
+
         self.iconWidget = IconWidget(icon)
+        self.iconWidget.mouseReleaseEvent = lambda a0: self._onEditAccountAvatarClicked()
         self.titleLabel = BodyLabel(title, self)
         self.contentLabel = CaptionLabel(content, self)
         self.openButton = PushButton(self.tr('切换'), self)
@@ -78,15 +95,22 @@ class AccountCard(CardWidget):
         self.hBoxLayout.addWidget(self.moreButton, 0, Qt.AlignRight)
 
         self.editAction = Action(FluentIcon.EDIT, self.tr("编辑名称"), self)
+        self.editAvatarAction = Action(FluentIcon.PEOPLE, self.tr("修改头像"), self)
+        self.deleteAvatarAction = Action(FluentIcon.DELETE, self.tr("移除头像"), self)
+        self.deleteAvatarAction.setEnabled(account.avatar_exists())
         self.editPasswordAction = Action(FluentIcon.LABEL, self.tr('修改密码'), self)
         self.deleteAction = Action(FluentIcon.DELETE, self.tr('删除'), self)
 
         self.editAction.triggered.connect(self._onEditAccountNameClicked)
+        self.editAvatarAction.triggered.connect(self._onEditAccountAvatarClicked)
+        self.deleteAvatarAction.triggered.connect(self._onRemoveAvatarClicked)
         self.editPasswordAction.triggered.connect(self._onEditAccountPasswordClicked)
         self.deleteAction.triggered.connect(self._onDeleteAccountClicked)
 
         self.menu = RoundMenu(parent=self)
         self.menu.addAction(self.editAction)
+        self.menu.addAction(self.editAvatarAction)
+        self.menu.addAction(self.deleteAvatarAction)
         self.menu.addAction(self.editPasswordAction)
         self.menu.addAction(self.deleteAction)
 
@@ -120,6 +144,34 @@ class AccountCard(CardWidget):
             self.account.nickname = dialog.nameEdit.text()
             self.titleLabel.setText(self.account.nickname)
             self.accountChanged.emit()
+
+    def _onEditAccountAvatarClicked(self):
+        if self.account.avatar_exists():
+            dialog = AvatarDialog(self.account.origin_avatar_full_path, parent=self.parent().parent().parent().parent())
+        else:
+            dialog = AvatarDialog(parent=self.parent().parent().parent().parent())
+        if dialog.exec():
+            avatar_pixmap = dialog.get_avatar_pixmap()
+            origin_pixmap = dialog.get_origin_pixmap()
+            if avatar_pixmap and origin_pixmap:
+                path = self.account.avatar_full_path
+                avatar_pixmap.save(path, "PNG")
+                origin_path = self.account.origin_avatar_full_path
+                origin_pixmap.save(origin_path, "PNG")
+                self.iconWidget.setIcon(QIcon(path))
+                self.accountChanged.emit()
+
+            self.avatarChanged.emit(self.account)
+            self.deleteAvatarAction.setEnabled(self.account.avatar_exists())
+
+    def _onRemoveAvatarClicked(self):
+        self.account.remove_avatar()
+        if self.__class__.default_icon is None:
+            self.__class__.default_icon = QIcon("assets/icons/default_avatar.png")
+        self.iconWidget.setIcon(self.__class__.default_icon)
+        self.deleteAvatarAction.setEnabled(self.account.avatar_exists())
+        self.accountChanged.emit()
+        self.avatarChanged.emit(self.account)
 
     def _onEditAccountPasswordClicked(self):
         self.main_window.switchTo(self.main_window.login_interface)
@@ -183,6 +235,9 @@ class EditAccountNameBox(MessageBoxBase):
 
 
 class AccountInterface(ScrollArea):
+    # 某个账户的头像发生变化时发出信号
+    avatarChanged = pyqtSignal(Account)
+
     def __init__(self, accounts: AccountManager, main_window, parent=None):
         super().__init__(parent)
         self.setObjectName("AccountInterface")
@@ -224,8 +279,6 @@ class AccountInterface(ScrollArea):
         self.accountAreaLayout.setAlignment(Qt.AlignTop)
 
         self.vBoxLayout.addWidget(self.accountArea, stretch=1)
-
-        self.default_icon = QIcon("assets/icons/default_avatar.png")
 
         self.addAccountWidget = AddAccountCard(self.accountArea)
         self.accountAreaLayout.addWidget(self.addAccountWidget)
@@ -289,6 +342,10 @@ class AccountInterface(ScrollArea):
         self.account_widgets[account].deleteLater()
         self._onAccountChanged()
 
+    @pyqtSlot(Account)
+    def _onAvatarChanged(self, account: Account):
+        self.avatarChanged.emit(account)
+
     def _onAddAccountClicked(self):
         if not self.accountClickable:
             InfoBar.error(self.tr("无法添加账户"), self.tr("请先解密账户"), duration=2000, parent=self)
@@ -316,11 +373,11 @@ class AccountInterface(ScrollArea):
 
     def _add_account_widget(self, account: Account, is_current=False):
         """is_current 仅仅影响按钮样式，不会影响账户的切换行为"""
-        widget = AccountCard(account, self.default_icon, account.nickname, account.username, self.main_window,
-                             self.accountArea)
+        widget = AccountCard(account, account.nickname, account.username, self.main_window, self.accountArea)
         widget.accountChanged.connect(self._onAccountChanged)
         widget.accountDeleted.connect(self._onAccountDeleted)
         widget.accountCurrentChanged.connect(self._onCurrentAccountChanged)
+        widget.avatarChanged.connect(self._onAvatarChanged)
         self.account_widgets[account] = widget
         self.accountAreaLayout.addWidget(widget)
         widget.setCurrent(is_current)
