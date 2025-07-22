@@ -19,12 +19,13 @@ from schedule.xjtu_time import isSummerTime
 
 
 class WeekFlyoutView(FlyoutViewBase):
-    def __init__(self, weeks, select_week=None, lock_weeks=None, parent=None):
+    def __init__(self, weeks, select_week=None, lock_weeks=None, week_numbers=22, parent=None):
         """
         创建一个用于选择周数的浮窗
-        :param weeks: 所有可选择的周数
+        :param weeks: 所有初始选择的周数
         :param select_week: 要强制某周为选择状态，传入该周的数字
         :param lock_weeks: 要锁定（不允许选择）的周数，传入一个列表
+        :param week_numbers: 总周数，默认为 22 周
         :param parent: 父对象
         """
         super().__init__(parent)
@@ -34,7 +35,7 @@ class WeekFlyoutView(FlyoutViewBase):
         self.checkbox = []
         self.setMinimumWidth(300)
 
-        for week in range(1, 19):
+        for week in range(1, week_numbers + 1):
             checkbox = CheckBox(f"第{week}周", self)
             checkbox.setMinimumWidth(150)
             checkbox.setChecked(week in self.weeks)
@@ -321,6 +322,21 @@ class LessonCard(HeaderCardWidget):
         self.table.item(4, 0).setFlags(Qt.ItemIsEnabled)
         self.table.item(4, 1).setFlags(Qt.ItemIsEnabled)
 
+    def getWeekLength(self):
+        """
+        获得每个学期的周数长度。目前设置一般学期（编号 2020-2021-1/2020-2021-2）长度为 22 周，小学期（2020-2021-3）长度为 8 周
+        """
+        # 默认 22 周
+        if self.schedule_service is None:
+            return 22
+        term = self.schedule_service.getCurrentTerm()
+        if term is None:
+            return 22
+        # 在学期编号为 3 结尾的情况下（小学期），长度为 8 周
+        if term.endswith("-3"):
+            return 8
+        return 22
+
     @pyqtSlot(int, int)
     def onTableWidgetClicked(self, row, col):
         if row == 4 and col == 1:
@@ -328,7 +344,7 @@ class LessonCard(HeaderCardWidget):
                 self.weeks_flyout = Flyout.make(
                     target=self.table,
                     view=WeekFlyoutView(weeks=self.weeks, lock_weeks=self.other_weeks,
-                                        select_week=self.course.week_number),
+                                        select_week=self.course.week_number, week_numbers=self.getWeekLength()),
                     parent=self
                 )
                 self.weeks_flyout.closed.connect(self.onWeekFlyoutClosed)
@@ -579,13 +595,29 @@ class EmptyLessonCard(HeaderCardWidget):
             self.table.setVisible(False)
             self.confirmFrame.setVisible(False)
 
+    def getWeekLength(self):
+        """
+        获得每个学期的周数长度。目前设置一般学期（编号 2020-2021-1/2020-2021-2）长度为 22 周，小学期（2020-2021-3）长度为 8 周
+        """
+        # 默认 22 周
+        if self.schedule_service is None:
+            return 22
+        term = self.schedule_service.getCurrentTerm()
+        if term is None:
+            return 22
+        # 在学期编号为 3 结尾的情况下（小学期），长度为 8 周
+        if term.endswith("-3"):
+            return 8
+        return 22
+
     @pyqtSlot(int, int)
     def onTableWidgetClicked(self, row, col):
         if row == 2 and col == 1:
             if self.editable:
                 self.weeks_flyout = Flyout.make(
                     target=self.table,
-                    view=WeekFlyoutView(weeks=self.weeks, select_week=self.current_week, lock_weeks=self.other_weeks),
+                    view=WeekFlyoutView(weeks=self.weeks, select_week=self.current_week, lock_weeks=self.other_weeks,
+                                        week_numbers=self.getWeekLength()),
                     parent=self
                 )
                 self.weeks_flyout.closed.connect(self.onWeekFlyoutClosed)

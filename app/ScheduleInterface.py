@@ -391,10 +391,17 @@ class ScheduleInterface(ScrollArea):
         if self.detailDialog.modified:
             # 这个写法虽然很奇怪，但是直接调用 loadSchedule 会导致课程表大小变得很小，不知道为什么
             # 这样做就没有问题
-            self.weekComboBox.setCurrentIndex(
-                self.weekComboBox.currentIndex() + 1)
-            self.weekComboBox.setCurrentIndex(
-                self.weekComboBox.currentIndex() - 1)
+            if self.weekComboBox.currentIndex() != self.getWeekLength() - 1:
+                self.weekComboBox.setCurrentIndex(
+                    self.weekComboBox.currentIndex() + 1)
+                self.weekComboBox.setCurrentIndex(
+                    self.weekComboBox.currentIndex() - 1)
+            else:
+                # 最后一周时无法设置周数为下一周，所以先减再加
+                self.weekComboBox.setCurrentIndex(
+                    self.weekComboBox.currentIndex() - 1)
+                self.weekComboBox.setCurrentIndex(
+                    self.weekComboBox.currentIndex() + 1)
 
     def getSameCourseInOtherWeek(self, course):
         if self.schedule_service is None:
@@ -415,6 +422,7 @@ class ScheduleInterface(ScrollArea):
         self.nextWeekButton.setEnabled(False)
         self.weekComboBox.setEnabled(False)
 
+        self.getExamAction.setEnabled(False)
         self.changeTermAction.setEnabled(False)
         self.exportAction.setEnabled(False)
         self.clearAction.setEnabled(False)
@@ -436,6 +444,7 @@ class ScheduleInterface(ScrollArea):
         self.process_widget_attendance.setVisible(False)
         self.process_widget_ehall.setVisible(False)
 
+        self.getExamAction.setEnabled(True)
         self.changeTermAction.setEnabled(True)
         self.exportAction.setEnabled(True)
         self.clearAction.setEnabled(True)
