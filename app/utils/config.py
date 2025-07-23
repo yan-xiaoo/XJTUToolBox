@@ -1,9 +1,10 @@
 import datetime
+import json
 import os
 
 from packaging.version import parse
 from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme, \
-    EnumSerializer, ConfigValidator
+    EnumSerializer, ConfigValidator, ConfigItem
 from enum import Enum
 from .migrate_data import DATA_DIRECTORY
 
@@ -63,6 +64,28 @@ class DateTimeSerializer(ConfigSerializer):
             return datetime.datetime(1970, 1, 1)
 
 
+class CardValidator(ConfigValidator):
+    def validate(self, value):
+        return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+    def correct(self, value):
+        if not self.validate(value):
+            return []
+        return value
+
+
+class CardSerializer(ConfigSerializer):
+    def serialize(self, value):
+        if isinstance(value, list):
+            return json.dumps(value)
+        return ""
+
+    def deserialize(self, value):
+        if isinstance(value, str):
+            return json.loads(value)
+        return []
+
+
 class AttendanceLoginMethod(Enum):
     # 不设置，每次询问
     NONE = 0
@@ -118,6 +141,7 @@ class Config(QConfig):
                                          DateTimeSerializer())
     showAvatarOnSideBar = OptionsConfigItem("Settings", "show_avatar_on_sidebar",
                                     True, OptionsValidator([True, False]), BooleanSerializer())
+    cardLayout = ConfigItem("Settings", "card_layout", [], CardValidator(), CardSerializer())
 
     def __init__(self):
         super().__init__()
