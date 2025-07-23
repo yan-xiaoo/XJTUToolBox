@@ -1,6 +1,6 @@
 import json
 
-from PyQt5.QtCore import pyqtSlot, QDate, Qt, QStandardPaths
+from PyQt5.QtCore import pyqtSlot, QDate, Qt, QStandardPaths, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QTableWidgetItem, \
     QFileDialog
 from PyQt5.QtGui import QFont, QPixmap
@@ -189,17 +189,24 @@ class EmptyRoomInterface(ScrollArea):
         self.processWidget = ProcessWidget(self.thread_, parent=self.view, stoppable=True)
         self.processWidget.setVisible(False)
 
+        # 延迟加载教室数据的相关变量
+        self._pendingRoomData = {}  # 待处理的教室数据
+        self._loadRoomIndex = 0  # 当前加载的教室索引
+        self._roomBatchSize = 10  # 每批加载的教室数量
+        self._loadRoomTimer = QTimer(self)  # 延迟加载定时器
+        self._roomLabels = []  # 教室标签列表
+
         self.viewLayout.addWidget(self.commandFrame)
         self.viewLayout.addWidget(self.processWidget)
         self.viewLayout.addWidget(self.emptyRoomTable, stretch=1)
+
+        # 先更新一次教学楼下拉框的内容
+        self._updateBuildingBox(save_setting=False)
 
         self.loadQuerySetting()
         self.loadQueryResult()
         self.campusBox.currentIndexChanged.connect(self._updateBuildingBox)
         self.buildingBox.selectChanged.connect(self.saveQuerySetting)
-
-        # 先更新一次教学楼下拉框的内容
-        self._updateBuildingBox()
 
         cfg.themeChanged.connect(self._onThemeChanged)
 
@@ -208,7 +215,7 @@ class EmptyRoomInterface(ScrollArea):
         self.setWidgetResizable(True)
 
     @pyqtSlot()
-    def _updateBuildingBox(self):
+    def _updateBuildingBox(self, save_setting=True):
         """
         更新教学楼下拉框的内容
         """
@@ -222,7 +229,8 @@ class EmptyRoomInterface(ScrollArea):
         self.buildingBox.clear()
         self.buildingBox.addItems(buildings)
 
-        self.saveQuerySetting()
+        if save_setting:
+            self.saveQuerySetting()
 
     @pyqtSlot()
     def _onSearchButtonClicked(self):
@@ -260,27 +268,70 @@ class EmptyRoomInterface(ScrollArea):
 
     @pyqtSlot(dict)
     def _onReceiveResult(self, empty_room_info: dict):
+        # 停止之前可能正在进行的加载
+        self._loadRoomTimer.stop()
+
+        # 清空表格内容
         self.emptyRoomTable.clearContents()
         self.emptyRoomTable.setRowCount(len(empty_room_info))
         self.emptyRoomTable.verticalHeader().setVisible(True)
         self.emptyRoomTable.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents)
-        labels = []
-        i = 0
-        for room, value in empty_room_info.items():
-            labels.append(room)
+
+        # 准备延迟加载的数据
+        self._pendingRoomData = empty_room_info
+        self._roomLabels = list(empty_room_info.keys())
+        self._loadRoomIndex = 0
+
+        # 设置表格行标签
+        self.emptyRoomTable.setVerticalHeaderLabels(self._roomLabels)
+
+        # 调整行高以适应新的组件
+        self.emptyRoomTable.verticalHeader().setDefaultSectionSize(40)
+
+        # 如果有数据，启动延迟加载
+        if empty_room_info:
+            QTimer.singleShot(50, self._startLoadingRooms)  # 50ms后开始加载
+
+    def _startLoadingRooms(self):
+        """
+        开始加载教室数据
+        """
+        if self._loadRoomIndex >= len(self._roomLabels):
+            return
+
+        # 计算当前批次的教室数据
+        batch_data = {}
+        for i in range(self._roomBatchSize):
+            index = self._loadRoomIndex + i
+            if index >= len(self._roomLabels):
+                break
+            room = self._roomLabels[index]
+            batch_data[room] = self._pendingRoomData[room]
+
+        # 更新表格内容
+        self._updateTableWithRoomData(batch_data)
+
+        # 更新索引
+        self._loadRoomIndex += len(batch_data)
+
+        # 继续加载下一批
+        if self._loadRoomIndex < len(self._roomLabels):
+            QTimer.singleShot(50, self._startLoadingRooms)  # 50ms后加载下一批
+
+    def _updateTableWithRoomData(self, room_data: dict):
+        """
+        用教室数据更新表格
+        """
+        for room, value in room_data.items():
+            row = self._roomLabels.index(room)
             status = value["status"]
-            self.emptyRoomTable.setItem(i, 0, QTableWidgetItem(str(value["size"])))
+            self.emptyRoomTable.setItem(row, 0, QTableWidgetItem(str(value["size"])))
             for period in range(11):
                 # 创建自定义的CellWidget来替代纯文字
                 is_occupied = status[period] == 1
                 cell_widget = CellWidget(is_occupied=is_occupied)
-                self.emptyRoomTable.setCellWidget(i, self._getSuitablePeriod(period), cell_widget)
-            i += 1
-        self.emptyRoomTable.setVerticalHeaderLabels(labels)
-
-        # 调整行高以适应新的组件
-        self.emptyRoomTable.verticalHeader().setDefaultSectionSize(40)
+                self.emptyRoomTable.setCellWidget(row, self._getSuitablePeriod(period), cell_widget)
 
     @pyqtSlot()
     def _onThemeChanged(self):

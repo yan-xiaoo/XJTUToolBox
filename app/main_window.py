@@ -56,11 +56,15 @@ class MainWindow(MSFluentWindow):
         self.on_theme_changed()
         self.initWindow()
 
-        self.splashScreen = SplashScreen(self.windowIcon(), self)
+        self.splashScreen = SplashScreen(QIcon("assets/icons/main_icon.ico"), self)
         self.splashScreen.setIconSize(QSize(102, 102))
         self.show()
+        for _ in range(5):
+            # 多 process 几次，保证显示出初始页面
+            QApplication.processEvents()
 
         self.initInterface()
+        QApplication.processEvents()
         self.initNavigation()
 
         cfg.themeChanged.connect(self.on_theme_changed)
@@ -115,9 +119,12 @@ class MainWindow(MSFluentWindow):
         self.webvpn_convert_interface = WebVPNConvertInterface(self)
         self.notice_interface = NoticeInterface(self, self)
         self.setting_interface.noticeCard.testButton.clicked.connect(lambda: self.notice_interface.startBackgroundSearch(force_push=True))
+        QApplication.processEvents()
         self.notice_setting_interface = NoticeSettingInterface(self.notice_interface.noticeManager, self.notice_interface, self)
         self.notice_setting_interface.quit.connect(self.notice_interface.onSettingQuit)
+        QApplication.processEvents()
         self.empty_room_interface = EmptyRoomInterface(self)
+        QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
         self.tray_interface.main_interface.connect(lambda: self.show())

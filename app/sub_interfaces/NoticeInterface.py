@@ -3,7 +3,7 @@ import json
 import platform
 import sys
 
-from PyQt5.QtCore import Qt, pyqtSlot, QUrl
+from PyQt5.QtCore import Qt, pyqtSlot, QUrl, QTimer
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QActionGroup
 from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton, \
@@ -147,16 +147,15 @@ class NoticeInterface(ScrollArea):
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             notice_data = []
         self.notices = self.noticeManager.load_notifications(notice_data)
-        self.sort_by_selected_method()
-        for notice in self.notices:
-            # 创建通知卡片对象
-            notice_card = NoticeCard(notice, self.noticeFrame)
-            notice_card.noticeChanged.connect(self.onNoticeChanged)
-            notice_card.noticeClicked.connect(self.onNoticeClicked)
-            # 添加到通知显示界面
-            self.noticeFrameLayout.addWidget(notice_card)
-            # 添加到通知列表
-            self.noticeWidgets.append(notice_card)
+        # 延迟加载通知卡片的相关变量
+        self._pendingNotices = self.notices[:]  # 待处理的通知列表
+        self._loadIndex = 0  # 当前加载索引
+        self._batchSize = 5  # 每批加载的通知数量
+        self._loadTimer = QTimer(self)  # 延迟加载定时器
+        self._loadTimer.timeout.connect(self._loadNextBatch)
+
+        # 先排序通知数据，但不创建UI组件
+        self.sort_notices_data_only()
 
         # 没有通知配置时就切换到提示你添加配置的界面
         if not self.noticeManager.subscription:
@@ -165,6 +164,8 @@ class NoticeInterface(ScrollArea):
             # 有通知配置但是没有通知时就切换到提示你获取通知的界面
             if self.notices:
                 self.switchTo(self.noticeFrame)
+                # 启动延迟加载
+                QTimer.singleShot(100, self._startLoadingNotices)  # 100ms后开始加载
             else:
                 self.switchTo(self.emptyFrame)
 
@@ -280,6 +281,14 @@ class NoticeInterface(ScrollArea):
         for one in self.noticeWidgets:
             self.noticeFrameLayout.addWidget(one)
         self.save_notification()
+
+    def sort_notices_data_only(self):
+        """
+        仅对通知数据进行排序，不更新UI
+        """
+        self.notices.sort(key=lambda x: x.date, reverse=True)
+        self.notices.sort(key=lambda x: x.source.value, reverse=False)
+        self.notices.sort(key=lambda x: x.is_read, reverse=False)
 
     def sort_by_selected_method(self):
         """
@@ -497,3 +506,37 @@ class NoticeInterface(ScrollArea):
                 self.onGetNoticeButtonClicked()
             else:
                 self.switchTo(self.emptyFrame)
+
+    @pyqtSlot()
+    def _loadNextBatch(self):
+        """
+        加载下一批通知卡片
+        """
+        if self._loadIndex >= len(self._pendingNotices):
+            # 如果没有更多的通知，停止定时器
+            self._loadTimer.stop()
+            return
+
+        # 计算当前批次的通知
+        endIndex = min(self._loadIndex + self._batchSize, len(self._pendingNotices))
+        currentBatch = self._pendingNotices[self._loadIndex:endIndex]
+
+        for notice in currentBatch:
+            # 创建通知卡片对象
+            notice_card = NoticeCard(notice, self.noticeFrame)
+            notice_card.noticeChanged.connect(self.onNoticeChanged)
+            notice_card.noticeClicked.connect(self.onNoticeClicked)
+            # 添加到通知显示界面
+            self.noticeFrameLayout.addWidget(notice_card)
+            # 添加到通知列表
+            self.noticeWidgets.append(notice_card)
+
+        self._loadIndex = endIndex
+
+    @pyqtSlot()
+    def _startLoadingNotices(self):
+        """
+        开始延迟加载通知卡片
+        """
+        self._loadTimer.start(100)  # 每100ms加载一批通知
+
