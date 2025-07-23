@@ -25,6 +25,7 @@ from .sessions.ehall_session import EhallSession
 from .sessions.jwapp_session import JwappSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
+from .sub_interfaces.EmptyRoomInterface import EmptyRoomInterface
 from .sub_interfaces.NoticeInterface import NoticeInterface
 from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
@@ -116,6 +117,7 @@ class MainWindow(MSFluentWindow):
         self.setting_interface.noticeCard.testButton.clicked.connect(lambda: self.notice_interface.startBackgroundSearch(force_push=True))
         self.notice_setting_interface = NoticeSettingInterface(self.notice_interface.noticeManager, self.notice_interface, self)
         self.notice_setting_interface.quit.connect(self.notice_interface.onSettingQuit)
+        self.empty_room_interface = EmptyRoomInterface(self)
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
         self.tray_interface.main_interface.connect(lambda: self.show())
@@ -158,6 +160,10 @@ class MainWindow(MSFluentWindow):
         notice_card = self.tool_box_interface.addCard(self.notice_interface, FIF.DICTIONARY, self.tr("通知查询"),
                                                       self.tr("在一处查询学校网站的新通知"))
         notice_card.setFixedSize(200, 180)
+
+        empty_room_card = self.tool_box_interface.addCard(self.empty_room_interface, FIF.LAYOUT, self.tr("空闲教室"),
+                                                          self.tr("查询当前空闲的教室"))
+        empty_room_card.setFixedSize(200, 180)
 
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),

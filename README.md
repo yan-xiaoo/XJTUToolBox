@@ -10,6 +10,7 @@
 - 课表查询：查询整学期的课表，并查看每节课程的考勤信息
 - 成绩查询：查询多个学期的成绩，平均分，自选课程计算绩点
 - 通知订阅：订阅教务处、各个学院的消息，设置定时推送，快速查看网站的新通知
+- 空闲教室查询：查询任意校区的空闲教室，并导出为图片
 
 > 目前除通知查询外的功能均只支持本科生系统，不支持研究生系统
 
@@ -49,7 +50,7 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 - 安装依赖库：
   - macOS 系统用户：`pip install -r requirements_osx.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements_osx.txt` （国内）
   - 其他系统用户：`pip install -r requirements.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt` （国内）
-  > macOS 系统中，由于 PyCocoa 和 pyobjc 最新版本出现冲突，必须手动限制 pyobjc 的版本
+  > macOS 系统中，由于 PyCocoa 和 pyobjc 最新版本出现冲突，必须手动限制 pyobjc 的版本，因此有一个单独的 requirements_osx.txt 文件
 - 运行：`python app.py`
 
 > 从源码运行时，macOS 系统的用户需要额外安装 pyobjus 库以实现通知发送。如果不安装，定时推送通知功能将无法使用。
@@ -71,6 +72,7 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 
 ## 未来规划
 - 考勤统计查询：查询整学期课程的考勤状态，快速找出缺勤的课程
+- 研究生系统支持：预计九/十月份尝试适配一下
 
 ## 开发相关
 项目结构说明：
@@ -89,6 +91,7 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 ## 相关项目与致谢
 本项目的完成离不开如下开源项目的帮助：
 - [qfluentwidgets (PyQt5 界面库)](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
+- [March7thAssistant（项目结构、自动更新功能）](https://github.com/moesnow/March7thAssistant)
 - [better-ehall (交大登录示例项目)](https://github.com/guitaoliu/xjtu-grade)
 - [webvpn-dlut (WebVPN 网址转换)](https://github.com/ESWZY/webvpn-dlut)
 - [xidian-script（Ehall 开发实例）](https://github.com/xdlinux/xidian-scripts)

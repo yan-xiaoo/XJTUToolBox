@@ -1,0 +1,8 @@
+EmptyRoomInterface, #view{
+    background-color: transparent;
+}
+
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}

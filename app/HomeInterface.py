@@ -61,6 +61,11 @@ class HomeFrame(QWidget):
         self.noticeCard.setBackgroundColor(LinkCard.LinkCardColor.GREEN)
         self.noticeCard.cardClicked.connect(lambda: main_window.switchTo(main_window.notice_interface))
         self.linkCardView.addCard(self.noticeCard)
+        self.emptyRoomCard = LinkCard(FIF.LAYOUT.icon(theme=Theme.DARK), self.tr("空闲教室"),
+                                      self.tr("查询当前空闲的教室"))
+        self.emptyRoomCard.setBackgroundColor(LinkCard.LinkCardColor.ORANGE)
+        self.emptyRoomCard.cardClicked.connect(lambda: main_window.switchTo(main_window.empty_room_interface))
+        self.linkCardView.addCard(self.emptyRoomCard)
 
         self.vBoxLayout.addWidget(self.linkCardView, alignment=Qt.AlignTop)
         self.vBoxLayout.addStretch(1)

@@ -51,6 +51,8 @@ class MultiSelectionComboBox(LineEdit, ComboBoxBase):
 
     currentIndexChanged = pyqtSignal(int)
     currentTextChanged = pyqtSignal(str)
+    itemAdded = pyqtSignal()
+    selectChanged = pyqtSignal()
 
     def __init__(self, all_select_option=False, parent=None):
         """
@@ -109,6 +111,8 @@ class MultiSelectionComboBox(LineEdit, ComboBoxBase):
             return
 
         self.selected.add(index)
+        self.itemAdded.emit()
+        self.selectChanged.emit()
         self.generateTags()
 
     def addSelectIndexes(self, indexes: list):
@@ -116,13 +120,30 @@ class MultiSelectionComboBox(LineEdit, ComboBoxBase):
             if index >= self.count() or index < 0 or index in self.selected:
                 continue
             self.selected.add(index)
+        self.itemAdded.emit()
+        self.selectChanged.emit()
         self.generateTags()
+
+    def setPlaceholderText(self, a0):
+        self._placeholderText = a0
+        if tuple(self.selected):
+            self._setPlaceholderText("")
+        else:
+            self._setPlaceholderText(self._placeholderText)
+
+    def _setPlaceholderText(self, text):
+        super().setPlaceholderText(text)
 
     def generateTags(self):
         """
         根据已经选择的索引，生成对应的 tag
         """
         selected = sorted(tuple(self.selected))
+        if selected:
+            self._setPlaceholderText("")
+        else:
+            self._setPlaceholderText(self._placeholderText)
+
         for index in selected:
             if index not in self.selected_tags:
                 tag = SelectionTag(self.itemText(index), self)
@@ -149,16 +170,20 @@ class MultiSelectionComboBox(LineEdit, ComboBoxBase):
             return
 
         self.selected.remove(index)
+        self.selectChanged.emit()
         self.generateTags()
 
     def removeSelectIndexes(self, indexes: list):
         for index in indexes:
             if index in self.selected:
                 self.selected.remove(index)
+        self.selectChanged.emit()
         self.generateTags()
 
     def clear(self):
+        self.selected.clear()
         ComboBoxBase.clear(self)
+        self.generateTags()
 
     def _onDropMenuClosed(self):
         self.dropMenu = None

@@ -52,7 +52,7 @@ class LinkCardColor:
             "dark": __dark_color_base.format("101, 136, 115")
         },
         ORANGE: {
-            "light": __light_color_base.format("235, 145, 99"),
+            "light": __light_color_base.format("220, 135, 90"),
             "dark": __dark_color_base.format("235, 145, 99")
         }
     }
