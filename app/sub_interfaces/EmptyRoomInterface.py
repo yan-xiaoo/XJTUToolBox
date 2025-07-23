@@ -198,6 +198,9 @@ class EmptyRoomInterface(ScrollArea):
         self.campusBox.currentIndexChanged.connect(self._updateBuildingBox)
         self.buildingBox.selectChanged.connect(self.saveQuerySetting)
 
+        # 先更新一次教学楼下拉框的内容
+        self._updateBuildingBox()
+
         cfg.themeChanged.connect(self._onThemeChanged)
 
         StyleSheet.EMPTY_ROOM_INTERFACE.apply(self)

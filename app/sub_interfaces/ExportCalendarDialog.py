@@ -1,6 +1,6 @@
 import os.path
 
-from PyQt5.QtCore import pyqtSlot
+from PyQt5.QtCore import pyqtSlot, QStandardPaths
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QFileDialog
 from qfluentwidgets import MessageBoxBase, TitleLabel, CaptionLabel, PushButton, LineEdit, CheckBox, ToolTipFilter, ToolTipPosition
 
@@ -72,6 +72,7 @@ class ExportCalendarDialog(MessageBoxBase):
 
     @pyqtSlot()
     def _onChooseFileButtonClicked(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, self.tr("导出为 ics"), filter=self.tr("iCalendar (*.ics);;所有文件 (*)"))
+        file_path, _ = QFileDialog.getSaveFileName(self, self.tr("导出为 ics"), filter=self.tr("iCalendar (*.ics);;所有文件 (*)"),
+                                                   directory=QStandardPaths.writableLocation(QStandardPaths.DesktopLocation))
         if file_path:
             self.fileEdit.setText(file_path)
