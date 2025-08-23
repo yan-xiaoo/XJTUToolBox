@@ -1,3 +1,4 @@
+import json.decoder
 from enum import Enum
 
 from requests import HTTPError
@@ -59,7 +60,16 @@ class LoginThread(QThread):
                     self.loginSuccess.emit()
             elif self.choice == LoginChoice.GET_STUDENT_ID:
                 try:
-                    info = self.login.session.get("https://ehall.xjtu.edu.cn/jsonp/userDesktopInfo.json").json()
+                    info = self.login.session.get("https://ehall.xjtu.edu.cn/jsonp/userDesktopInfo.json")
+                    info = info.json()
+                except json.decoder.JSONDecodeError as e:
+                    logger.error("JSON 解析错误", exc_info=True)
+                    try:
+                        logger.error("接口返回的原始信息: （下方内容有可能包含姓名/学号信息，请在分享时注意隐私问题）")
+                        logger.error(info.text or "返回内容为空")
+                    except Exception:
+                        pass
+                    self.loginFailed.emit(False, str(e))
                 except HTTPError as e:
                     logger.error("网络错误", exc_info=True)
                     self.loginFailed.emit(False, str(e))

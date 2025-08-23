@@ -212,17 +212,15 @@ class LoginInterface(ScrollArea):
             w.cancelButton.setText(self.tr("取消"))
             if w.exec():
                 self.loginSuccess.emit(id_, self.__password)
-                # 清除一下旧的 Session，不然就没法再登录了
-                self.__thread.login = None
                 self._unlock(True)
             else:
-                # 不管怎么样，都需要清除 Session，否则系统不允许再发送登录认证请求
-                self.__thread.login = None
                 self._unlock(False)
         else:
             self.loginSuccess.emit(id_, self.__password)
-            self.__thread.login = None
             self._unlock(True)
+        # 不管怎么样，都需要清除 Session，否则系统不允许再发送登录认证请求
+        # 服务器的策略是：只要登录步骤成功，当前 session 就不允许再发起登录的 post 请求（会返回 404），因此登录成功后必须清除 Session
+        self.__thread.login = None
 
     @pyqtSlot(bool)
     def __on_double_check_isShowCaptcha(self, show: bool):
@@ -245,6 +243,8 @@ class LoginInterface(ScrollArea):
             self.__thread.isShowCaptcha.connect(self.__on_double_check_isShowCaptcha)
             self.__thread.start()
         else:
+            # 清空 login 对象，防止后续登录请求使用了一个不可用的 Session
+            self.__thread.login = None
             self._unlock(False)
 
     @pyqtSlot(bool)
