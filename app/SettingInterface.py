@@ -260,7 +260,7 @@ class SettingInterface(ScrollArea):
         self.expandLayout.addWidget(self.aboutGroup)
 
         self.expandLayout.setSpacing(28)
-        self.expandLayout.setContentsMargins(36, 10, 36, 0)
+        self.expandLayout.setContentsMargins(36, 15, 36, 15)
 
         StyleSheet.SETTING_INTERFACE.apply(self)
         # 更新小圆点
@@ -290,6 +290,8 @@ class SettingInterface(ScrollArea):
         if not getattr(sys, "frozen", False):
             # 非打包版本不支持自动启动
             self.autoStartCard.setVisible(False)
+            self.aboutGroup.cardLayout.removeWidget(self.autoStartCard)
+            self.aboutGroup.adjustSize()
 
     @pyqtSlot()
     def _onTraySettingChanged(self):

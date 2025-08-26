@@ -1,14 +1,84 @@
 from PyQt5.QtCore import Qt, QPoint, pyqtSlot, pyqtSignal
-from PyQt5.QtGui import QIcon, QPixmap
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel
 from qfluentwidgets import ScrollArea, TitleLabel, VBoxLayout, StrongBodyLabel, BodyLabel, SubtitleLabel, LineEdit, \
     CardWidget, IconWidget, CaptionLabel, PushButton, TransparentToolButton, FluentIcon, RoundMenu, Action, MessageBox, \
-    MessageBoxBase, InfoBar
+    MessageBoxBase, InfoBar, isDarkTheme
 
+from auth.new_login import NewLogin
 from .sub_interfaces.AvatarDialog import AvatarDialog
 from .sub_interfaces.EncryptDialog import DecryptFrame
-from .utils import StyleSheet, cfg, AccountDataManager, accounts
+from .utils import StyleSheet, cfg, AccountDataManager
 from .utils.account import Account, AccountManager
+
+
+class BadgeLabel(QLabel):
+    """账户类型徽章组件"""
+
+    def __init__(self, account_type: Account.AccountType, parent=None):
+        super().__init__(parent)
+        self.account_type = account_type
+        self._setup_ui()
+        # 主题切换时，更新自身的样式
+        cfg.themeChanged.connect(self._update_style)
+
+    def _setup_ui(self):
+        # 设置文本
+        if self.account_type == Account.UNDERGRADUATE:
+            self.setText("本科生")
+        elif self.account_type == Account.POSTGRADUATE:
+            self.setText("研究生")
+
+        # 设置样式
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedHeight(16)
+        self.setMinimumWidth(50)
+
+        # 根据主题设置样式
+        self._update_style()
+
+    def _update_style(self):
+        """根据当前主题更新样式"""
+        if isDarkTheme():
+            # 深色主题
+            if self.account_type == Account.UNDERGRADUATE:
+                # 本科生 - 蓝色系
+                background_color = "#1e3a8a"  # 深蓝色背景
+                text_color = "#93c5fd"        # 浅蓝色文字
+                border_color = "#3b82f6"      # 蓝色边框
+            else:
+                # 研究生 - 紫色系
+                background_color = "#581c87"  # 深紫色背景
+                text_color = "#c4b5fd"        # 浅紫色文字
+                border_color = "#8b5cf6"      # 紫色边框
+        else:
+            # 浅色主题
+            if self.account_type == Account.UNDERGRADUATE:
+                # 本科生 - 蓝色系
+                background_color = "#dbeafe"  # 浅蓝色背景
+                text_color = "#1e40af"        # 深蓝色文字
+                border_color = "#3b82f6"      # 蓝色边框
+            else:
+                # 研究生 - 紫色系
+                background_color = "#ede9fe"  # 浅紫色背景
+                text_color = "#6d28d9"        # 深紫色文字
+                border_color = "#8b5cf6"      # 紫色边框
+
+        self.setStyleSheet(f"""
+            QLabel {{
+                background-color: {background_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: 500;
+            }}
+        """)
+
+    def updateTheme(self):
+        """主题切换时调用此方法更新样式"""
+        self._update_style()
 
 
 class AddAccountCard(CardWidget):
@@ -46,7 +116,7 @@ class AccountCard(CardWidget):
 
     default_icon = None
 
-    def __init__(self, account: Account, title, content, main_window, parent=None):
+    def __init__(self, account: Account, title, content, type, main_window, parent=None):
         super().__init__(parent)
         self.account = account
         # 获得主窗口的引用，用于切换界面
@@ -68,11 +138,16 @@ class AccountCard(CardWidget):
         self.iconWidget.mouseReleaseEvent = lambda a0: self._onEditAccountAvatarClicked()
         self.titleLabel = BodyLabel(title, self)
         self.contentLabel = CaptionLabel(content, self)
+        self.contentLabel.setFixedWidth(70)
+        # 添加徽章组件
+        self.badgeLabel = BadgeLabel(account.type, self)
         self.openButton = PushButton(self.tr('切换'), self)
         self.moreButton = TransparentToolButton(FluentIcon.MORE, self)
 
         self.hBoxLayout = QHBoxLayout(self)
         self.vBoxLayout = QVBoxLayout()
+        # 创建一个水平布局来放置 contentLabel 和 badgeLabel
+        self.contentHBoxLayout = QHBoxLayout()
 
         self.setFixedHeight(73)
         self.iconWidget.setFixedSize(48, 48)
@@ -86,7 +161,15 @@ class AccountCard(CardWidget):
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
         self.vBoxLayout.setSpacing(0)
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignVCenter)
-        self.vBoxLayout.addWidget(self.contentLabel, 0, Qt.AlignVCenter)
+
+        # 设置 contentLabel 和 badge 的水平布局
+        self.contentHBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.contentHBoxLayout.setSpacing(8)
+        self.contentHBoxLayout.addWidget(self.contentLabel, 0, Qt.AlignVCenter)
+        self.contentHBoxLayout.addWidget(self.badgeLabel, 0, Qt.AlignVCenter)
+        self.contentHBoxLayout.addStretch(1)  # 添加弹性空间推到左侧
+
+        self.vBoxLayout.addLayout(self.contentHBoxLayout)
         self.vBoxLayout.setAlignment(Qt.AlignVCenter)
         self.hBoxLayout.addLayout(self.vBoxLayout)
 
@@ -355,6 +438,8 @@ class AccountInterface(ScrollArea):
                 return
         self.main_window.login_interface.loginSuccess.connect(self._onLoginFinish)
         self.main_window.login_interface.showRepeatHint = True
+        self.main_window.login_interface.clearEdits()
+        self.main_window.login_interface.resetLogin()
         self.main_window.switchTo(self.main_window.login_interface)
         self.main_window.login_interface.userNameEdit.setFocus()
 
@@ -373,7 +458,7 @@ class AccountInterface(ScrollArea):
 
     def _add_account_widget(self, account: Account, is_current=False):
         """is_current 仅仅影响按钮样式，不会影响账户的切换行为"""
-        widget = AccountCard(account, account.nickname, account.username, self.main_window, self.accountArea)
+        widget = AccountCard(account, account.nickname, account.username, account.type, self.main_window, self.accountArea)
         widget.accountChanged.connect(self._onAccountChanged)
         widget.accountDeleted.connect(self._onAccountDeleted)
         widget.accountCurrentChanged.connect(self._onCurrentAccountChanged)
@@ -389,9 +474,15 @@ class AccountInterface(ScrollArea):
             w.setCurrent(a == account)
         self._onAccountChanged()
 
-    @pyqtSlot(str, str)
-    def _onLoginFinish(self, username, password):
-        account = Account(username, password, username)
+    @pyqtSlot(str, str, object, str)
+    def _onLoginFinish(self, username, password, type_, real_name):
+        # NewLogin 和 Account 类处定义的账户类型不是一个类，这里稍微转换一下。
+        if type_ == NewLogin.UNDERGRADUATE:
+            type_ = Account.UNDERGRADUATE
+        elif type_ == NewLogin.POSTGRADUATE:
+            type_ = Account.POSTGRADUATE
+
+        account = Account(username, password, real_name, type=type_)
         self.add_account(account)
         self.main_window.switchTo(self)
         self.main_window.login_interface.clearEdits()

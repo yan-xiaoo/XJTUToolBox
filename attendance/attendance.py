@@ -126,45 +126,13 @@ class AttendanceNewLogin(NewLogin):
     def __init__(self, session: requests.Session = None):
         super().__init__(ATTENDANCE_URL, session)
 
-    def login(self, username, password, jcaptcha="") -> requests.Session:
-        """
-        登录并添加 token 到 session 头部
-        """
-        encrypt_password = self.encrypt_password(password)
-        login_response = self._post(self.post_url,
-                                    data={"username": username,
-                                          "password": encrypt_password,
-                                          "execution": self.execution_input,
-                                          "_eventId": "submit",
-                                          "submit1": "Login1",
-                                          "fpVisitorId": self.fp_visitor_id,
-                                          "captcha": jcaptcha,
-                                          "currentMenu": "1",
-                                          "failN": str(self.fail_count),
-                                          "mfaState": "",
-                                          "geolocation": "",
-                                          "trustAgent": ""}, allow_redirects=True)
-        if login_response.status_code == 401:
-            raise ServerError(401, "登录失败，用户名或密码错误。")
-        else:
-            login_response.raise_for_status()
-            message = extract_alert_message(login_response.text)
-            if message:
-                # 如果有错误提示，说明登录失败
-                self.fail_count += 1
-                raise ServerError(400, f"登录失败: {message['title']}")
-            else:
-                # 登录成功，重置失败次数
-                self.fail_count = 0
-
+    def postLogin(self, login_response) -> None:
         response = self._get(ATTENDANCE_URL, allow_redirects=True)
         try:
             token = response.url.split("token=")[1].split('&')[0]
         except IndexError:
             raise ServerError(500, "登录失败：服务器出现错误。")
         self.session.headers.update({"Synjones-Auth": "bearer " + token})
-
-        return self.session
 
 
 class AttendanceWebVPNLogin(WebVPNLogin):
@@ -213,37 +181,7 @@ class AttendanceNewWebVPNLogin(NewWebVPNLogin):
     def __init__(self, session: requests.Session = None):
         super().__init__(WEBVPN_LOGIN_URL, session=session)
 
-    def login(self, username, password, jcaptcha="") -> requests.Session:
-        """
-        登录并添加 token 到 session 头部
-        """
-        encrypt_password = self.encrypt_password(password)
-        login_response = self._post(self.post_url,
-                                    data={"username": username,
-                                          "password": encrypt_password,
-                                          "execution": self.execution_input,
-                                          "_eventId": "submit",
-                                          "submit1": "Login1",
-                                          "fpVisitorId": self.fp_visitor_id,
-                                          "captcha": jcaptcha,
-                                          "currentMenu": "1",
-                                          "failN": str(self.fail_count),
-                                          "mfaState": "",
-                                          "geolocation": "",
-                                          "trustAgent": ""}, allow_redirects=True)
-        if login_response.status_code == 401:
-            raise ServerError(401, "登录失败，用户名或密码错误。")
-        else:
-            login_response.raise_for_status()
-            message = extract_alert_message(login_response.text)
-            if message:
-                # 如果有错误提示，说明登录失败
-                self.fail_count += 1
-                raise ServerError(400, f"登录失败: {message['title']}")
-            else:
-                # 登录成功，重置失败次数
-                self.fail_count = 0
-
+    def postLogin(self, login_response) -> None:
         response = self._get(ATTENDANCE_WEBVPN_URL, allow_redirects=True)
         try:
             token = response.url.split("token=")[1].split('&')[0]

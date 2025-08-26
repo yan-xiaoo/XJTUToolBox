@@ -18,3 +18,8 @@ BASE_URL = "https://org.xjtu.edu.cn/openplatform/login.html"
 
 # 移动教务的登录地址
 JWAPP_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1370&redirectUri=http://jwapp.xjtu.edu.cn/app/index&responseType=code&scope=user_info&state=1234"
+
+# 新师生综合服务大厅的登录地址
+# 网站为 https://ywtb.xjtu.edu.cn/
+# 这边直接用网站名称当变量名了
+YWTB_LOGIN_URL = "https://login.xjtu.edu.cn/cas/login?service=https%3A%2F%2Fywtb.xjtu.edu.cn%2F%3Fpath%3Dhttps%253A%252F%252Fywtb.xjtu.edu.cn%252Fmain.html%2523%252FIndex"

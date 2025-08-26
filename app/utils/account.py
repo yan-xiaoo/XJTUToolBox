@@ -2,6 +2,7 @@ import json
 import os.path
 import secrets
 import hashlib
+from enum import Enum
 from uuid import uuid4
 
 from Crypto.Cipher import AES
@@ -27,17 +28,32 @@ def depad(text):
 
 class Account:
     """保存曾经登录过的用户名，密码，名称（自定义）等信息"""
-    def __init__(self, username: str, password: str, nickname: str = None, uuid=None, avatar_path="avatar.png", origin_avatar_path="origin_avatar.png"):
+
+    class AccountType(Enum):
+        """账号类型，分为本科生/研究生两种"""
+        UNDERGRADUATE = 0
+        POSTGRADUATE = 1
+
+    # 把定义挂到 Account 类中，方便引用
+    UNDERGRADUATE = AccountType.UNDERGRADUATE
+    POSTGRADUATE = AccountType.POSTGRADUATE
+
+    def __init__(self, username: str, password: str, nickname: str = None, uuid=None, type=None, avatar_path="avatar.png", origin_avatar_path="origin_avatar.png"):
         """
         创建一个账户记录。
         :param username: 用户名（学号/手机号/邮箱）
         :param password: 密码
         :param nickname: 用户给这个账号起的名称，仅保存在本地。
+        :param type: 账号类型，见 Account.AccountType，分为本科生/研究生两种
         """
         self.username = username
         self.password = password
         self.nickname = nickname
         self.uuid = uuid or str(uuid4())
+        try:
+            self.type = self.AccountType(type) or self.AccountType.UNDERGRADUATE
+        except ValueError:
+            self.type = self.AccountType.UNDERGRADUATE
         # 以下路径是相对账户的主文件夹的路径
         self.avatar_path = avatar_path  # 头像路径，默认是 avatar.png
         self.origin_avatar_path = origin_avatar_path  # 原始未裁剪头像路径，默认是 origin_avatar.png
@@ -69,11 +85,11 @@ class Account:
 
     def to_diction(self):
         return {"username": self.username, "password": self.password, "nickname": self.nickname, "uuid": self.uuid,
-                "avatar_path": self.avatar_path, "origin_avatar_path": self.origin_avatar_path}
+                "type": self.type.value,"avatar_path": self.avatar_path, "origin_avatar_path": self.origin_avatar_path}
 
     @classmethod
     def from_diction(cls, data: dict):
-        return cls(data["username"], data["password"], data["nickname"], data.get("uuid", None),
+        return cls(data["username"], data["password"], data["nickname"], data.get("uuid", None), data.get("type", None),
                    data.get("avatar_path", "avatar.png"), data.get("origin_avatar_path", "origin_avatar.png"))
 
     def save(self) -> str:

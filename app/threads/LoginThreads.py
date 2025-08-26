@@ -4,10 +4,12 @@ from enum import Enum
 from requests import HTTPError
 
 from app.utils import logger
-from auth import Login, EHALL_LOGIN_URL, ServerError
+from auth import ServerError
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from auth.new_login import NewLogin
+from ywtb import YWTBLogin
+from ywtb.util import YWTBUtil
 
 
 class LoginChoice(Enum):
@@ -15,6 +17,7 @@ class LoginChoice(Enum):
     GET_CAPTCHA_CODE = 1,
     LOGIN = 2,
     GET_STUDENT_ID = 3
+    FINISH_LOGIN = 4
 
 
 class LoginThread(QThread):
@@ -22,11 +25,15 @@ class LoginThread(QThread):
     # 是否需要显示验证码。此信号应当连接到具有一个参数槽函数。参数为 True: 需要验证码, False: 不需要验证码
     isShowCaptcha = pyqtSignal(bool)
     captchaCode = pyqtSignal(bytes)
-    # 获得学号后，传输学号的信号
-    studentID = pyqtSignal(str)
+    # 获得学号和账户类型后，传输信息的信号
+    # 传输学号、账号类型、姓名
+    studentInfo = pyqtSignal(str, object, str)
     # 信号：登录失败。第一个参数表示是否可继续（可继续：服务器有响应，只是回答密码错误之类的。不可继续：断网等情况），第二个参数表示具体错误。
     loginFailed = pyqtSignal(bool, str)
+    # 登录成功信号
     loginSuccess = pyqtSignal()
+    # 需要选择账户信号
+    needChooseAccount = pyqtSignal()
 
     LoginChoice = LoginChoice
 
@@ -38,10 +45,12 @@ class LoginThread(QThread):
         self.captcha = captcha
         # 稍后初始化，避免立刻产生网络请求
         self.login = None
+        # 选择的账户类型
+        self.accountType = None
 
     def run(self):
         try:
-            self.login = self.login or NewLogin(EHALL_LOGIN_URL)
+            self.login = self.login or YWTBLogin()
             if self.choice == LoginChoice.GET_SHOW_CAPTCHA:
                 result = self.login.isShowJCaptchaCode()
                 self.isShowCaptcha.emit(result)
@@ -52,24 +61,30 @@ class LoginThread(QThread):
 
             elif self.choice == LoginChoice.LOGIN:
                 try:
-                    self.login.login(self.username, self.password, self.captcha or "")
+                    # 检查账户是否存在多个身份
+                    both_accounts = self.login.checkForBothAccounts(self.username, self.password, self.captcha or "")
                 except ServerError as e:
                     logger.error("服务器错误", exc_info=True)
                     self.loginFailed.emit(True, e.message)
                 else:
+                    if both_accounts:
+                        self.needChooseAccount.emit()
+                    else:
+                        self.loginSuccess.emit()
+            elif self.choice == LoginChoice.FINISH_LOGIN:
+                try:
+                    if self.accountType is None:
+                        raise ValueError("必须选择账户类型")
+                    self.login.finishLogin(self.accountType)
+                except ServerError as e:
+                    logger.error("服务器错误", exc_info=True)
+                    self.loginFailed.emit(False, e.message)
+                else:
                     self.loginSuccess.emit()
             elif self.choice == LoginChoice.GET_STUDENT_ID:
                 try:
-                    info = self.login.session.get("https://ehall.xjtu.edu.cn/jsonp/userDesktopInfo.json")
-                    info = info.json()
-                except json.decoder.JSONDecodeError as e:
-                    logger.error("JSON 解析错误", exc_info=True)
-                    try:
-                        logger.error("接口返回的原始信息: （下方内容有可能包含姓名/学号信息，请在分享时注意隐私问题）")
-                        logger.error(info.text or "返回内容为空")
-                    except Exception:
-                        pass
-                    self.loginFailed.emit(False, str(e))
+                    ywtb_util = YWTBUtil(self.login.session)
+                    result = ywtb_util.getUserInfo()
                 except HTTPError as e:
                     logger.error("网络错误", exc_info=True)
                     self.loginFailed.emit(False, str(e))
@@ -77,7 +92,13 @@ class LoginThread(QThread):
                     logger.error("其他错误", exc_info=True)
                     self.loginFailed.emit(False, str(e))
                 else:
-                    self.studentID.emit(info["userId"])
+                    if result["attributes"]["identityTypeCode"] == "S01":
+                        account_type = NewLogin.AccountType.UNDERGRADUATE
+                    elif result["attributes"]["identityTypeCode"] == "S02":
+                        account_type = NewLogin.AccountType.POSTGRADUATE
+                    else:
+                        raise ServerError(-1, "服务器返回了未知的身份类型代码：" + result["attributes"]["identityTypeCode"])
+                    self.studentInfo.emit(result["username"], account_type, result["attributes"]["userName"])
             else:
                 raise ValueError("Invalid choice")
         except ServerError as e:

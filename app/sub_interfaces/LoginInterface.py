@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QVBoxLayout, QWidget, QFrame, QHBoxLayout, QDialog
 from qfluentwidgets import TitleLabel, ScrollArea, LineEdit, PasswordLineEdit, PrimaryPushButton, PushButton, \
     ImageLabel, InfoBar, InfoBarPosition, StateToolTip, isDarkTheme, Theme, MessageBox
 
+from auth.new_login import NewLogin
 from ..threads.LoginThreads import LoginThread
 from ..utils import StyleSheet, cfg, accounts
 
@@ -11,7 +12,8 @@ from ..utils import StyleSheet, cfg, accounts
 class LoginInterface(ScrollArea):
     """登录界面"""
     # 此元件发出的信号
-    loginSuccess = pyqtSignal(str, str)
+    # 登录成功，发出用户名、密码、账户类型与姓名信号
+    loginSuccess = pyqtSignal(str, str, object, str)
     loginFail = pyqtSignal()
     cancel = pyqtSignal()
 
@@ -93,10 +95,11 @@ class LoginInterface(ScrollArea):
         self.captchaLabel.clicked.connect(self.on_refresh_captcha_clicked)
         self.loginSuccess.connect(self.on_login_success)
 
+        self.__thread.needChooseAccount.connect(self.__on_choose_account)
         self.__thread.loginSuccess.connect(self.__on_login_success)
         self.__thread.loginFailed.connect(self.__on_login_fail)
         self.__thread.captchaCode.connect(self.__on_receive_captcha_code)
-        self.__thread.studentID.connect(self.__on_getID_success)
+        self.__thread.studentInfo.connect(self.__on_getID_success)
 
     def _show_captcha(self, refresh=True):
         """显示验证码输入区域，同时标记验证码为必须填写的区域。"""
@@ -110,6 +113,12 @@ class LoginInterface(ScrollArea):
         self.captchaFrame.setVisible(False)
         self.captchaEdit.clear()
         self._captcha_required = False
+
+    def resetLogin(self):
+        """
+        重置线程的 login 对象，防止登录后无法再次登录
+        """
+        self.__thread.login = None
 
     def _lock(self):
         """锁定登录按钮，以防止用户重复点击。"""
@@ -200,27 +209,40 @@ class LoginInterface(ScrollArea):
         self.captchaLabel.setToolTip("点击刷新验证码")
 
     @pyqtSlot()
+    def __on_choose_account(self):
+        w = MessageBox(self.tr("选择账户"), self.tr("你的账号下同时存在本科生账号与研究生账号。你想登录哪一个账号？"), self)
+        w.yesButton.setText(self.tr("研究生"))
+        w.cancelButton.setText(self.tr("本科生"))
+        if w.exec():
+            self.__thread.accountType = NewLogin.POSTGRADUATE
+        else:
+            self.__thread.accountType = NewLogin.UNDERGRADUATE
+
+        self.__thread.choice = LoginThread.LoginChoice.FINISH_LOGIN
+        self.__thread.start()
+
+    @pyqtSlot()
     def __on_login_success(self):
         self.__thread.choice = self.__thread.LoginChoice.GET_STUDENT_ID
         self.__thread.start()
 
-    @pyqtSlot(str)
-    def __on_getID_success(self, id_: str):
+    @pyqtSlot(str, object, str)
+    def __on_getID_success(self, id_: str, type_: object, name: str):
         if self.checkForSameId(id_) and self.showRepeatHint:
             w = MessageBox(self.tr("账户已经存在"), self.tr("如果同时登录多个相同的账户并频繁切换，则访问只允许单处登录的网站时可能遇到问题。\n是否仍要继续？"), self)
             w.yesButton.setText(self.tr("继续"))
             w.cancelButton.setText(self.tr("取消"))
             if w.exec():
-                self.loginSuccess.emit(id_, self.__password)
+                self.loginSuccess.emit(id_, self.__password, type_, name)
                 self._unlock(True)
             else:
                 self._unlock(False)
         else:
-            self.loginSuccess.emit(id_, self.__password)
+            self.loginSuccess.emit(id_, self.__password, type_, name)
             self._unlock(True)
         # 不管怎么样，都需要清除 Session，否则系统不允许再发送登录认证请求
         # 服务器的策略是：只要登录步骤成功，当前 session 就不允许再发起登录的 post 请求（会返回 404），因此登录成功后必须清除 Session
-        self.__thread.login = None
+        self.resetLogin()
 
     @pyqtSlot(bool)
     def __on_double_check_isShowCaptcha(self, show: bool):
@@ -244,7 +266,7 @@ class LoginInterface(ScrollArea):
             self.__thread.start()
         else:
             # 清空 login 对象，防止后续登录请求使用了一个不可用的 Session
-            self.__thread.login = None
+            self.resetLogin()
             self._unlock(False)
 
     @pyqtSlot(bool)
