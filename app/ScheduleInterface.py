@@ -19,6 +19,7 @@ from .sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
 from .sub_interfaces.LessonConflictDialog import LessonConflictDialog
 from .sub_interfaces.LessonDetailDialog import LessonDetailDialog
 from .threads.ExamScheduleThread import ExamScheduleThread
+from .threads.GraduateScheduleThread import GraduateScheduleThread
 from .threads.HolidayThread import HolidayThread
 from .threads.ProcessWidget import ProcessWidget
 from .threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
@@ -72,6 +73,13 @@ class ScheduleInterface(ScrollArea):
         self.process_widget_ehall.setVisible(False)
         self.schedule_thread.error.connect(self.onThreadError)
         self.schedule_thread.finished.connect(self.unlock)
+
+        self.graduate_schedule_thread = GraduateScheduleThread()
+        self.graduate_schedule_thread.schedule.connect(self.onReceiveSchedule)
+        self.process_widget_graduate_schedule = ProcessWidget(self.graduate_schedule_thread, stoppable=True)
+        self.process_widget_graduate_schedule.setVisible(False)
+        self.graduate_schedule_thread.error.connect(self.onThreadError)
+        self.graduate_schedule_thread.finished.connect(self.unlock)
 
         self.process_widget_attendance = ProcessWidget(
             self.schedule_attendance_thread, stoppable=True)
@@ -215,6 +223,7 @@ class ScheduleInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.process_widget_ehall)
         self.vBoxLayout.addWidget(self.process_widget_attendance)
         self.vBoxLayout.addWidget(self.process_widget_exam)
+        self.vBoxLayout.addWidget(self.process_widget_graduate_schedule)
         self.vBoxLayout.addWidget(self.table_widget)
 
         # 加载可能存在的课表缓存到页面中
@@ -695,19 +704,28 @@ class ScheduleInterface(ScrollArea):
 
         term_number = self.schedule_service.getCurrentTerm()
         self.schedule_thread.term_number = term_number
+        self.graduate_schedule_thread.term_number = term_number
         if not self.schedule_service.getCourseInTerm(term_number):
-            self.process_widget_ehall.setVisible(True)
             self.lock()
-            self.schedule_thread.start()
+            if accounts.current.type == accounts.current.UNDERGRADUATE:
+                self.process_widget_ehall.setVisible(True)
+                self.schedule_thread.start()
+            else:
+                self.process_widget_graduate_schedule.setVisible(True)
+                self.graduate_schedule_thread.start()
         else:
             w = MessageBox(self.tr("获取课表"),
                            self.tr("获取课表后，所有非手动添加的课程及其考勤状态将会清空，是否继续？"), self)
             w.yesButton.setText(self.tr("确定"))
             w.cancelButton.setText(self.tr("取消"))
             if w.exec():
-                self.process_widget_ehall.setVisible(True)
                 self.lock()
-                self.schedule_thread.start()
+                if accounts.current.type == accounts.current.UNDERGRADUATE:
+                    self.process_widget_ehall.setVisible(True)
+                    self.schedule_thread.start()
+                else:
+                    self.process_widget_graduate_schedule.setVisible(True)
+                    self.graduate_schedule_thread.start()
 
     @pyqtSlot()
     def onGetWeekAttendanceClicked(self):
@@ -963,16 +981,29 @@ class ScheduleInterface(ScrollArea):
     @pyqtSlot(dict)
     def onReceiveSchedule(self, schedule: dict):
         # 清除获取的新课表所在学期的所有非手动添加的课程
+        if schedule["start_date"] is None:
+            w = MessageBox(self.tr("获取课表失败"), self.tr("抱歉，由于学校接口限制，无法获得此学期的开始时间，因此未能添加课表"), parent=self)
+            w.yesButton.setText(self.tr("确认"))
+            w.cancelButton.hide()
+            w.exec()
+            return
+
         self.schedule_service.setTermInfo(schedule["term_number"],
                                           schedule["start_date"], True)
         self.schedule_service.clearNonManualCourses()
 
         conflicts = []
         new_courses = []
-        for lesson in schedule["lessons"]:
-            new_courses.append(
-                self.schedule_service.getCourseGroupFromJson(lesson,
-                                                             manual=False))
+        if self.sender() == self.schedule_thread:
+            for lesson in schedule["lessons"]:
+                new_courses.append(
+                    self.schedule_service.getCourseGroupFromJson(lesson,
+                                                                 manual=False))
+        else:
+            for lesson in schedule["lessons"]:
+                new_courses.append(
+                    self.schedule_service.getGraduateCourseGroupFromJson(
+                        lesson, schedule["term_number"], manual=False))
 
         for one_course in new_courses:
             old_course = self.schedule_service.getCourseGroupInCertainTime(
@@ -1025,12 +1056,21 @@ class ScheduleInterface(ScrollArea):
                 self.loadSchedule()
             else:
                 # 取消合并，那么就不添加新获取的课程了
+                # 刷新一下页面
+                self.loadSchedule()
                 return
 
         else:
-            for lesson in schedule["lessons"]:
-                self.schedule_service.addCourseFromJson(
-                    lesson, merge_with_existing=True, manual=False)
+            # 根据查询者是本科生还是研究生（给出信息的线程是哪个），使用不同接口添加课程。
+            if self.sender() == self.schedule_thread:
+                for lesson in schedule["lessons"]:
+                    self.schedule_service.addCourseFromJson(
+                        lesson, merge_with_existing=True, manual=False)
+            else:
+                for lesson in schedule["lessons"]:
+                    self.schedule_service.addGraduateCourseFromJson(
+                        lesson, schedule["term_number"],
+                        merge_with_existing=True, manual=False)
 
         self.setTablePrimary(False)
         self.setAttendancePrimary(True)

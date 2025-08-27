@@ -23,3 +23,8 @@ JWAPP_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1370&red
 # 网站为 https://ywtb.xjtu.edu.cn/
 # 这边直接用网站名称当变量名了
 YWTB_LOGIN_URL = "https://login.xjtu.edu.cn/cas/login?service=https%3A%2F%2Fywtb.xjtu.edu.cn%2F%3Fpath%3Dhttps%253A%252F%252Fywtb.xjtu.edu.cn%252Fmain.html%2523%252FIndex"
+
+
+# 研究生管理信息系统（Graduate Management Information System, gmis）的登录地址
+# 网站为 https://gmis.xjtu.edu.cn/
+GMIS_LOGIN_URL = " https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1036&state=abcd1234&redirectUri=http://gmis.xjtu.edu.cn/pyxx/sso/login&responseType=code&scope=user_info"

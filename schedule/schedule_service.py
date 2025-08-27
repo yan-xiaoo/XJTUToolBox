@@ -391,20 +391,45 @@ class ScheduleService:
                                 week_numbers=weeks)
         return result
 
+    def getGraduateCourseGroupFromJson(self, course_json: dict, term_number, manual: bool = False):
+        """
+        从研究生 json 文件中创建课程对象，且将不同周的课程创建为一个对象，周数记录到返回结果的 week_numbers 列表中
+        :param course_json: 课程的 json 字典
+        :param term_number: 学期编号
+        :param manual: 课程的 manual 字段如何设置，即标记课程是不是手动添加的
+        """
+        teacher = course_json.get("teacher", None)
+        location = course_json.get("classroom", None)
+        day = course_json["day_of_week"]
+        start_time = int(course_json["period_start"])
+        end_time = int(course_json["period_end"])
+        start_week, end_week = course_json["weeks"].strip("第周").split("-")
+        weeks = list(range(int(start_week), int(end_week) + 1))
+        result = CourseInstance(course=None,
+                                name=course_json["name"],
+                                day_of_week=day,
+                                start_time=start_time,
+                                end_time=end_time,
+                                location=location,
+                                teacher=teacher,
+                                week_number=None,
+                                manual=1 if manual else 0,
+                                term_number=term_number,
+                                week_numbers=weeks)
+        return result
+
     def getCourseFromJson(self, course_json: dict, manual: bool = False) -> List[CourseInstance]:
         """
         从 json 文件中创建课程对象，
         :param course_json: 课程的 json 字典
         :param manual: 课程的 manual 字段如何设置，即标记课程是不是手动添加的
         """
-
         result = []
         teacher = course_json.get("SKJS", None)
         location = course_json.get("JASMC", None)
         day = int(course_json["SKXQ"])
         start_time = int(course_json["KSJC"])
         end_time = int(course_json["JSJC"])
-        #
         for week_no, single in enumerate(course_json["SKZC"]):
             if single == "1":
                 result.append(
@@ -418,6 +443,36 @@ class ScheduleService:
                                    week_number=week_no + 1,
                                    manual=1 if manual else 0,
                                    term_number=course_json["XNXQDM"]))
+
+        return result
+
+    def getGraduateCourseFromJson(self, course_json: dict, term_number, manual: bool = False) -> List[CourseInstance]:
+        """
+        从研究生 json 文件中创建课程对象，
+        :param course_json: 课程的 json 字典
+        :param term_number: 学期编号
+        :param manual: 课程的 manual 字段如何设置，即标记课程是不是手动添加的
+        """
+        result = []
+        teacher = course_json.get("teacher", None)
+        location = course_json.get("classroom", None)
+        day = course_json["day_of_week"]
+        start_time = int(course_json["period_start"])
+        end_time = int(course_json["period_end"])
+        # weeks 字段写的是 第1-16周 之类的内容，需要去掉“第”和“周”再拆分
+        start_week, end_week = course_json["weeks"].strip("第周").split("-")
+        for week in range(int(start_week), int(end_week) + 1):
+            result.append(
+                CourseInstance(course=None,
+                               name=course_json["name"],
+                               day_of_week=day,
+                               start_time=start_time,
+                               end_time=end_time,
+                               location=location,
+                               teacher=teacher,
+                               week_number=week,
+                               manual=1 if manual else 0,
+                               term_number=term_number))
 
         return result
 
@@ -488,6 +543,7 @@ class ScheduleService:
         添加课程表的内容
         :param course_group: 课程的 json 字典，其中 week_numbers 字段表示课程的所有周数
         :param merge_with_existing: 如果已存在名称相同的课程，将当前课程视为此课程的实例，而不新建课程
+        :param add_exam: 是否尝试添加考试安排新信息
         """
         # 创建课程表的内容
         if merge_with_existing:
@@ -507,8 +563,7 @@ class ScheduleService:
                                teacher=course_group.teacher,
                                week_number=week,
                                manual=course_group.manual,
-                               term_number=course_group.term_number,
-                               Exam=course_group.Exam))
+                               term_number=course_group.term_number))
         with self.database.atomic():
             CourseInstance.bulk_create(insertion)
 
@@ -544,6 +599,32 @@ class ScheduleService:
             course = Course.create(name=course_json["KCM"])
         # 解析 json 并添加课程实例表的内容
         insertion = self.getCourseFromJson(course_json, manual)
+        if insertion is None:
+            return
+        for item in insertion:
+            item.course = course
+        with self.database.atomic():
+            CourseInstance.bulk_create(insertion)
+
+    def addGraduateCourseFromJson(self,
+                          course_json: dict,
+                          term_number: str,
+                          merge_with_existing: bool = False,
+                          manual: bool = False):
+        """
+        从研究生 json 添加课程
+        :param course_json: 课程的 json 字典
+        :param term_number: 学期编号
+        :param merge_with_existing: 如果已存在名称相同的课程，将当前课程视为此课程的实例，而不新建课程
+        :param manual: 是否为手动添加的课程
+        """
+        # 创建课程表的内容
+        if merge_with_existing:
+            course = Course.get_or_create(name=course_json["name"])[0]
+        else:
+            course = Course.create(name=course_json["name"])
+        # 解析 json 并添加课程实例表的内容
+        insertion = self.getGraduateCourseFromJson(course_json, term_number, manual)
         if insertion is None:
             return
         for item in insertion:

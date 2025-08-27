@@ -337,7 +337,7 @@ class NewLogin:
         """
         # 没有 checkForBothAccounts 的响应结果，说明不需要选择账户，直接返回
         if self._choose_account_response is None:
-            return
+            return self.session
 
         account_choices = extract_account_choices(self._choose_account_response.text)
         # 如果检测到账户选择页面，根据 account_type 参数选择对应的账户
@@ -371,6 +371,7 @@ class NewLogin:
             raise ValueError("未知的账户类型")
 
         self.postLogin(choice_response)
+        return self.session
 
     def encrypt_password(self, password: str, public_key=None) -> str:
         """

@@ -4,6 +4,8 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 from qfluentwidgets import MessageBoxBase, TitleLabel, CaptionLabel, EditableComboBox
 
+from app.utils import accounts
+
 
 class ChangeTermDialog(MessageBoxBase):
     """课表界面中，选择更多-修改学期弹出的对话框"""
@@ -36,23 +38,33 @@ class ChangeTermDialog(MessageBoxBase):
             for year in range(current_date.year - 3, current_date.year):
                 self.termBox.addItem(f"{year}-{year + 1}-1")
                 self.termBox.addItem(f"{year}-{year + 1}-2")
-                self.termBox.addItem(f"{year}-{year + 1}-3")
+                # 只有本科生支持第三学期（小学期）的课程查询
+                if accounts.current.type == accounts.current.UNDERGRADUATE:
+                    self.termBox.addItem(f"{year}-{year + 1}-3")
             self.termBox.addItem(f"{current_date.year}-{current_date.year + 1}-1")
             # 设置编号为当前学期
-            if current_date.month < 8:
-                self.termBox.setCurrentIndex(8)
+            if accounts.current.type == accounts.current.UNDERGRADUATE:
+                if current_date.month < 8:
+                    self.termBox.setCurrentIndex(8)
+                else:
+                    self.termBox.setCurrentIndex(9)
             else:
-                self.termBox.setCurrentIndex(9)
+                self.termBox.setCurrentIndex(6)
         # 七月之前为下半学期，显示前推四年的学期和当前整年
         else:
             for year in range(current_date.year - 4, current_date.year):
                 self.termBox.addItem(f"{year}-{year + 1}-1")
                 self.termBox.addItem(f"{year}-{year + 1}-2")
-                self.termBox.addItem(f"{year}-{year + 1}-3")
-            if current_date.month <= 1:
-                self.termBox.setCurrentIndex(9)
+                # 只有本科生支持第三学期（小学期）的课程查询
+                if accounts.current.type == accounts.current.UNDERGRADUATE:
+                    self.termBox.addItem(f"{year}-{year + 1}-3")
+            if accounts.current.type == accounts.current.UNDERGRADUATE:
+                if current_date.month <= 1:
+                    self.termBox.setCurrentIndex(9)
+                else:
+                    self.termBox.setCurrentIndex(10)
             else:
-                self.termBox.setCurrentIndex(10)
+                self.termBox.setCurrentIndex(7)
         # 系统中有数据的最新学期
         self.max_term_number = self.termBox.items[-1].text
 

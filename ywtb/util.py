@@ -1,4 +1,6 @@
+import random
 from urllib.parse import urlparse, parse_qs
+from datetime import datetime, timedelta
 
 import jwt
 
@@ -88,3 +90,47 @@ class YWTBUtil:
         if response.status_code != 200:
             raise ServerError(response.status_code, data.get("message", "服务器返回了错误信息。"))
         return data["data"]
+
+    def getStartOfTerm(self, timestamp):
+        """
+        获取某一学期的开学日期
+        :param timestamp: 学年学期时间戳，比如 2020-2021-1。只支持春季/秋季学期的查询（末尾为 1/2）
+        :return 开学日期，格式为 "YYYY-MM-DD"
+        """
+        # 这个实现主要是给研究生用的，因为我完全找不到 gmis 系统里返回学期开始时间的接口……
+        # 一网通办平台上实际只有一个 api，根据你输入的日期，判断这个日期是第几个教学周
+        # 所以我们根据目前查询的是春季学期/秋季学期，猜测几个可能的开始日期，找到哪个开始日期位于第一周，再通过 Python 自己的日期库计算那周的周一是哪一天
+        # 就这样非常神人的得到了学期开始时间
+        year_start, year_end, term = timestamp.split('-')
+        if term == '1':
+            # 秋季学期，猜测 8 月和 9 月的 1、8、15、22、29 号
+            possible_starts = [f"{year_start}-08-{day:02d}" for day in range(1, 36, 7)] + \
+                             [f"{year_start}-09-{day:02d}" for day in range(1, 36, 7)]
+            right_semester = "第一学期"
+        elif term == '2':
+            # 春季学期，猜测 2 月和 3 月的 1、8、15、22、29 号
+            possible_starts = [f"{year_end}-02-{day:02d}" for day in range(1, 36, 7)] + \
+                             [f"{year_end}-03-{day:02d}" for day in range(1, 36, 7)]
+            right_semester = "第二学期"
+        else:
+            raise ValueError("只支持春季/秋季学期的查询（末尾为 1/2）")
+
+        response = self.session.get("https://ywtb.xjtu.edu.cn/portal-api/v1/calendar/share/schedule/getWeekOfTeaching",
+                                    params={"today": ','.join(possible_starts), "random_number": random.randint(100, 999)})
+        print(possible_starts)
+        data = response.json()
+        print(data)
+        cleaned_list = []
+        for i in range(len(data['data']['data']['date'])):
+            # （教学周（1），学期名称（第一学期/暑假/第二学期），学年编号（2024-2025），日期自身）
+            cleaned_list.append((data['data']['data']['date'][i], data['data']['data']['semesterAlilist'][i], data['data']['data']['semesterlist'][i],
+                                 possible_starts[i]))
+
+        for week_str, semester_name, semester_id, date in cleaned_list:
+            if semester_id == f"{year_start}-{year_end}" and semester_name == right_semester and week_str == '1':
+                # 找到开学日期了
+                date_obj = datetime.strptime(date, "%Y-%m-%d")
+                start_of_term = date_obj - timedelta(days=date_obj.weekday())
+                return start_of_term.strftime("%Y-%m-%d")
+
+        raise ServerError(500, "无法确定学期开始时间")

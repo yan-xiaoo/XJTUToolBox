@@ -22,6 +22,7 @@ from .ToolBoxInterface import ToolBoxInterface
 from .TrayInterface import TrayInterface
 from .sessions.attendance_session import AttendanceSession
 from .sessions.ehall_session import EhallSession
+from .sessions.gmis_session import GMISSession
 from .sessions.jwapp_session import JwappSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
@@ -42,6 +43,7 @@ def registerSession():
     SessionManager.global_register(EhallSession, "ehall")
     SessionManager.global_register(AttendanceSession, "attendance")
     SessionManager.global_register(JwappSession, "jwapp")
+    SessionManager.global_register(GMISSession, "gmis")
 
 
 class MainWindow(MSFluentWindow):
