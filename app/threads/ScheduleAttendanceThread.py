@@ -46,7 +46,7 @@ class ScheduleAttendanceThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
-        self.session.webvpn_login(accounts.current.username, accounts.current.password)
+        self.session.webvpn_login(accounts.current.username, accounts.current.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
         self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
 
     def normal_login(self):
@@ -55,7 +55,7 @@ class ScheduleAttendanceThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
-        self.session.login(accounts.current.username, accounts.current.password)
+        self.session.login(accounts.current.username, accounts.current.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
         self.messageChanged.emit(self.tr("直接登录考勤系统成功。"))
 
     def run(self):
@@ -83,14 +83,14 @@ class ScheduleAttendanceThread(ProcessThread):
             if self.session.has_login:
                 # 如果当前 session 已经登录，必须沿用当前登录方式。
                 self.login_method = AttendanceFlowLogin.NORMAL_LOGIN if self.session.login_method == self.session.LoginMethod.NORMAL else AttendanceFlowLogin.WEBVPN_LOGIN
-                self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN)
+                self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
             else:
                 # 手动登录。
                 if self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN:
                     self.webvpn_login()
                 else:
                     self.normal_login()
-                self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN)
+                self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
                 if not self.can_run:
                     self.canceled.emit()
                     return

@@ -5,7 +5,7 @@ import requests
 
 from auth import ServerError
 from ..sessions.attendance_session import AttendanceSession
-from ..utils import Account, cfg, logger
+from ..utils import Account, cfg, logger, accounts
 from attendance.attendance import Attendance
 from .ProcessWidget import ProcessThread
 from PyQt5.QtCore import pyqtSignal
@@ -40,19 +40,19 @@ class AttendanceFlowThread(ProcessThread):
     def webvpn_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
-        self.session.webvpn_login(self.account.username, self.account.password)
+        self.session.webvpn_login(self.account.username, self.account.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
         self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
 
     def normal_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
-        self.session.login(self.account.username, self.account.password)
+        self.session.login(self.account.username, self.account.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
         self.messageChanged.emit(self.tr("直接登录考勤系统成功。"))
 
     def search(self, session):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在查询考勤流水..."))
-        lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN)
+        lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
         while True:
             try:
                 result = lookup_wrapper.getFlowRecordWithPage(self.page, self.size)

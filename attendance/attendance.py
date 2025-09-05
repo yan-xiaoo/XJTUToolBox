@@ -7,7 +7,7 @@ from enum import Enum
 import requests
 
 from auth import Login, ATTENDANCE_URL, ServerError, WebVPNLogin, ATTENDANCE_WEBVPN_URL, get_session, getVPNUrl, \
-    get_timestamp, WEBVPN_LOGIN_URL
+    get_timestamp, WEBVPN_LOGIN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL
 from auth.new_login import NewLogin, extract_alert_message, NewWebVPNLogin
 from schedule import Schedule, WeekSchedule, Lesson
 
@@ -123,8 +123,8 @@ class AttendanceNewLogin(NewLogin):
         此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
         """
 
-    def __init__(self, session: requests.Session = None):
-        super().__init__(ATTENDANCE_URL, session)
+    def __init__(self, session: requests.Session = None, is_postgraduate=False):
+        super().__init__(POSTGRADUATE_ATTENDANCE_URL if is_postgraduate else ATTENDANCE_URL, session)
 
     def postLogin(self, login_response) -> None:
         response = self._get(ATTENDANCE_URL, allow_redirects=True)
@@ -178,8 +178,8 @@ class AttendanceNewWebVPNLogin(NewWebVPNLogin):
         此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
         """
 
-    def __init__(self, session: requests.Session = None):
-        super().__init__(ATTENDANCE_WEBVPN_URL, session=session)
+    def __init__(self, session: requests.Session = None, is_postgraduate=False):
+        super().__init__(POSTGRADUATE_ATTENDANCE_WEBVPN_URL if is_postgraduate else ATTENDANCE_WEBVPN_URL, session=session)
 
     def postLogin(self, login_response) -> None:
         try:
