@@ -3,10 +3,9 @@
 # 此文件会尽可能与登录页面前端实现保持一致，不会尝试利用设计漏洞等方式绕过验证码等安全措施。
 import base64
 import enum
-from typing import List
-from urllib.parse import urlparse, parse_qs
+import json
+import re
 
-import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from lxml import html
@@ -82,6 +81,28 @@ def extract_alert_message(html_content):
     return result
 
 
+def extract_mfa_enabled(html_content: str) -> bool:
+    """
+    从 HTML 内容中提取 globalConfig 变量的 mfaEnabled 字段（布尔值）。
+    :param html_content: HTML 文本
+    :return: mfaEnabled 字段的布尔值，未找到时返回 True
+    """
+    # 匹配 globalConfig = eval('(' + "JSON字符串" + ')');
+    match = re.search(r'globalConfig\s*=\s*eval\(\'\(\'\s*\+\s*"(.*?)"\s*\+\s*\'\)\'\s*\);', html_content, re.DOTALL)
+    # 默认进行 mfa 验证，不然可能有问题
+    if not match:
+        return True
+    json_str = match.group(1)
+    # 反转义
+    json_str = json_str.encode('utf-8').decode('unicode_escape')
+    try:
+        config = json.loads(json_str)
+        mfaEnabled = config.get('mfaEnabled', True)
+        return mfaEnabled is True or mfaEnabled == 'true'
+    except Exception:
+        return True
+
+
 class NewLogin:
     """
     通过西安交通大学统一身份认证网站，登录目标网页。
@@ -144,6 +165,8 @@ class NewLogin:
         self.execution_input = extract_execution_value(response.text)
         # 获得一个标识符
         self.fp_visitor_id = generate_fp_visitor_id()
+        # 是否进行 mfa 验证
+        self.mfa_enabled = extract_mfa_enabled(response.text)
         # 目前服务端在本地存储登录失败次数，实现是否填写验证码的判断，我也暂时这么实现
         self.fail_count = 0
         # 存储服务器发送的 RSA 公钥
@@ -197,6 +220,25 @@ class NewLogin:
             raise RuntimeError("已经登录，不能重复登录。请重新创建 NewLogin 对象以登录其他账号。")
 
         encrypt_password = self.encrypt_password(password)
+        if self.mfa_enabled:
+            # POST 一个 mfa 验证接口
+            response = self._post("https://login.xjtu.edu.cn/cas/mfa/detect",
+                                  data={"username": username,
+                                        "password": encrypt_password,
+                                        "fpVisitorId": self.fp_visitor_id},
+                                  headers={"Referer": self.post_url})
+            try:
+                data = response.json()
+            except json.decoder.JSONDecodeError:
+                raise ServerError(500, "服务器在 mfa 验证时返回了无法解析的信息")
+
+            state = data["data"]["state"]
+            need = data["data"]["need"]
+            if need:
+                raise ServerError(403, f"需要进行多因素认证，但目前程序不支持 MFA 登录，因此无法继续登录")
+        else:
+            state = ""
+
         login_response = self._post(self.post_url,
                                     data={"username": username,
                                           "password": encrypt_password,
@@ -207,7 +249,7 @@ class NewLogin:
                                           "captcha": jcaptcha,
                                           "currentMenu": "1",
                                           "failN": str(self.fail_count),
-                                          "mfaState": "",
+                                          "mfaState": state,
                                           "geolocation": "",
                                           "trustAgent": ""}, allow_redirects=True)
         # 神人系统用返回值 401 判断是否登录失败
@@ -294,6 +336,25 @@ class NewLogin:
             raise RuntimeError("已经登录，不能重复登录。请重新创建 NewLogin 对象以登录其他账号。")
 
         encrypt_password = self.encrypt_password(password)
+        if self.mfa_enabled:
+            # POST 一个 mfa 验证接口
+            response = self._post("https://login.xjtu.edu.cn/cas/mfa/detect",
+                                  data={"username": username,
+                                        "password": encrypt_password,
+                                        "fpVisitorId": self.fp_visitor_id},
+                                  headers={"Referer": self.post_url})
+            try:
+                data = response.json()
+            except json.decoder.JSONDecodeError:
+                raise ServerError(500, "服务器在 mfa 验证时返回了无法解析的信息")
+
+            state = data["data"]["state"]
+            need = data["data"]["need"]
+            if need:
+                raise ServerError(403, f"需要进行多因素认证，但目前程序不支持 MFA 登录，因此无法继续登录")
+        else:
+            state = ""
+
         login_response = self._post(self.post_url,
                                     data={"username": username,
                                           "password": encrypt_password,
@@ -304,7 +365,7 @@ class NewLogin:
                                           "captcha": jcaptcha,
                                           "currentMenu": "1",
                                           "failN": str(self.fail_count),
-                                          "mfaState": "",
+                                          "mfaState": state,
                                           "geolocation": "",
                                           "trustAgent": ""}, allow_redirects=True)
         if login_response.status_code == 401:
@@ -382,7 +443,8 @@ class NewLogin:
         """
         if public_key is None:
             if self.rsa_public_key is None:
-                self.rsa_public_key = self._get("https://login.xjtu.edu.cn/cas/jwt/publicKey").text
+                self.rsa_public_key = self._get("https://login.xjtu.edu.cn/cas/jwt/publicKey",
+                                                headers={"Referer": self.post_url}).text
             public_key = self.rsa_public_key
 
         # 加载公钥

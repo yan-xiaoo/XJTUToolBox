@@ -117,9 +117,7 @@ class YWTBUtil:
 
         response = self.session.get("https://ywtb.xjtu.edu.cn/portal-api/v1/calendar/share/schedule/getWeekOfTeaching",
                                     params={"today": ','.join(possible_starts), "random_number": random.randint(100, 999)})
-        print(possible_starts)
         data = response.json()
-        print(data)
         cleaned_list = []
         for i in range(len(data['data']['data']['date'])):
             # （教学周（1），学期名称（第一学期/暑假/第二学期），学年编号（2024-2025），日期自身）

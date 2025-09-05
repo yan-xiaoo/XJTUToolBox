@@ -232,14 +232,20 @@ class ScheduleInterface(ScrollArea):
                 self.loadSchedule()
                 self.setTablePrimary(False)
                 self.setAttendancePrimary(True)
+                # 设置考试查询学期
+                self.schedule_exam_thread.term_number = self.schedule_service.getCurrentTerm()
             else:
                 term = self.schedule_service.getCurrentTerm()
                 if term is not None:
                     self.termButton.setText(
                         self.schedule_service.getCurrentTerm())
+                    self.schedule_exam_thread.term_number = term
 
                 self.setTablePrimary(True)
                 self.setAttendancePrimary(False)
+            # 研究生无法查询考试时间
+            if accounts.current.type == accounts.current.POSTGRADUATE:
+                self.getExamAction.setEnabled(False)
         else:
             self.termButton.setText(self.tr("未登录"))
             self.setTablePrimary(False)
@@ -798,6 +804,7 @@ class ScheduleInterface(ScrollArea):
         w = ChangeTermDialog(self)
         if w.exec():
             self.schedule_service.setCurrentTerm(w.term_number)
+            self.schedule_exam_thread.term_number = w.term_number
             # 重新根据学期长度设置下拉框
             self.weekComboBox.clear()
             self.weekComboBox.addItems([str(i) for i in range(1, self.getWeekLength() + 1)])
@@ -1161,3 +1168,8 @@ class ScheduleInterface(ScrollArea):
                 self.setTablePrimary(True)
                 self.setAttendancePrimary(False)
             self.loadSchedule()
+            # 如果当前账户是研究生，禁用考试时间查询按键（因为研究生系统没有对应的 API）
+            if accounts.current.type == accounts.current.POSTGRADUATE:
+                self.getExamAction.setEnabled(False)
+            else:
+                self.getExamAction.setEnabled(True)

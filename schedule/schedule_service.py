@@ -489,7 +489,13 @@ class ScheduleService:
             time_string = one.get("KSSJMS", "")
             date_part, time_part = time_string.split(' ')
             time_range = time_part.split('(')[0]  # 去掉 (星期二)
-            start_str, end_str = time_range.split('-')
+            # 怎么系统里还有 EM-Dash（非 ASCII 标准字符，UTF-8 编码是 '\xe2\x80\x94' 的神秘东西）作为时间分界线的情况出现
+            # 真是太恐怖了
+            try:
+                start_str, end_str = time_range.split('-')
+            except ValueError:
+                # 说明考试时间可能是 EM-Dash 分割的（—），而不是（-）
+                start_str, end_str = time_range.split('—')
 
             location = one.get("JASMC", "")
             seat_number = one.get("ZWH", "")

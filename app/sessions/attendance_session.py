@@ -2,6 +2,8 @@ import enum
 
 from app.sessions.common_session import CommonLoginSession
 from attendance.attendance import AttendanceNewLogin, AttendanceNewWebVPNLogin
+from auth import WEBVPN_LOGIN_URL
+from auth.new_login import NewLogin
 
 
 class AttendanceSession(CommonLoginSession):
@@ -26,8 +28,14 @@ class AttendanceSession(CommonLoginSession):
         self.has_login = True
 
     def webvpn_login(self, username, password):
-        login_util = AttendanceNewWebVPNLogin(self)
+        # 目前 WebVPN 访问分为两个步骤
+        # 1. 登录 WebVPN 自身，此时采用不经过 WebVPN 中介的接口
+        # 2. 登录 WebVPN 之后，再登录一次目标网站。此时采用经过 WebVPN 中介的接口
+        login_util = NewLogin(WEBVPN_LOGIN_URL, self)
         login_util.login(username, password)
+
+        attendance_login_util = AttendanceNewWebVPNLogin(self)
+        attendance_login_util.login(username, password)
 
         self.login_method = self.LoginMethod.WEBVPN
 

@@ -179,12 +179,11 @@ class AttendanceNewWebVPNLogin(NewWebVPNLogin):
         """
 
     def __init__(self, session: requests.Session = None):
-        super().__init__(WEBVPN_LOGIN_URL, session=session)
+        super().__init__(ATTENDANCE_WEBVPN_URL, session=session)
 
     def postLogin(self, login_response) -> None:
-        response = self._get(ATTENDANCE_WEBVPN_URL, allow_redirects=True)
         try:
-            token = response.url.split("token=")[1].split('&')[0]
+            token = login_response.url.split("token=")[1].split('&')[0]
         except IndexError:
             raise ServerError(500, "登录失败：服务器出现错误。")
         self.session.headers.update({"Synjones-Auth": "bearer " + token})
@@ -256,16 +255,21 @@ class Attendance:
     请注意：考勤系统对同一个 session 的连接存在时间限制。因此，不要持久性的存储此类的对象；每次使用时通过 AttendanceLogin 或
     attendance_fast_login 重新得到一个登录的 session，然后重新创建此对象。
     """
-    def __init__(self, session: requests.Session, use_webvpn=False):
+    def __init__(self, session: requests.Session, use_webvpn=False, is_postgraduate=False):
         """
         创建一个接口对象
         :param session: 已经登录考勤系统的 session 对象
+        :param use_webvpn: 是否通过 WebVPN 访问考勤系统。如果设为 true，传入的 session 必须已经登录 webvpn 系统。
+        :param is_postgraduate: 是否为研究生。true：是；false：不是（本科生）
+        本科生和研究生的网站接口完全一致，但是二者不在同一域名下（bkkq.xjtu.edu.cn 和 yjskq.xjtu.edu.cn）。此参数将用于决定访问哪个系统。
         """
         self.session = session
         # 缓存学期编号
         self._bh = None
         # 是否使用 WebVPN
         self.use_vpn = use_webvpn
+        # 是否为研究生
+        self.is_postgraduate = is_postgraduate
 
     def getStudentInfo(self):
         """
@@ -316,7 +320,7 @@ class Attendance:
             "snos": null
         }
         """
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/global/getStuInfo")
+        response = self._post("/attendance-student/global/getStuInfo")
         result = response.json()
         if not result["success"]:
             raise ServerError(result['code'], result["msg"])
@@ -347,7 +351,7 @@ class Attendance:
         }
         在返回值中，只有“编号”（bh）这一项是有用的，有的接口查询需要这一参数。
         """
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/global/getNearTerm")
+        response = self._post("/attendance-student/global/getNearTerm")
         result = response.json()
         if not result["success"]:
             raise ServerError(result['code'], result["msg"])
@@ -389,7 +393,7 @@ class Attendance:
             "currentDateWeek": "2024-03-30" // 查询周当前的日期
         }, ...]
         """
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/kqtj/getKqtjCurrentWeek")
+        response = self._post("/attendance-student/kqtj/getKqtjCurrentWeek")
         result = response.json()
         if not result["success"]:
             raise ServerError(result['code'], result["msg"])
@@ -412,7 +416,7 @@ class Attendance:
                 result = self.getNearTerm()
                 termNo = self._bh = result["bh"]
 
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/classWater/getClassWaterPage",
+        response = self._post("/attendance-student/classWater/getClassWaterPage",
                               json={"startDate": start_date, "endDate": end_date, "current": current, "pageSize": page_size,
                               "timeCondition": '', "subjectBean": {"sCode": ""}, "classWaterBean": {"status": ""},
                               "classBean": {"termNo": termNo}})
@@ -458,7 +462,7 @@ class Attendance:
         """
         if end_date is None:
             end_date = _getNowTime()
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/kqtj/getKqtjByTime",
+        response = self._post("/attendance-student/kqtj/getKqtjByTime",
                               json={"startDate": start_date, "endDate": end_date})
         result = response.json()
         if not result["success"]:
@@ -503,7 +507,7 @@ class Attendance:
         """
         if end_date is None:
             end_date = _getNowTime()
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/kqtj/getKqtjNumByTime",
+        response = self._post("/attendance-student/kqtj/getKqtjNumByTime",
                               json={"startDate": start_date, "endDate": end_date})
         result = response.json()
         if not result["success"]:
@@ -520,7 +524,7 @@ class Attendance:
             ...
         }
         """
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/global/getBeforeTodayTerm")
+        response = self._post("/attendance-student/global/getBeforeTodayTerm")
         result = response.json()
         if not result["success"]:
             raise ServerError(result['code'], result["msg"])
@@ -543,7 +547,7 @@ class Attendance:
                 result = self.getNearTerm()
                 termNo = self._bh = result["bh"]
 
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/rankClass/getWeekSchedule2",
+        response = self._post("/attendance-student/rankClass/getWeekSchedule2",
                               json={"week": week, "termNo": termNo})
         result = response.json()
         if not result['success']:
@@ -583,7 +587,7 @@ class Attendance:
         """
         if end_date is None:
             end_date = _getNowDay()
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/waterList/page",
+        response = self._post("/attendance-student/waterList/page",
                               json={"startdate": start_date, "enddate": end_date, "current": 1, "pageSize": 50, "calendarBh": ""})
         result = response.json()
         if not result['success']:
@@ -601,7 +605,7 @@ class Attendance:
         - total_count: 总数量
         - current_page: 当前页数
         """
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/waterList/page", json={
+        response = self._post("/attendance-student/waterList/page", json={
             "calendarBh": "", "enddate": "", "startdate": "", "pageSize": page_size, "current": current
         })
         result = response.json()
@@ -623,7 +627,7 @@ class Attendance:
         :param page_size: 每页包含多少流水信息
         :return: 考勤流水信息的列表
         """
-        response = self._post("http://bkkq.xjtu.edu.cn/attendance-student/waterList/page", json={
+        response = self._post("/attendance-student/waterList/page", json={
             "calendarBh": "", "enddate": "", "startdate": "", "pageSize": page_size, "current": current
         })
         result = response.json()
@@ -635,15 +639,24 @@ class Attendance:
             return records
 
     def _get(self, url, **kwargs):
-        if self.use_vpn:
-            url = getVPNUrl(url)
+        url = self._build_url(url)
         response = self.session.get(url, **kwargs)
         response.raise_for_status()
         return response
 
     def _post(self, url, **kwargs):
-        if self.use_vpn:
-            url = getVPNUrl(url)
+        url = self._build_url(url)
         response = self.session.post(url, **kwargs)
         response.raise_for_status()
         return response
+
+    def _build_url(self, path: str) -> str:
+        """
+        将接口路径与域名（bkkq.xjtu.edu.cn 或 yjskq.xjtu.edu.cn）拼接成完整的 URL
+        """
+        domain = "yjskq.xjtu.edu.cn" if self.is_postgraduate else "bkkq.xjtu.edu.cn"
+        if self.use_vpn:
+            return getVPNUrl(f"http://{domain}{path}")
+        else:
+            return f"http://{domain}{path}"
+
