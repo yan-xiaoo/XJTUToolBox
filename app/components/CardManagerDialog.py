@@ -1,12 +1,12 @@
 # coding:utf-8
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget, QLabel
-from qfluentwidgets import Dialog, PushButton, ScrollArea, FluentIcon, CheckBox, StrongBodyLabel, BodyLabel
+from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget
+from qfluentwidgets import ScrollArea, CheckBox, StrongBodyLabel, BodyLabel, MessageBox
 
 from app.utils import StyleSheet
 
 
-class CardManagerDialog(Dialog):
+class CardManagerDialog(MessageBox):
     """卡片管理对话框"""
     cardsSelected = pyqtSignal(list)  # 发出选中的卡片ID列表
 

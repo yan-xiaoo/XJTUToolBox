@@ -1,10 +1,9 @@
 # coding:utf-8
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint
-from PyQt5.QtGui import QIcon, QDrag, QPainter, QPixmap, QStyleHints
-from PyQt5.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget, QPushButton
+from PyQt5.QtGui import QIcon, QDrag, QPainter, QPixmap
+from PyQt5.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
-from qfluentwidgets import IconWidget, TextWrap, ScrollArea, isDarkTheme, FluentIconBase, FlowLayout, FluentIcon, \
-    PushButton, MessageBox, ToolButton
+from qfluentwidgets import IconWidget, TextWrap, ScrollArea, isDarkTheme, FluentIconBase, FlowLayout, FluentIcon, ToolButton
 from ..utils.style_sheet import StyleSheet
 
 
@@ -151,7 +150,7 @@ class LinkCard(QFrame):
 
         # 执行拖拽
         self.setCursor(Qt.ClosedHandCursor)
-        dropAction = drag.exec_(Qt.MoveAction)
+        drag.exec_(Qt.MoveAction)
         self.setCursor(Qt.OpenHandCursor if self._edit_mode else Qt.PointingHandCursor)
 
     def mouseReleaseEvent(self, e):

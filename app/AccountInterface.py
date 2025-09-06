@@ -138,7 +138,7 @@ class AccountCard(CardWidget):
         self.iconWidget.mouseReleaseEvent = lambda a0: self._onEditAccountAvatarClicked()
         self.titleLabel = BodyLabel(title, self)
         self.contentLabel = CaptionLabel(content, self)
-        self.contentLabel.setFixedWidth(70)
+        self.contentLabel.setMinimumWidth(70)
         # 添加徽章组件
         self.badgeLabel = BadgeLabel(account.type, self)
         self.openButton = PushButton(self.tr('切换'), self)
