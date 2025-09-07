@@ -2,47 +2,45 @@ import requests
 from PyQt5.QtCore import pyqtSignal
 
 from auth.new_login import NewLogin
-from ehall.score import Score
-from ..sessions.ehall_session import EhallSession
+from gmis.score import GraduateScore
+from ..sessions.gmis_session import GMISSession
 from ..threads.ProcessWidget import ProcessThread
 from ..utils import accounts, logger
-from auth import EHALL_LOGIN_URL, ServerError
+from auth import ServerError, GMIS_LOGIN_URL
 
 
-class ScoreThread(ProcessThread):
+class GraduateScoreThread(ProcessThread):
     """
-    获取成绩相关的线程
+    获取研究生成绩相关的线程
     """
     # 成绩获取成功后发送的数据
-    # 参数为：成绩列表、是否为研究生成绩（本线程固定为 False）
+    # 成绩列表、是否为研究生成绩（此线程固定发送 True）
     scores = pyqtSignal(list, bool)
 
-    def __init__(self, term_number=None, parent=None):
+    def __init__(self, parent=None):
         """
-        创建一个获取成绩的线程
-        :param term_number: 需要获取的成绩的学期编号
+        创建一个获取研究生成绩的线程
         :param parent: 父对象
         """
         super().__init__(parent)
-        self.term_number = term_number
         self.util = None
 
     @property
-    def session(self) -> EhallSession:
+    def session(self) -> GMISSession:
         """
-        获取当前账户用于访问 ehall 的 session
+        获取当前账户用于访问 gmis 的 session
         """
-        return accounts.current.session_manager.get_session("ehall")
+        return accounts.current.session_manager.get_session("gmis")
 
     def login(self):
         """
-        使当前账户的 session 登录 ehall
+        使当前账户的 session 登录 gmis
         """
         self.setIndeterminate.emit(False)
         self.progressChanged.emit(0)
-        self.messageChanged.emit(self.tr("正在登录 EHALL..."))
+        self.messageChanged.emit(self.tr("正在登录研究生信息管理系统..."))
         self.progressChanged.emit(10)
-        login = NewLogin(EHALL_LOGIN_URL, session=self.session)
+        login = NewLogin(GMIS_LOGIN_URL, session=self.session)
         self.messageChanged.emit(self.tr("正在验证身份..."))
         self.progressChanged.emit(33)
         if not self.can_run:
@@ -51,18 +49,12 @@ class ScoreThread(ProcessThread):
         if not self.can_run:
             return False
         self.progressChanged.emit(66)
-        self.messageChanged.emit(self.tr("正在完成登录..."))
-        self.progressChanged.emit(88)
 
         self.session.has_login = True
         if not self.can_run:
             return False
 
-        # 进入课表页面
-        self.messageChanged.emit(self.tr("正在进入成绩页面..."))
-        self.progressChanged.emit(95)
-        self.util = Score(self.session)
-        self.progressChanged.emit(100)
+        self.util = GraduateScore(self.session)
 
         return True
 
@@ -83,9 +75,9 @@ class ScoreThread(ProcessThread):
         try:
             # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
             if self.session.has_login:
-                self.util = Score(self.session)
+                self.util = GraduateScore(self.session)
             else:
-                # 手动登录。虽然 EhallSession 有自动登录功能，但是为了显示进度条，还是一步一步手动登录。
+                # 手动登录。虽然 GMISSession 有自动登录功能，但是为了显示进度条，还是一步一步手动登录。
                 result = self.login()
                 if not result:
                     self.canceled.emit()
@@ -94,7 +86,7 @@ class ScoreThread(ProcessThread):
             self.messageChanged.emit("正在获取成绩...")
             if not self.can_run:
                 return
-            result = self.util.grade(self.term_number, jwapp_format=True)
+            result = self.util.grade()
             self.progressChanged.emit(100)
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
@@ -113,5 +105,5 @@ class ScoreThread(ProcessThread):
             self.error.emit(self.tr("其他错误"), str(e))
             self.canceled.emit()
         else:
-            self.scores.emit(result, False)
+            self.scores.emit(result, True)
             self.hasFinished.emit()

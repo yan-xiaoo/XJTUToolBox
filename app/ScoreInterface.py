@@ -8,6 +8,7 @@ from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, PrimaryPushB
 
 from app.components.MultiSelectionComboBox import MultiSelectionComboBox
 from app.sub_interfaces.ScoreDetailDialog import ScoreDetailDialog
+from app.threads.GraduateScoreThread import GraduateScoreThread
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScoreThread import ScoreThread
 from app.utils import StyleSheet, cfg, AccountDataManager, accounts
@@ -43,16 +44,6 @@ class ScoreInterface(ScrollArea):
         self.commandLayout = QHBoxLayout(self.commandFrame)
 
         self.termBox = MultiSelectionComboBox(all_select_option=True, parent=self.view)
-        items = []
-        term_string = self.guess_term_string()
-        for year in range(2016, int(term_string.split('-')[0])):
-            for term in range(1, 4):
-                items.append(f"{year}-{year+1}-{term}")
-        for term in range(1, int(term_string.split('-')[2])+1):
-            items.append(f"{term_string.split('-')[0]}-{term_string.split('-')[1]}-{term}")
-
-        items.reverse()
-        self.termBox.addItems(items)
 
         self.scoreButton = PrimaryPushButton(self.tr("查询"), self.view)
         self.scoreButton.setFixedHeight(40)
@@ -65,6 +56,13 @@ class ScoreInterface(ScrollArea):
         self.scoreThread.error.connect(self.onThreadError)
         self.scoreThread.scores.connect(self.onReceiveScore)
         self.scoreThread.finished.connect(self.unlock)
+
+        self.graduateScoreThread = GraduateScoreThread()
+        self.graduateProcessWidget = ProcessWidget(self.graduateScoreThread, self.view, stoppable=True, hide_on_end=True)
+        self.graduateProcessWidget.setVisible(False)
+        self.graduateScoreThread.error.connect(self.onThreadError)
+        self.graduateScoreThread.scores.connect(self.onReceiveScore)
+        self.graduateScoreThread.finished.connect(self.unlock)
 
         self._onlyNotice = None
         self.scores = None
@@ -90,9 +88,7 @@ class ScoreInterface(ScrollArea):
         self.scoreTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.scoreTable.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
-        self.scoreTable.setHorizontalHeaderLabels([self.tr("课程"), self.tr("学分"), self.tr("绩点"), self.tr("成绩"), self.tr("详情")])
         self.scoreTable.verticalHeader().setVisible(False)
-        self.scoreTable.setColumnWidth(4, 75)
         self.scoreTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.scoreTable.setSelectionMode(TableWidget.SelectionMode.MultiSelection)
         self.scoreTable.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
@@ -103,6 +99,7 @@ class ScoreInterface(ScrollArea):
 
         self.viewLayout.addWidget(self.commandFrame)
         self.viewLayout.addWidget(self.processWidget)
+        self.viewLayout.addWidget(self.graduateProcessWidget)
         self.viewLayout.addWidget(self.statisticTable)
         self.viewLayout.addWidget(self.scoreTable, stretch=1)
 
@@ -112,11 +109,8 @@ class ScoreInterface(ScrollArea):
 
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
+        self.adjust_table_by_account()
         self.load()
-
-        if not self.termBox.selected:
-            # 生成一个默认的学期
-            self.termBox.addSelectIndex(self.termBox.findText(self.guess_last_term_string()))
 
     def lock(self):
         """
@@ -156,9 +150,48 @@ class ScoreInterface(ScrollArea):
                 self.termBox.removeSelectIndexes(list(self.termBox.selected))
                 for term in terms:
                     self.termBox.addSelectIndex(self.termBox.findText(term))
-                self.onReceiveScore(self.scores, False)
+                self.onReceiveScore(self.scores, accounts.current.type == accounts.current.POSTGRADUATE, False)
             except (OSError, json.JSONDecodeError, KeyError):
                 pass
+
+    def adjust_table_by_account(self):
+        """
+        根据当前账户类型修改表格样式和成绩查询框样式。
+        本科生：课程、学分、绩点、成绩和详情
+        研究生：课程、课程类型、学分、绩点和成绩。由于学校系统限制，看不到成绩详情。此外，成绩查询框只能选择“全部学期”
+        未登录：按照本科生样式显示
+        """
+        if accounts.current is None or accounts.current.type == accounts.current.UNDERGRADUATE:
+            self.scoreTable.setHorizontalHeaderLabels([self.tr("课程"), self.tr("学分"), self.tr("绩点"), self.tr("成绩"), self.tr("详情")])
+            self.scoreTable.verticalHeader().setVisible(False)
+            self.scoreTable.setColumnWidth(4, 75)
+
+            self.termBox.clear()
+            self.termBox.show_all_select_option = True
+            items = []
+            term_string = self.guess_term_string()
+            for year in range(2016, int(term_string.split('-')[0])):
+                for term in range(1, 4):
+                    items.append(f"{year}-{year + 1}-{term}")
+            for term in range(1, int(term_string.split('-')[2]) + 1):
+                items.append(f"{term_string.split('-')[0]}-{term_string.split('-')[1]}-{term}")
+
+            items.reverse()
+            self.termBox.addItems(items)
+        else:
+            self.scoreTable.setHorizontalHeaderLabels([self.tr("课程"), self.tr("课程类型"), self.tr("学分"), self.tr("绩点"), self.tr("成绩")])
+
+            self.termBox.clear()
+            self.termBox.show_all_select_option = False
+            self.termBox.addItems(["全部学期"])
+
+        if not self.termBox.selected:
+            # 生成一个默认的学期
+            index = self.termBox.findText(self.guess_last_term_string())
+            if index == -1:
+                self.termBox.addSelectIndex(0)
+            else:
+                self.termBox.addSelectIndex(index)
 
     @staticmethod
     def guess_term_string():
@@ -268,28 +301,46 @@ class ScoreInterface(ScrollArea):
                 return
 
         self.lock()
-        self.scoreThread.term_number = term_number
-        self.scoreThread.start()
-        self.processWidget.setVisible(True)
+        if accounts.current is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            self.unlock()
+            return
+        # 只有本科生查询成绩可以选学期；研究生没法选，只能查询所有的
+        elif accounts.current.type == accounts.current.UNDERGRADUATE:
+            self.scoreThread.term_number = term_number
+            self.scoreThread.start()
+            self.processWidget.setVisible(True)
+        else:
+            self.graduateScoreThread.start()
+            self.graduateProcessWidget.setVisible(True)
 
-    @pyqtSlot(list)
-    def onReceiveScore(self, scores: list, show_success_message=True):
-        if cfg.ignoreLateCourse.value:
+    @pyqtSlot(list, bool)
+    def onReceiveScore(self, scores: list, is_postgraduate=False, show_success_message=True):
+        # 研究生无法区分缓考信息
+        if cfg.ignoreLateCourse.value and not is_postgraduate:
             scores = [score for score in scores if score["passFlag"] or score["specificReason"] != "缓考"]
 
         self.scores = scores
         self.scoreTable.clearSelection()
         self.scoreTable.setRowCount(len(scores))
-        for i, score in enumerate(scores):
-            self.scoreTable.setItem(i, 0, QTableWidgetItem(score["courseName"]))
-            self.scoreTable.setItem(i, 1, QTableWidgetItem(str(score["coursePoint"])))
-            self.scoreTable.setItem(i, 2, QTableWidgetItem(str(score["gpa"])))
-            self.scoreTable.setItem(i, 3, QTableWidgetItem(str(score["score"])))
-            self.scoreTable.setItem(i, 4, QTableWidgetItem(""))
-            button = TransparentPushButton(self.tr("详情"), self.view)
-            button.clicked.connect(lambda _, s=score: self.showDetailDialog(s))
-            self.scoreTable.setCellWidget(i, 4, button)
-            self.scoreTable.item(i, 4).setFlags(Qt.ItemIsEditable)
+        if is_postgraduate:
+            for i, score in enumerate(scores):
+                self.scoreTable.setItem(i, 0, QTableWidgetItem(score["courseName"]))
+                self.scoreTable.setItem(i, 1, QTableWidgetItem(str(score["type"])))
+                self.scoreTable.setItem(i, 2, QTableWidgetItem(str(score["coursePoint"])))
+                self.scoreTable.setItem(i, 3, QTableWidgetItem(str(score["gpa"])))
+                self.scoreTable.setItem(i, 4, QTableWidgetItem(str(score["score"])))
+        else:
+            for i, score in enumerate(scores):
+                self.scoreTable.setItem(i, 0, QTableWidgetItem(score["courseName"]))
+                self.scoreTable.setItem(i, 1, QTableWidgetItem(str(score["coursePoint"])))
+                self.scoreTable.setItem(i, 2, QTableWidgetItem(str(score["gpa"])))
+                self.scoreTable.setItem(i, 3, QTableWidgetItem(str(score["score"])))
+                self.scoreTable.setItem(i, 4, QTableWidgetItem(""))
+                button = TransparentPushButton(self.tr("详情"), self.view)
+                button.clicked.connect(lambda _, s=score: self.showDetailDialog(s))
+                self.scoreTable.setCellWidget(i, 4, button)
+                self.scoreTable.item(i, 4).setFlags(Qt.ItemIsEditable)
 
         self.onSelectScore()
         self.save()
@@ -305,6 +356,7 @@ class ScoreInterface(ScrollArea):
         self.scoreTable.clearContents()
         self.scoreTable.setRowCount(7)
         self.statisticTable.clearContents()
+        self.adjust_table_by_account()
         self.load()
 
     @pyqtSlot()
