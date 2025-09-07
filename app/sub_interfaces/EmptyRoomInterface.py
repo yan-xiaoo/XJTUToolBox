@@ -10,7 +10,7 @@ from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, ComboBox, Ca
 from ..components.MultiSelectionComboBox import MultiSelectionComboBox
 from ..threads.EmptyRoomThread import EmptyRoomThread
 from ..threads.ProcessWidget import ProcessWidget
-from ..utils import StyleSheet, DataManager, cfg
+from ..utils import StyleSheet, DataManager, cfg, accounts
 from ehall.empty_room import CAMPUS_BUILDING_DICT
 
 
@@ -234,6 +234,10 @@ class EmptyRoomInterface(ScrollArea):
 
     @pyqtSlot()
     def _onSearchButtonClicked(self):
+        if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
+            self.error("", self.tr("抱歉，由于学校没有接口，研究生账号无法查询空闲教室。"), duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self)
+            return
+
         if not self.campusBox.currentText() or not self.buildingBox.selectedItems():
             self.error("", self.tr("请选择校区和教学楼。"), duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self)
             return

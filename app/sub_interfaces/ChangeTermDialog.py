@@ -94,10 +94,15 @@ class ChangeTermDialog(MessageBoxBase):
                 correct = False
                 self.showError(self.tr("学期编号格式错误，示例: 2020-2021-1"))
             else:
-                if no not in (1, 2, 3):
-                    correct = False
-                    self.showError(self.tr("学期编号最后一位必须为 1、2 或 3"))
-                elif start >= end:
+                if accounts.current.type == accounts.current.UNDERGRADUATE:
+                    if no not in (1, 2, 3):
+                        correct = False
+                        self.showError(self.tr("学期编号最后一位必须为 1、2 或 3"))
+                else:
+                    if no not in (1, 2):
+                        correct = False
+                        self.showError(self.tr("学期编号最后一位必须为 1 或 2"))
+                if start >= end:
                     correct = False
                     self.showError(self.tr("结束年份必须大于开始年份"))
                 elif start < 2016 or term_number > self.max_term_number:

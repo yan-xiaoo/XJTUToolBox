@@ -18,6 +18,7 @@ from .sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from .sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
 from .sub_interfaces.LessonConflictDialog import LessonConflictDialog
 from .sub_interfaces.LessonDetailDialog import LessonDetailDialog
+from .sub_interfaces.TermStartTimeDialog import TermStartTimeDialog
 from .threads.ExamScheduleThread import ExamScheduleThread
 from .threads.GraduateScheduleThread import GraduateScheduleThread
 from .threads.HolidayThread import HolidayThread
@@ -170,6 +171,10 @@ class ScheduleInterface(ScrollArea):
         self.exportAction = Action(FIF.SHARE, self.tr("导出 ics..."))
         self.moreMenu.addAction(self.exportAction)
         self.exportAction.triggered.connect(self.onExportClicked)
+        # 修改开始日期菜单项
+        self.changeTermStartAction = Action(FIF.DATE_TIME, self.tr("修改学期开始日期..."))
+        self.moreMenu.addAction(self.changeTermStartAction)
+        self.changeTermStartAction.triggered.connect(self.onChangeTermStartClicked)
         # 清空课程菜单项
         self.clearAction = Action(FIF.CLOSE, self.tr("清空课程..."))
         self.moreMenu.addAction(self.clearAction)
@@ -235,6 +240,9 @@ class ScheduleInterface(ScrollArea):
                 # 设置考试查询学期
                 self.schedule_exam_thread.term_number = self.schedule_service.getCurrentTerm()
             else:
+                # 本学期没有课表，则不能设置学期开始时间（防止误判）
+                self.getExamAction.setEnabled(False)
+                self.changeTermStartAction.setEnabled(False)
                 term = self.schedule_service.getCurrentTerm()
                 if term is not None:
                     self.termButton.setText(
@@ -805,10 +813,82 @@ class ScheduleInterface(ScrollArea):
         if w.exec():
             self.schedule_service.setCurrentTerm(w.term_number)
             self.schedule_exam_thread.term_number = w.term_number
+
+            # 未获取过课表时，无法查询考试时间和修改学期开始日期
+            if self.schedule_service.getStartOfTerm() is not None:
+                self.getExamAction.setEnabled(True)
+                self.changeTermStartAction.setEnabled(True)
+            else:
+                self.getExamAction.setEnabled(True)
+                self.changeTermStartAction.setEnabled(False)
+
             # 重新根据学期长度设置下拉框
             self.weekComboBox.clear()
             self.weekComboBox.addItems([str(i) for i in range(1, self.getWeekLength() + 1)])
             self.loadSchedule()
+
+    @pyqtSlot()
+    def onChangeTermStartClicked(self):
+        """
+        修改当前学期的开始日期
+        """
+        if self.schedule_service is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+
+        date = self.schedule_service.getStartOfTerm()
+        if date is None:
+            date = self.guessTermStartDate(self.schedule_service.getCurrentTerm())
+            print(date)
+        w = TermStartTimeDialog(date, self)
+        if w.exec():
+            self.schedule_service.setTermInfo(self.schedule_service.getCurrentTerm(), w.date.isoformat())
+            self.loadSchedule()
+
+    @staticmethod
+    def guessTermStartDate(term_number):
+        """
+        根据一个学期编号，猜测一个学期开始日期（用于给修改学期开始日期对话框填充初始数据）
+        :param term_number: 学期编号，比如 2020-2021-1
+        """
+        def get_nearest_monday(date: datetime.date):
+            """
+            获得距离某个日期前后最近的星期一
+            """
+            last_monday = date
+            last_delta = 0
+            while last_monday.weekday() != 0:
+                last_monday -= datetime.timedelta(days=1)
+                last_delta += 1
+            next_monday = date
+            next_delta = 0
+            while next_monday.weekday() != 0:
+                next_monday += datetime.timedelta(days=1)
+                next_delta += 1
+            return last_monday if last_delta <= next_delta else next_monday
+
+        start_year, end_year, semester = term_number.split("-")
+        start_year = int(start_year)
+        end_year = int(end_year)
+        semester = int(semester)
+        if semester == 1:
+            # 第一个学期，设定为 9 月第一个周一
+            date = datetime.date(start_year, 9, 1)
+            # 一直+1直到日期是周一
+            while date.weekday() != 0:
+                date += datetime.timedelta(days=1)
+            return date
+        elif semester == 2:
+            # 第二个学期，选择二月最后一个周一或者三月第一个周一（根据二者哪个距离 3 月 1 日最近）
+            date = datetime.date(end_year, 3, 1)
+            return get_nearest_monday(date)
+        elif semester == 3:
+            # 夏季小学期，找 7 月的第一个星期一或者 6 月最后一个周一（根据二者哪个距离 7 月 1 日最近）
+            date = datetime.date(year=end_year, month=7, day=1)
+            return get_nearest_monday(date)
+        else:
+            # 默认值 1 月 1 日
+            return datetime.date(year=start_year, month=1, day=1)
 
     @pyqtSlot()
     def onClearClicked(self):
@@ -989,11 +1069,17 @@ class ScheduleInterface(ScrollArea):
     def onReceiveSchedule(self, schedule: dict):
         # 清除获取的新课表所在学期的所有非手动添加的课程
         if schedule["start_date"] is None:
-            w = MessageBox(self.tr("获取课表失败"), self.tr("抱歉，由于学校接口限制，无法获得此学期的开始时间，因此未能添加课表"), parent=self)
-            w.yesButton.setText(self.tr("确认"))
-            w.cancelButton.hide()
-            w.exec()
-            return
+            # 研究生没有获取到学期开始时间，则允许手动设置一下
+            w = TermStartTimeDialog(self.guessTermStartDate(schedule["term_number"]), self)
+            if w.exec():
+                schedule["start_date"] = w.date.isoformat()
+            else:
+                w = MessageBox(self.tr("获取课表失败"),
+                               self.tr("由于无法获得此学期的开始时间，因此未能添加课表"), parent=self)
+                w.yesButton.setText(self.tr("确认"))
+                w.cancelButton.hide()
+                w.exec()
+                return
 
         self.schedule_service.setTermInfo(schedule["term_number"],
                                           schedule["start_date"], True)

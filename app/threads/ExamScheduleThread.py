@@ -89,11 +89,6 @@ class ExamScheduleThread(ProcessThread):
             self.messageChanged.emit("正在获取考试时间...")
             exam = self.util.getExamSchedule(timestamp=self.term_number)
 
-            self.progressChanged.emit(88)
-            self.messageChanged.emit("正在获取学期开始时间...")
-
-            date = self.util.getStartOfTerm(timestamp=self.term_number)
-
             self.progressChanged.emit(100)
 
         except ServerError as e:

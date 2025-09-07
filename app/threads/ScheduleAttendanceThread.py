@@ -129,8 +129,14 @@ class ScheduleAttendanceThread(ProcessThread):
             if self.term_map is None:
                 self.term_map = self.util.getTermNoMap()
 
-            records = self.util.attendanceDetailByTime(self.start_date.strftime("%Y-%m-%d"), self.end_date.strftime("%Y-%m-%d"), 1, 50,
-                                                       termNo=self.term_map[self.term_number])
+            try:
+                records = self.util.attendanceDetailByTime(self.start_date.strftime("%Y-%m-%d"), self.end_date.strftime("%Y-%m-%d"), 1, 50,
+                                                           termNo=self.term_map[self.term_number])
+            except KeyError:
+                self.error.emit(self.tr("学期错误"), self.tr("当前学期尚无法查询考勤信息"))
+                self.canceled.emit()
+                return
+
             self.records = records
             self.progressChanged.emit(100)
 
