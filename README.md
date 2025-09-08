@@ -27,6 +27,10 @@
 ![sample4](./screenshots/sample_4.png)
 
 ## 下载安装
+
+> [!NOTE]
+> 你也可以查看文档站中更加详细的说明文档：[用户手册](https://yan-xiaoo.github.io/XJTUToolBox/tutorial/quick-start)
+
 你可以从 [Release](https://github.com/yan-xiaoo/XJTUToolBox/releases) 页面下载最新版本的安装包。
 
 使用 GNU/Linux 发行版的用户请参考「源码运行」部分，通过克隆源代码运行程序。
@@ -44,33 +48,10 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 如果喜欢本项目，就给一颗星星吧✨
 
 ## 源码运行
-如果你不想研究/修改/协助开发此软件的话，请直接选择上面的安装方式，避免不必要的麻烦
-> 请尽量使用 venv 或者 miniconda 等虚拟环境安装依赖
 
-- 安装 Python 3.12 或以上版本。更低版本的 Python 可能可以运行本程序，但可能存在兼容性问题
-- 克隆本项目：`git clone https://github.com/yan-xiaoo/XJTUToolBox.git`
-- 安装依赖库：
-  - macOS 系统用户：`pip install -r requirements_osx.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements_osx.txt` （国内）
-  - 其他系统用户：`pip install -r requirements.txt` 或 `pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt` （国内）
-  > macOS 系统中，由于 PyCocoa 和 pyobjc 最新版本出现冲突，必须手动限制 pyobjc 的版本，因此有一个单独的 requirements_osx.txt 文件
-- 运行：`python app.py`
+如果你不想研究/修改/协助开发此软件的话，请直接选择上面的安装方式，避免不必要的麻烦。
 
-> 从源码运行时，macOS 系统的用户需要额外安装 pyobjus 库以实现通知发送。如果不安装，定时推送通知功能将无法使用。
-> 
-> 由于依赖库还没有在 pypi 上更新最新的版本，你需要手动编译安装最新的源代码版本。请在存放本软件的终端下依次执行以下命令：
-> 
-> `git clone https://github.com/kivy/pyobjus.git`
-> 
-> `pip install Cython==3.0.12`
-> 
-> `cd pyobjus`
-> 
-> `make build_ext`
-> 
-> `python setup.py install`
-
-更新代码：
-- `git pull`
+请前往我们的文档站：[开发环境搭建](https://yan-xiaoo.github.io/XJTUToolBox/development/setup) 了解如何搭建开发环境。
 
 ## 未来规划
 - 考勤统计查询：查询整学期课程的考勤状态，快速找出缺勤的课程
@@ -79,7 +60,7 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 ## 开发相关
 项目结构说明：
 - app 目录下存放图形界面的相关代码
-- attendance, ehall, schedule, auth 四个目录的代码实现了一部分西交的 API，与图形界面逻辑无关，可以在此基础上开发其他项目
+- attendance, ehall, schedule, auth, gmis, jwapp, ywtb 等目录的代码实现了一部分西交的 API，与图形界面逻辑无关，可以在此基础上开发其他项目
 > auth: 西交登录、WebVPN 登录相关代码
 >
 > ehall: Ehall 系统的相关代码，包含评教接口，课表接口和成绩接口
@@ -89,6 +70,12 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 > attendance: 考勤系统相关代码，包含考勤查询、课表查询接口
 > 
 > jwapp：移动教务相关代码，包含成绩查询接口（项目中暂未使用）
+> 
+> gmis：GMIS （研究生信息管理系统）系统相关代码
+> 
+> ywtb：新师生服务大厅 [https://ywtb.xjtu.edu.cn](https://ywtb.xjtu.edu.cn) 相关代码，包含空闲教室查询接口
+
+具体开发指南请参阅 [开发手册](https://yan-xiaoo.github.io/XJTUToolBox/development/setup)
 
 ## 相关项目与致谢
 本项目的完成离不开如下开源项目的帮助：

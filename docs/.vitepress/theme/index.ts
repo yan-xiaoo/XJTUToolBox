@@ -49,7 +49,7 @@ export default {
       }
     } as Options)
     googleAnalytics({
-        id: 'G-1EJY6',
+        id: 'G-26ERSR2FLQ',
     })
   },
     setup() {

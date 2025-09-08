@@ -155,6 +155,7 @@ export default withMermaid(defineConfig({
         text: '用户手册',
         items: [
           { text: '快速开始', link: '/tutorial/quick-start' },
+          { text: '常见问题', link: '/tutorial/faq' }
         ]
       },
       {
@@ -169,7 +170,23 @@ export default withMermaid(defineConfig({
       { icon: 'github', link: 'https://github.com/yan-xiaoo/XJTUToolBox' }
     ],
     search: {
-        provider: 'local'
+        provider: 'local',
+        options: {
+        translations: {
+          button: {
+            buttonText: "搜索文档",
+            buttonAriaLabel: "搜索文档",
+          },
+          modal: {
+            noResultsText: "无法找到相关结果",
+            resetButtonTitle: "清除查询条件",
+            footer: {
+              selectText: "选择",
+              navigateText: "切换",
+            },
+          },
+        },
+      },
     }
   },
   markdown: {
