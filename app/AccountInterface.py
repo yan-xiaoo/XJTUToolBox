@@ -408,7 +408,11 @@ class AccountInterface(ScrollArea):
         # 如果没有账户了，则取消加密
         if len(self.accounts) == 0:
             self.accounts.setEncrypted(False, use_keyring=cfg.useKeyring.value)
-        self.accounts.save_suitable()
+
+        if cfg.useKeyring.value:
+            self.accounts.save_to_keyring()
+        else:
+            self.accounts.save_suitable()
 
     @pyqtSlot(Account)
     def _onAccountDeleted(self, account: Account):
@@ -454,7 +458,11 @@ class AccountInterface(ScrollArea):
         if len(self.accounts) == 1:
             self.accounts.current = account
             self._onCurrentAccountChanged(account)
-        self.accounts.save_suitable()
+
+        if cfg.useKeyring.value:
+            self.accounts.save_to_keyring()
+        else:
+            self.accounts.save_suitable()
 
     def _add_account_widget(self, account: Account, is_current=False):
         """is_current 仅仅影响按钮样式，不会影响账户的切换行为"""
