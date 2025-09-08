@@ -1,8 +1,9 @@
+import keyring.errors
 from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QFrame, QHBoxLayout
 
-from ..utils import accounts
+from ..utils import accounts, cfg
 from qfluentwidgets import MessageBoxBase, TitleLabel, CaptionLabel, PasswordLineEdit, BodyLabel, PrimaryPushButton
 
 
@@ -39,7 +40,7 @@ class EncryptDialog(MessageBoxBase):
         if not self.passwordEdit.text():
             return
         else:
-            accounts.setEncrypted(True, self.passwordEdit.text().encode())
+            accounts.setEncrypted(True, self.passwordEdit.text().encode(), use_keyring=cfg.useKeyring.value)
             self.accept()
             self.accepted.emit()
 
@@ -95,6 +96,23 @@ class DecryptDialog(MessageBoxBase):
                 self.showError(self.tr("密码错误。如果你忘记了密码，可以通过设置-清除账户信息清空账户并撤销加密。"))
             else:
                 self.showError(self.tr("密码错误"))
+        except FileNotFoundError:
+            # 没有文件的话，尝试从钥匙串拉取
+            try:
+                accounts.extend_from_keyring(key=self.passwordEdit.text().encode())
+            except ValueError:
+                self.failCount += 1
+                if self.failCount >= 3:
+                    self.showError(self.tr("密码错误。如果你忘记了密码，可以通过设置-清除账户信息清空账户并撤销加密。"))
+                else:
+                    self.showError(self.tr("密码错误"))
+            except keyring.errors.KeyringError:
+                self.showError(self.tr("无法访问系统钥匙串，请给予授权。"))
+            else:
+                accounts.key = self.passwordEdit.text().encode()
+                self.failCount = 0
+                self.accept()
+                self.accepted.emit()
         else:
             accounts.key = self.passwordEdit.text().encode()
             self.failCount = 0

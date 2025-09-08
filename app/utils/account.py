@@ -5,11 +5,13 @@ import hashlib
 from enum import Enum
 from uuid import uuid4
 
+import keyring
+import keyring.errors
 from Crypto.Cipher import AES
 from PyQt5.QtCore import pyqtSignal, QObject
 
-from app.utils import SessionManager
-
+from .session_manager import SessionManager
+from .config import cfg
 from .migrate_data import DATA_DIRECTORY
 
 
@@ -106,6 +108,8 @@ class Account:
 
 # 默认账户信息的存储位置
 DEFAULT_ACCOUNT_PATH = os.path.join(DATA_DIRECTORY, "accounts.json")
+# 钥匙串的服务名称
+KEYRING_SERVICE_NAME = "XJTUToolBox"
 
 
 class AccountManager(QObject):
@@ -189,6 +193,17 @@ class AccountManager(QObject):
         else:
             self.save_to(file)
 
+    def save_to_keyring(self):
+        """将账户信息保存到钥匙串中，根据是否加密，保存方式不同。"""
+        if self.encrypted and not self.key:
+            raise ValueError("无密钥，无法保存")
+
+        if self.encrypted:
+            data = self.encrypt_save(self.key)
+        else:
+            data = self.save()
+        keyring.set_password(KEYRING_SERVICE_NAME, "accounts", data)
+
     def encrypted_save_to(self, key: bytes = None, file=DEFAULT_ACCOUNT_PATH):
         key = key or self.key
         with open(file, "w", encoding="utf-8") as f:
@@ -203,24 +218,30 @@ class AccountManager(QObject):
         # 清除当前账号
         self.current = None
         # 覆盖当前磁盘上的账号信息
-        self.setEncrypted(False)
+        self.setEncrypted(False, use_keyring=cfg.useKeyring.value)
         self.accountCleared.emit()
         # 清除所有缓存
         from app.utils.cache import remove_all_cache
         remove_all_cache()
 
-    def setEncrypted(self, status, key=None):
+    def setEncrypted(self, status, key=None, use_keyring=False):
         """设置账户是否需要加密。请注意这个操作本身不会加密或者解密账户。"""
         if status:
             self.key = key
             self.encrypted = True
             self.accountEncryptStateChanged.emit()
-            self.encrypted_save_to(key=key)
+            if use_keyring:
+                self.save_to_keyring()
+            else:
+                self.encrypted_save_to(key=key)
         else:
             self.encrypted = False
             self.accountEncryptStateChanged.emit()
             self.key = None
-            self.save_to()
+            if use_keyring:
+                self.save_to_keyring()
+            else:
+                self.save_to()
 
     @classmethod
     def exists(cls, path: str = DEFAULT_ACCOUNT_PATH):
@@ -229,26 +250,61 @@ class AccountManager(QObject):
                 json.load(f)
             return True
         except (json.JSONDecodeError, FileNotFoundError):
+            try:
+                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
+            except keyring.errors.KeyringError:
+                return False
+            if data is not None:
+                return True
             return False
 
     @classmethod
     def empty(cls, path: str = DEFAULT_ACCOUNT_PATH):
-        if not cls.exists():
+        if not cls.exists(path):
             return True
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return len(data["data"]) == 0
 
-    @classmethod
-    def is_encrypted(cls, path: str = DEFAULT_ACCOUNT_PATH):
-        if not cls.exists():
-            return False
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data.get("encrypted", False)
-        except (json.JSONDecodeError, KeyError):
-            return False
+        except FileNotFoundError:
+            try:
+                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
+            except keyring.errors.KeyringError:
+                return True
+            if data is None:
+                return True
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return True
+            else:
+                return len(data["data"]) == 0
+        else:
+            return len(data["data"]) == 0
+
+    @classmethod
+    def is_encrypted(cls, path: str = DEFAULT_ACCOUNT_PATH):
+        # 没有账户文件的话，尝试从钥匙串查询
+        if not os.path.exists(path):
+            try:
+                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
+            except keyring.errors.KeyringError:
+                return False
+            if data is None:
+                return False
+            else:
+                try:
+                    data = json.loads(data)
+                    return data.get("encrypted", False)
+                except (json.JSONDecodeError, KeyError):
+                    return False
+        else:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data.get("encrypted", False)
+            except (json.JSONDecodeError, KeyError):
+                return False
 
     def encrypt_save(self, key: bytes) -> str:
         key = pad(key)
@@ -293,15 +349,54 @@ class AccountManager(QObject):
             self.accountDecrypted.emit()
         self.accountAdded.emit()
 
+    def remove_from_keyring(self):
+        keyring.delete_password(KEYRING_SERVICE_NAME, "accounts")
+
+    def extend_from_keyring(self, key: bytes = None):
+        new = self.load_from_keyring(key)
+        self.accounts.extend(new)
+        if self._current is None:
+            self._current = new._current
+            self.currentAccountChanged.emit()
+        if key is not None:
+            self.accountDecrypted.emit()
+        self.accountAdded.emit()
+
     @classmethod
     def load_from(cls, file=DEFAULT_ACCOUNT_PATH, key: bytes = None):
         with open(file, "r", encoding="utf-8") as f:
             return cls.load(f.read(), key)
 
+    @classmethod
+    def load_from_keyring(cls, key: bytes = None):
+        data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
+        if data is None:
+            raise ValueError("钥匙串中不存在账户数据")
+        return cls.load(data, key)
+
 
 accounts = AccountManager()
 if accounts.exists() and not accounts.is_encrypted():
-    accounts = AccountManager.load_from()
+    in_original_file = True
+    try:
+        accounts = AccountManager.load_from()
+    except FileNotFoundError:
+        try:
+            accounts = AccountManager.load_from_keyring()
+            in_original_file = False
+        except ValueError:
+            accounts = AccountManager()
+        except keyring.errors.KeyringError:
+            accounts = AccountManager()
+
+    if in_original_file and cfg.useKeyring.value:
+        # 本该存储在钥匙串，但是没有
+        # 立刻存储到钥匙串，并删除原始的文件
+        accounts.save_to_keyring()
+        try:
+            os.remove(DEFAULT_ACCOUNT_PATH)
+        except OSError:
+            pass
 
 
 if __name__ == '__main__':

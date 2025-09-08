@@ -142,6 +142,8 @@ class Config(QConfig):
     showAvatarOnSideBar = OptionsConfigItem("Settings", "show_avatar_on_sidebar",
                                     True, OptionsValidator([True, False]), BooleanSerializer())
     cardLayout = ConfigItem("Settings", "card_layout", [], CardValidator(), CardSerializer())
+    useKeyring = OptionsConfigItem("Settings", "use_keyring", True, OptionsValidator([True, False]),
+                                   BooleanSerializer())
 
     def __init__(self):
         super().__init__()

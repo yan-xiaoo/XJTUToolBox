@@ -1,7 +1,11 @@
 import datetime
+import os
 import sys
 
+import keyring
+import keyring.errors
 from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTime
+from keyring.backends.SecretService import Keyring
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
     InfoBadge, ExpandGroupSettingCard, SwitchButton, IndicatorPosition, BodyLabel, TimePicker, PushButton
@@ -12,9 +16,10 @@ from PyQt5.QtGui import QColor, QDesktopServices
 from .cards.custom_switch_card import CustomSwitchSettingCard
 from .components.CustomMessageBox import ConfirmBox
 from .threads.UpdateThread import checkUpdate, UpdateStatus
+from .utils.account import KEYRING_SERVICE_NAME
 from .utils.auto_start import add_to_startup, delete_from_startup
 from .utils.config import cfg, TraySetting
-from .utils import accounts, LOG_DIRECTORY
+from .utils import accounts, LOG_DIRECTORY, DEFAULT_ACCOUNT_PATH
 from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
 from .sub_interfaces.EncryptDialog import EncryptDialog, DecryptDialog
@@ -142,11 +147,20 @@ class SettingInterface(ScrollArea):
             cfg.showAvatarOnSideBar,
             self.accountGroup
         )
+        self.saveKeyringCard = CustomSwitchSettingCard(
+            FIF.VPN,
+            self.tr("使用系统密码管理器"),
+            self.tr("将账户密码存储在系统密码管理器中（如 macOS 钥匙串、Windows 凭据管理器）"),
+            cfg.useKeyring,
+            self.accountGroup
+        )
         self.accountGroup.addSettingCard(self.encryptCard)
         self.accountGroup.addSettingCard(self.decryptCard)
         self.accountGroup.addSettingCard(self.clearCard)
         self.accountGroup.addSettingCard(self.showAvatarCard)
+        self.accountGroup.addSettingCard(self.saveKeyringCard)
 
+        self.saveKeyringCard.checkedChanged.connect(self._onSaveKeyringChanged)
         self._onUpdateEncryptStatus()
 
         # 考勤设置组
@@ -323,6 +337,52 @@ class SettingInterface(ScrollArea):
         w = EncryptDialog(self)
         w.exec()
 
+    @pyqtSlot(bool)
+    def _onSaveKeyringChanged(self, checked: bool):
+        if not checked and not accounts.encrypted:
+            box = MessageBox(self.tr("关闭系统密码管理器"), self.tr("关闭后，账户密码将以明文存储在数据文件中，可能会增加密码泄漏风险。\n是否确认关闭？"),
+                             parent=self)
+            box.yesButton.setText(self.tr("确认"))
+            box.cancelButton.setText(self.tr("取消"))
+            if box.exec():
+                pass
+            else:
+                self.saveKeyringCard.setChecked(True)
+
+        if cfg.useKeyring.value:
+            if accounts.is_encrypted():
+                with open(DEFAULT_ACCOUNT_PATH, "r") as f:
+                    data = f.read()
+                try:
+                    keyring.set_password(KEYRING_SERVICE_NAME, "accounts", data)
+                except keyring.errors.KeyringError:
+                    InfoBar.error(self.tr(""), self.tr("错误：无法将账户保存到系统密码管理器中"), parent=self)
+                    self.saveKeyringCard.setChecked(False)
+            else:
+                try:
+                    accounts.save_to_keyring()
+                except keyring.errors.KeyringError:
+                    InfoBar.error(self.tr(""), self.tr("错误：无法将账户保存到系统密码管理器中"), parent=self)
+                    self.saveKeyringCard.setChecked(False)
+            try:
+                os.remove(DEFAULT_ACCOUNT_PATH)
+            except OSError:
+                pass
+        else:
+            if accounts.is_encrypted():
+                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
+                if data:
+                    with open(DEFAULT_ACCOUNT_PATH, "w") as f:
+                        f.write(data)
+            else:
+                accounts.save_suitable()
+
+            try:
+                accounts.remove_from_keyring()
+            except keyring.errors.KeyringError:
+                pass
+
+
     @pyqtSlot()
     def _onUpdateEncryptStatus(self):
         if accounts.encrypted:
@@ -348,7 +408,7 @@ class SettingInterface(ScrollArea):
         w.yesButton.setText(self.tr("不再加密"))
         w.cancelButton.setText(self.tr("取消"))
         if w.exec():
-            accounts.setEncrypted(False)
+            accounts.setEncrypted(False, use_keyring=cfg.useKeyring.value)
 
     @pyqtSlot()
     def _onClearAccountsClicked(self):

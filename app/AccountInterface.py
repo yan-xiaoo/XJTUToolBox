@@ -407,7 +407,7 @@ class AccountInterface(ScrollArea):
     def _onAccountChanged(self):
         # 如果没有账户了，则取消加密
         if len(self.accounts) == 0:
-            self.accounts.setEncrypted(False)
+            self.accounts.setEncrypted(False, use_keyring=cfg.useKeyring.value)
         self.accounts.save_suitable()
 
     @pyqtSlot(Account)
