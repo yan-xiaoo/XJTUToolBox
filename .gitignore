@@ -9,3 +9,7 @@ test.py
 config
 build
 dist
+
+docs/.vitepress/dist
+docs/.vitepress/cache
+node_modules

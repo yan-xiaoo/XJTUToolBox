@@ -1,0 +1,20 @@
+{
+  "devDependencies": {
+    "@nolebase/vitepress-plugin-enhanced-readabilities": "^2.18.2",
+    "markdown-it-mathjax3": "^4.3.2",
+    "mermaid": "^11.11.0",
+    "vitepress": "^1.6.4",
+    "vitepress-export-pdf": "^1.0.0",
+    "vitepress-plugin-google-analytics": "^1.0.2",
+    "vitepress-plugin-mermaid": "^2.0.17",
+    "vue": "^3.5.21"
+  },
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "dependencies": {
+    "vitepress-plugin-comment-with-giscus": "^1.1.15"
+  }
+}
