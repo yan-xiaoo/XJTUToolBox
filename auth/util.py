@@ -14,7 +14,7 @@ def get_timestamp() -> int:
 
 
 # 内部使用的对象，只获取桌面浏览器类型的 ua
-_ua = UserAgent(platforms=['pc'])
+_ua = UserAgent(platforms=['desktop'])
 
 
 def get_session() -> requests.Session:
