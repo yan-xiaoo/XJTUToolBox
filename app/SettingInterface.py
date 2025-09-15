@@ -13,8 +13,11 @@ from qfluentwidgets import FluentIcon as FIF
 from PyQt5.QtWidgets import QWidget, QHBoxLayout
 from PyQt5.QtGui import QColor, QDesktopServices
 
+from auth import generate_fp_visitor_id
+from auth.util import old_fp_visitor_id
 from .cards.custom_switch_card import CustomSwitchSettingCard
 from .components.CustomMessageBox import ConfirmBox
+from .sub_interfaces.ResetVisitorIdDialog import ResetVisitorIdDialog
 from .threads.UpdateThread import checkUpdate, UpdateStatus
 from .utils.account import KEYRING_SERVICE_NAME
 from .utils.auto_start import add_to_startup, delete_from_startup
@@ -256,6 +259,13 @@ class SettingInterface(ScrollArea):
             self.tr("打开应用的日志目录"),
             self.aboutGroup
         )
+        self.visitorIdCard = PushSettingCard(
+            self.tr("重置 ID"),
+            FIF.CONNECT,
+            self.tr("客户端登录 ID"),
+            str(cfg.loginId.value),
+            self.aboutGroup
+        )
 
         self.aboutGroup.addSettingCard(self.minimizeToTrayCard)
         self.aboutGroup.addSettingCard(self.feedbackCard)
@@ -263,6 +273,7 @@ class SettingInterface(ScrollArea):
         self.aboutGroup.addSettingCard(self.autoStartCard)
         self.aboutGroup.addSettingCard(self.updateOnStartCard)
         self.aboutGroup.addSettingCard(self.prereleaseCard)
+        self.aboutGroup.addSettingCard(self.visitorIdCard)
         self.aboutGroup.addSettingCard(self.updateCard)
 
         # 添加设置组到布局
@@ -295,6 +306,7 @@ class SettingInterface(ScrollArea):
         self.logCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("file:///" + LOG_DIRECTORY)))
         self.autoStartCard.checkedChanged.connect(self._onAutoStartClicked)
         self.showAvatarCard.checkedChanged.connect(self._showAvatarClicked)
+        self.visitorIdCard.clicked.connect(self._onVisitorIdClicked)
 
         if sys.platform == "darwin":
             # macOS 不支持直接设置自动启动
@@ -431,6 +443,14 @@ class SettingInterface(ScrollArea):
         if status == UpdateStatus.UPDATE_EXE_AVAILABLE or status == UpdateStatus.UPDATE_AVAILABLE:
             self.update_badge = InfoBadge.warning(1, parent=self.updateCard, target=self.updateCard.button,
                                                   position=InfoBadgePosition.TOP_RIGHT)
+
+    @pyqtSlot()
+    def _onVisitorIdClicked(self):
+        w = ResetVisitorIdDialog(self)
+        if w.exec():
+            self.visitorIdCard.setContent(w.visitorId)
+            cfg.loginId.value = w.visitorId
+            InfoBar.success(self.tr("重置 ID 成功"), self.tr("新的客户端登录 ID 已经设置"), parent=self)
 
     @pyqtSlot()
     def onUpdateClicked(self):

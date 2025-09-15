@@ -118,19 +118,14 @@ def getOrdinaryUrl(url):
         return pro + "://" + hostname + '/' + fold
 
 
-def generate_fp_visitor_id():
-    """
-    生成类似 FingerprintJS 的设备指纹ID
-    通过收集系统信息生成一个相对稳定机器标识符，用于新的登录系统参数
-    代码仅使用获得的系统信息生成一个 SHA-256 哈希值，然后传输哈希值作为标识符，不会存储或直接传输系统信息。
-    """
+def _visitor_id_hash():
     # 收集系统特征信息
     system_info = {
         'platform': platform.platform(),
         'machine': platform.machine(),
         'processor': platform.processor(),
         'python_version': platform.python_version(),
-        'mac_address': ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0,8*6,8)][::-1])
+        'mac_address': ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0, 8 * 6, 8)][::-1])
     }
 
     # 将系统信息转换为字符串
@@ -140,10 +135,32 @@ def generate_fp_visitor_id():
     hash_object = hashlib.sha256(fingerprint_string.encode())
     fingerprint_hash = hash_object.hexdigest()
 
-    # 取前16位作为 fpVisitorId (类似 FingerprintJS 的格式)
-    fp_visitor_id = fingerprint_hash[:16]
+    return fingerprint_hash
 
-    return fp_visitor_id
+
+def old_fp_visitor_id():
+    """
+    旧的（算是错误的）生成设备指纹 ID 的方法，保留以备不时之需
+    正确方法是取 32 位作为 ID，但之前只取了 16 位；现在改为默认取 32 位。
+    """
+    return _visitor_id_hash()[:16]
+
+
+def generate_fp_visitor_id():
+    """
+    生成类似 FingerprintJS 的设备指纹ID
+    通过收集系统信息生成一个相对稳定机器标识符，用于新的登录系统参数
+    代码仅使用获得的系统信息生成一个 SHA-256 哈希值，然后传输哈希值作为标识符，不会存储或直接传输系统信息。
+    """
+    return _visitor_id_hash()[:32]
+
+
+def generate_random_visitor_id():
+    """
+    生成一个完全随机的 visitorId，长度为 32 位十六进制字符串。
+    适用于不需要稳定设备指纹的场景，每次调用都会生成一个新的 ID。
+    """
+    return uuid.uuid4().hex
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@ from enum import Enum
 
 from requests import HTTPError
 
-from app.utils import logger
+from app.utils import logger, cfg
 from auth import ServerError
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -50,7 +50,7 @@ class LoginThread(QThread):
 
     def run(self):
         try:
-            self.login = self.login or YWTBLogin()
+            self.login = self.login or YWTBLogin(visitor_id=str(cfg.loginId.value))
             if self.choice == LoginChoice.GET_SHOW_CAPTCHA:
                 result = self.login.isShowJCaptchaCode()
                 self.isShowCaptcha.emit(result)

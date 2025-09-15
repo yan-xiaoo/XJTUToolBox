@@ -6,6 +6,8 @@ from packaging.version import parse
 from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme, \
     EnumSerializer, ConfigValidator, ConfigItem
 from enum import Enum
+
+from auth.util import old_fp_visitor_id
 from .migrate_data import DATA_DIRECTORY
 
 
@@ -86,6 +88,26 @@ class CardSerializer(ConfigSerializer):
         return []
 
 
+class VisitorIdValidator(ConfigValidator):
+    def validate(self, value):
+        return isinstance(value, str) and len(value) == 32 and all(c in "0123456789abcdef" for c in value)
+
+    def correct(self, value):
+        if not self.validate(value):
+            return old_fp_visitor_id()
+        return value
+
+
+class VisitorIdSerializer(ConfigSerializer):
+    def serialize(self, value):
+        return value
+
+    def deserialize(self, value):
+        if isinstance(value, str):
+            return value
+        return old_fp_visitor_id()
+
+
 class AttendanceLoginMethod(Enum):
     # 不设置，每次询问
     NONE = 0
@@ -144,6 +166,7 @@ class Config(QConfig):
     cardLayout = ConfigItem("Settings", "card_layout", [], CardValidator(), CardSerializer())
     useKeyring = OptionsConfigItem("Settings", "use_keyring", True, OptionsValidator([True, False]),
                                    BooleanSerializer())
+    loginId = ConfigItem("Settings", "login_id", old_fp_visitor_id(), VisitorIdValidator(), VisitorIdSerializer())
 
     def __init__(self):
         super().__init__()

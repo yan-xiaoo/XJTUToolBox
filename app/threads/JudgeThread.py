@@ -4,7 +4,7 @@ from PyQt5.QtCore import pyqtSignal
 from auth.new_login import NewLogin
 from .ProcessWidget import ProcessThread
 from ..sessions.ehall_session import EhallSession
-from ..utils import Account, logger
+from ..utils import Account, logger, cfg
 
 from ehall import AutoJudge
 from auth import EHALL_LOGIN_URL, ServerError
@@ -45,7 +45,7 @@ class JudgeThread(ProcessThread):
         self.setIndeterminate.emit(False)
         self.messageChanged.emit(self.tr("正在登录 EHALL..."))
         self.progressChanged.emit(10)
-        login = NewLogin(EHALL_LOGIN_URL, session=self.session)
+        login = NewLogin(EHALL_LOGIN_URL, session=self.session, visitor_id=str(cfg.loginId.value))
         self.messageChanged.emit(self.tr("正在验证身份..."))
         self.progressChanged.emit(33)
         if not self.can_run:

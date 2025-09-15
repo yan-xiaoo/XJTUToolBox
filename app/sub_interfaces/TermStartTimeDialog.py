@@ -2,6 +2,7 @@ import datetime
 from typing import Optional
 
 from PyQt5.QtCore import Qt, QDate, pyqtSignal
+from PyQt5.QtGui import QColor
 from qfluentwidgets import MessageBoxBase, TitleLabel, CaptionLabel, FastCalendarPicker
 
 
@@ -15,6 +16,8 @@ class TermStartTimeDialog(MessageBoxBase):
 
         self.title = TitleLabel(self.tr("设置学期开始时间"), self)
         self.hint = CaptionLabel(self.tr("请设置当前学期的开始时间（第一周周一的日期）"), self)
+        self.warningHint = CaptionLabel(self.tr("请注意：错误的学期开始时间可能导致考勤查询出错"), self)
+        self.warningHint.setTextColor(QColor(255, 0, 0), QColor(255, 0, 0))
 
         self.calendar = FastCalendarPicker()
         self.calendar.setText(self.tr("选择日期"))
@@ -23,6 +26,7 @@ class TermStartTimeDialog(MessageBoxBase):
 
         self.viewLayout.addWidget(self.title)
         self.viewLayout.addWidget(self.hint)
+        self.viewLayout.addWidget(self.warningHint)
         self.viewLayout.addWidget(self.calendar)
 
         self.yesButton.setText(self.tr("确定"))

@@ -7,7 +7,7 @@ from auth.new_login import NewLogin
 from gmis.schedule import GraduateSchedule
 from ..sessions.gmis_session import GMISSession
 from ..threads.ProcessWidget import ProcessThread
-from ..utils import accounts, logger
+from ..utils import accounts, logger, cfg
 
 
 class GraduateScheduleThread(ProcessThread):
@@ -43,7 +43,7 @@ class GraduateScheduleThread(ProcessThread):
         self.progressChanged.emit(0)
         self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
         self.progressChanged.emit(10)
-        login = NewLogin(GMIS_LOGIN_URL, session=self.session)
+        login = NewLogin(GMIS_LOGIN_URL, session=self.session, visitor_id=str(cfg.loginId.value))
         self.messageChanged.emit(self.tr("正在验证身份..."))
         self.progressChanged.emit(33)
         if not self.can_run:

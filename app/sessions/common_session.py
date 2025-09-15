@@ -5,7 +5,7 @@ from fake_useragent import UserAgent
 import requests
 
 
-_ua = UserAgent(platforms=['pc'])
+_ua = UserAgent(platforms=['desktop'])
 
 
 class CommonLoginSession(requests.Session, metaclass=ABCMeta):

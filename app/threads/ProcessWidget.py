@@ -18,8 +18,11 @@ class ProcessWidget(QFrame):
     # 进程成功完成
     finished = pyqtSignal()
 
-    def __init__(self, thread: "ProcessThread", parent=None, stoppable=False, hide_on_end=True):
+    def __init__(self, thread: "ProcessThread", parent=None, stoppable=False, hide_on_end=True, backward_animation=True):
         super().__init__(parent)
+        # 点击取消时的进度倒退动画
+        self.backward_animation = backward_animation
+        self._speed = 0
         self.thread_ = thread
         self.hide_on_end = hide_on_end
         # 初始化自身的组件
@@ -33,7 +36,10 @@ class ProcessWidget(QFrame):
         self.hBoxLayout.addWidget(self.label)
         self.stopButton = PrimaryPushButton(self.tr("取消"), self)
         self.hBoxLayout.addWidget(self.stopButton)
+        # 是否已经要求子线程退出
         self.stopped = False
+        # 是否为确定进度条
+        self.isIndeterminate = True
         if not stoppable:
             self.stopButton.setVisible(False)
             self.stopButton.setEnabled(False)
@@ -97,6 +103,8 @@ class ProcessWidget(QFrame):
             self.progressBar.setVisible(True)
             self.indeterminateProgressBar.setVisible(False)
 
+        self.isIndeterminate = value
+
     @pyqtSlot(float)
     def onSetDeadTime(self, value: float):
         self.thread_dead_time = value
@@ -131,6 +139,10 @@ class ProcessWidget(QFrame):
         if not self.stopped:
             self.dead_time_start = time.time()
             self.stop.emit()
+            # 如果是确定进度条，显示一个进度倒退的动画
+            # 我们可以预知显示时间为 当前进度百分比 / 超时时间
+            # 具体显示逻辑在 checkProcess 中
+            self._speed = self.progressBar.value() / self.thread_dead_time if not self.isIndeterminate else 0
         self.stopped = True
 
     @pyqtSlot()
@@ -141,12 +153,17 @@ class ProcessWidget(QFrame):
                 self.onStopped()
             self.timer.stop()
         # 如果已经发送了停止请求，且超过了设定的时间线程仍然没有退出，强制终止线程
-        if self.stopped and self.thread_.isRunning() and time.time() - self.dead_time_start > self.thread_dead_time:
-            logger.warning(f"{str(self.thread_)} 线程强制退出")
-            self.thread_.terminate()
-            self.thread_.wait()
-            self.onStopped()
-            self.timer.stop()
+        if self.stopped:
+            if self.thread_.isRunning() and time.time() - self.dead_time_start > self.thread_dead_time:
+                logger.warning(f"{str(self.thread_)} 线程强制退出")
+                self.thread_.terminate()
+                self.thread_.wait()
+                self.onStopped()
+                self.timer.stop()
+            # 尝试显示倒退动画
+            elif not self.isIndeterminate and self.backward_animation:
+                new_value = self.progressBar.value() - self._speed / 2
+                self.progressBar.setValue(int(new_value))
 
     @pyqtSlot(int)
     def onSetProgress(self, value: int):

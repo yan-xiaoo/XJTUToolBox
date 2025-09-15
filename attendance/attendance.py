@@ -3,6 +3,7 @@ import datetime
 import math
 import time
 from enum import Enum
+import warnings
 
 import requests
 
@@ -100,6 +101,7 @@ class AttendanceLogin(Login):
     请注意：必须使用 post_login 方法才能添加此 header
     """
     def __init__(self, session: requests.Session = None):
+        warnings.warn("此类已被弃用，因为旧的登录系统已失效", DeprecationWarning)
         super().__init__(ATTENDANCE_URL, session)
 
     def post_login(self) -> requests.Session:
@@ -123,8 +125,8 @@ class AttendanceNewLogin(NewLogin):
         此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
         """
 
-    def __init__(self, session: requests.Session = None, is_postgraduate=False):
-        super().__init__(POSTGRADUATE_ATTENDANCE_URL if is_postgraduate else ATTENDANCE_URL, session)
+    def __init__(self, session: requests.Session = None, is_postgraduate=False, visitor_id=None):
+        super().__init__(POSTGRADUATE_ATTENDANCE_URL if is_postgraduate else ATTENDANCE_URL, session, visitor_id=visitor_id)
 
     def postLogin(self, login_response) -> None:
         response = self._get(ATTENDANCE_URL, allow_redirects=True)
@@ -146,6 +148,7 @@ class AttendanceWebVPNLogin(WebVPNLogin):
     """
 
     def __init__(self, session: requests.Session = None):
+        warnings.warn("此类已被弃用，因为旧的登录系统已失效", DeprecationWarning)
         if session is None:
             session = get_session()
 
@@ -178,8 +181,9 @@ class AttendanceNewWebVPNLogin(NewWebVPNLogin):
         此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
         """
 
-    def __init__(self, session: requests.Session = None, is_postgraduate=False):
-        super().__init__(POSTGRADUATE_ATTENDANCE_WEBVPN_URL if is_postgraduate else ATTENDANCE_WEBVPN_URL, session=session)
+    def __init__(self, session: requests.Session = None, is_postgraduate=False, visitor_id=None):
+        super().__init__(POSTGRADUATE_ATTENDANCE_WEBVPN_URL if is_postgraduate else ATTENDANCE_WEBVPN_URL, session=session,
+                         visitor_id=visitor_id)
 
     def postLogin(self, login_response) -> None:
         try:
@@ -202,6 +206,7 @@ def attendance_fast_login(username: str, password: str, captcha="", session=None
     :param session: 自定义的 Session 对象。默认利用 get_session 函数生成一个修改了 UA 的空 Session。
     :return: 登录成功后的 Session 对象
     """
+    warnings.warn("此方法已被弃用，因为旧的登录系统已失效", DeprecationWarning)
     login = AttendanceLogin(session)
     if login.isShowJCaptchaCode(username):
         # 需要验证码，让用户输入
@@ -227,6 +232,7 @@ def attendance_fast_webvpn_login(username: str, password: str, captcha="", sessi
     :param session: 自定义的 Session 对象。默认利用 get_session 函数生成一个修改了 UA 的空 Session。
     :return: 登录成功后的 Session 对象
     """
+    warnings.warn("此方法已被弃用，因为旧的登录系统已失效", DeprecationWarning)
     login = AttendanceWebVPNLogin(session)
     if login.isShowJCaptchaCode(username):
         # 需要验证码，让用户输入

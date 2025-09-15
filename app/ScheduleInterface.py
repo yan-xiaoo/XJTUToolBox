@@ -83,7 +83,7 @@ class ScheduleInterface(ScrollArea):
         self.graduate_schedule_thread.finished.connect(self.unlock)
 
         self.process_widget_attendance = ProcessWidget(
-            self.schedule_attendance_thread, stoppable=True)
+            self.schedule_attendance_thread, stoppable=True, backward_animation=False)
         self.process_widget_attendance.setVisible(False)
         self.schedule_attendance_thread.result.connect(
             self.onReceiveAttendance)

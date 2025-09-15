@@ -13,8 +13,8 @@ class YWTBLogin(NewLogin):
     专门用于登录新师生综合服务大厅（ywtb.xjtu.edu.cn）的类。
     此网站要求在获取部分信息时，在请求头中携带 x-device-info, x-terminal-info, x-id-token 等字段，其中 x-id-token 字段需要通过登录后重定向到的网址提取。
     """
-    def __init__(self, session=None):
-        super().__init__(YWTB_LOGIN_URL, session)
+    def __init__(self, session=None, visitor_id=None):
+        super().__init__(YWTB_LOGIN_URL, session, visitor_id=visitor_id)
 
     def postLogin(self, login_response):
         parse_result = urlparse(login_response.url)

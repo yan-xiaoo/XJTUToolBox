@@ -6,7 +6,7 @@ from auth.new_login import NewLogin
 from ehall.schedule import Schedule
 from .ProcessWidget import ProcessThread
 from ..sessions.ehall_session import EhallSession
-from ..utils import logger
+from ..utils import logger, cfg
 from ..utils.account import accounts
 
 
@@ -43,7 +43,7 @@ class ExamScheduleThread(ProcessThread):
         self.progressChanged.emit(0)
         self.messageChanged.emit(self.tr("正在登录 EHALL..."))
         self.progressChanged.emit(10)
-        login = NewLogin(EHALL_LOGIN_URL, session=self.session)
+        login = NewLogin(EHALL_LOGIN_URL, session=self.session, visitor_id=str(cfg.loginId.value))
         self.messageChanged.emit(self.tr("正在验证身份..."))
         self.progressChanged.emit(33)
         if not self.can_run:

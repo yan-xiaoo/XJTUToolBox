@@ -146,12 +146,14 @@ class NewLogin:
     UNDERGRADUATE = AccountType.UNDERGRADUATE
     POSTGRADUATE = AccountType.POSTGRADUATE
 
-    def __init__(self, login_url: str, session=None):
+    def __init__(self, login_url: str, session=None, visitor_id=None):
         """
         通过网址执行登录。
         :param login_url: 一个登录网址。在浏览器中打开此网址后，应当跳转到统一身份认证登录界面，
         且登录成功后可以返回到目标网页。
         :param session: 自定义的 Session 对象。默认利用 get_session 函数生成一个修改了 UA 的空 Session。
+        :param visitor_id: 可选的客户端标识符。服务器通过此标识符区分登录客户端，记录客户端是否可信。如果不传入，则自动根据运行环境生成一个较为稳定的标识符。
+        标识符应当为 32 位的随机十六进制数。
         """
         if session is None:
             session = get_session()
@@ -164,7 +166,7 @@ class NewLogin:
         # 获得 execution 字段
         self.execution_input = extract_execution_value(response.text)
         # 获得一个标识符
-        self.fp_visitor_id = generate_fp_visitor_id()
+        self.fp_visitor_id = visitor_id if visitor_id is not None else generate_fp_visitor_id()
         # 是否进行 mfa 验证
         self.mfa_enabled = extract_mfa_enabled(response.text)
         # 目前服务端在本地存储登录失败次数，实现是否填写验证码的判断，我也暂时这么实现

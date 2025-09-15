@@ -1,6 +1,7 @@
 from auth import EHALL_LOGIN_URL
 from auth.new_login import NewLogin
 from .common_session import CommonLoginSession
+from ..utils import cfg
 
 
 class EhallSession(CommonLoginSession):
@@ -8,7 +9,7 @@ class EhallSession(CommonLoginSession):
     ehall.xjtu.edu.cn 登录用的 Session
     """
     def login(self, username, password):
-        login_util = NewLogin(EHALL_LOGIN_URL, session=self)
+        login_util = NewLogin(EHALL_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
         login_util.login(username, password)
 
         self.reset_timeout()

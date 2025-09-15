@@ -28,8 +28,8 @@ class JwappLogin(Login):
 class JwappNewLogin(NewLogin):
     """移动教务系统的登录类。此系统和考勤系统类似，都需要在登录后，从 header 中添加一个 token"""
 
-    def __init__(self, session=None):
-        super().__init__(JWAPP_URL, session=session)
+    def __init__(self, session=None, visitor_id=None):
+        super().__init__(JWAPP_URL, session=session, visitor_id=visitor_id)
 
     def postLogin(self, login_response) -> None:
         try:
