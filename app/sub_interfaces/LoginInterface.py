@@ -237,7 +237,10 @@ class LoginInterface(ScrollArea):
         w = VerifyCodeDialog(phone_number, self)
         w.sendSignal.connect(__on_click_send_mfa)
 
-        self.__thread.sendMFAResult.disconnect()
+        try:
+            self.__thread.sendMFAResult.disconnect()
+        except TypeError:
+            pass
         self.__thread.sendMFAResult.connect(__on_report_send_mfa_result)
 
         if w.exec():

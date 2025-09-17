@@ -307,7 +307,10 @@ class NewLogin:
             return LoginState.REQUIRE_CAPTCHA, None
 
         # MFA 检测，每次都必须执行
-        if self.mfa_enabled and not self.has_login:
+        # 如果上次 MFA 的结果是不需要（required=False），则需要再检测，因为说明上次是用户名-密码不对导致的问题。
+        # 按原登录系统的表现，此时是需要重新检测的。
+        # 如果上次的结果是需要，那么说明这次是在继续未完成的一次登录，因此不需要再检测。
+        if self.mfa_enabled and not self.has_login and (self.mfa_context is None or not self.mfa_context.required):
             response = self._post("https://login.xjtu.edu.cn/cas/mfa/detect",
                                   data={"username": self._username,
                                         "password": self._password,

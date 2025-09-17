@@ -112,6 +112,7 @@ class LoginThread(QThread):
                         logger.error("登录错误: \n%s", info)
                         self.loginFailed.emit(True, info)
                     else:
+                        logger.error("登录错误：%s\n%s", status, info)
                         raise ValueError("未知的登录状态")
 
             elif self.choice == LoginChoice.MFA_SEND:

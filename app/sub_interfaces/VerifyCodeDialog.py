@@ -42,6 +42,7 @@ class VerifyCodeDialog(MessageBoxBase):
         self.viewLayout.addLayout(self.sendLayout)
         self.viewLayout.addWidget(self.codeEdit)
         self.viewLayout.addWidget(self.warningHint)
+        self.viewLayout.addWidget(self.trustCheckBox)
 
         self.yesButton.setText(self.tr("确定"))
         self.cancelButton.setText(self.tr("取消"))
