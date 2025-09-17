@@ -306,8 +306,8 @@ class NewLogin:
         if self.isShowJCaptchaCode() and not jcaptcha and not self._jcaptcha:
             return LoginState.REQUIRE_CAPTCHA, None
 
-        # MFA 检测
-        if self.mfa_enabled and self.mfa_context is None:
+        # MFA 检测，每次都必须执行
+        if self.mfa_enabled and not self.has_login:
             response = self._post("https://login.xjtu.edu.cn/cas/mfa/detect",
                                   data={"username": self._username,
                                         "password": self._password,
@@ -324,7 +324,6 @@ class NewLogin:
 
             if need:
                 return LoginState.REQUIRE_MFA, self.mfa_context
-            print("不需要进行 MFA 验证，直接继续")
 
         mfa_state = self.mfa_context.state if self.mfa_context else ""
 
