@@ -48,7 +48,7 @@ class GraduateScheduleThread(ProcessThread):
         self.progressChanged.emit(33)
         if not self.can_run:
             return False
-        login.login(accounts.current.username, accounts.current.password, account_type=NewLogin.POSTGRADUATE)
+        login.login_or_raise(accounts.current.username, accounts.current.password, account_type=NewLogin.POSTGRADUATE)
         if not self.can_run:
             return False
         self.progressChanged.emit(88)
@@ -102,7 +102,11 @@ class GraduateScheduleThread(ProcessThread):
 
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
-            self.error.emit(self.tr("服务器错误"), str(e))
+            if e.code == 102:
+                self.error.emit(self.tr("登录问题"), self.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"))
+                accounts.current.MFASignal.emit(True)
+            else:
+                self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()
         except requests.ConnectionError:
             logger.error("网络错误", exc_info=True)

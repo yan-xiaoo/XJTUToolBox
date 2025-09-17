@@ -163,6 +163,20 @@ def generate_random_visitor_id():
     return uuid.uuid4().hex
 
 
+def generate_user_agent() -> str:
+    """
+    根据当前的操作系统，随机生成一个该系统上浏览器的 UA
+    """
+    os_name = platform.system()
+    if not os_name:
+        return _ua.random
+    elif os_name == 'Darwin':
+        os_name = "Mac OS X"
+
+    return UserAgent(os=[os_name], browsers=['Chrome', 'Firefox', 'Edge']).random
+
+
+
 if __name__ == '__main__':
     print(getVPNUrl("https://org.xjtu.edu.cn/openplatform/g/admin/getJcaptchaCode"))
     print(getOrdinaryUrl("https://webvpn.xjtu.edu.cn/https/77726476706e69737468656265737421fbf952d2243e635930068cb8/KCMS/detail/detail.aspx?dbcode=CJFQ&dbname=CJFD2007&filename=JEXK200702000&uid=WEEvREcwSlJHSldRa1FhcTdnTnhXY20wTWhLQWVGdmJFOTcvMFFDWDBycz0=$9A4hF_YAuvQ5obgVAqNKPCYcEjKensW4IQMovwHtwkF4VYPoHbKxJw!!&v=MTYzNjU3cWZaT2RuRkNuaFZMN0tMeWpUWmJHNEh0Yk1yWTlGWklSOGVYMUx1eFlTN0RoMVQzcVRyV00xRnJDVVI="))

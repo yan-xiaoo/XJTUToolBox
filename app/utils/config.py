@@ -7,7 +7,7 @@ from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator
     EnumSerializer, ConfigValidator, ConfigItem
 from enum import Enum
 
-from auth.util import old_fp_visitor_id
+from auth.util import old_fp_visitor_id, generate_user_agent
 from .migrate_data import DATA_DIRECTORY
 
 
@@ -108,6 +108,26 @@ class VisitorIdSerializer(ConfigSerializer):
         return old_fp_visitor_id()
 
 
+class UserAgentValidator(ConfigValidator):
+    def validate(self, value):
+        return isinstance(value, str)
+
+    def correct(self, value):
+        if not self.validate(value):
+            return generate_user_agent()
+        return value
+
+
+class UserAgentSerializer(ConfigSerializer):
+    def serialize(self, value):
+        return value
+
+    def deserialize(self, value):
+        if isinstance(value, str):
+            return value
+        return generate_user_agent()
+
+
 class AttendanceLoginMethod(Enum):
     # 不设置，每次询问
     NONE = 0
@@ -167,6 +187,7 @@ class Config(QConfig):
     useKeyring = OptionsConfigItem("Settings", "use_keyring", True, OptionsValidator([True, False]),
                                    BooleanSerializer())
     loginId = ConfigItem("Settings", "login_id", old_fp_visitor_id(), VisitorIdValidator(), VisitorIdSerializer())
+    userAgent = ConfigItem("Settings", "user_agent", generate_user_agent(), UserAgentValidator(), UserAgentSerializer())
 
     def __init__(self):
         super().__init__()

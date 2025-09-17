@@ -5,7 +5,6 @@ import sys
 import keyring
 import keyring.errors
 from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTime
-from keyring.backends.SecretService import Keyring
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
     InfoBadge, ExpandGroupSettingCard, SwitchButton, IndicatorPosition, BodyLabel, TimePicker, PushButton
@@ -13,8 +12,6 @@ from qfluentwidgets import FluentIcon as FIF
 from PyQt5.QtWidgets import QWidget, QHBoxLayout
 from PyQt5.QtGui import QColor, QDesktopServices
 
-from auth import generate_fp_visitor_id
-from auth.util import old_fp_visitor_id
 from .cards.custom_switch_card import CustomSwitchSettingCard
 from .components.CustomMessageBox import ConfirmBox
 from .sub_interfaces.ResetVisitorIdDialog import ResetVisitorIdDialog

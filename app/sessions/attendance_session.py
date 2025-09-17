@@ -21,7 +21,7 @@ class AttendanceSession(CommonLoginSession):
 
     def login(self, username, password, is_postgraduate=False):
         login_util = AttendanceNewLogin(self, is_postgraduate=is_postgraduate, visitor_id=str(cfg.loginId.value))
-        login_util.login(username, password)
+        login_util.login_or_raise(username, password)
 
         self.login_method = self.LoginMethod.NORMAL
 

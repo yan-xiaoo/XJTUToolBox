@@ -4,7 +4,7 @@ from PyQt5.QtCore import pyqtSignal
 from auth.new_login import NewLogin
 from .ProcessWidget import ProcessThread
 from ..sessions.ehall_session import EhallSession
-from ..utils import Account, logger, cfg
+from ..utils import Account, logger, cfg, accounts
 
 from ehall import AutoJudge
 from auth import EHALL_LOGIN_URL, ServerError
@@ -50,7 +50,7 @@ class JudgeThread(ProcessThread):
         self.progressChanged.emit(33)
         if not self.can_run:
             return False
-        login.login(self.account.username, self.account.password)
+        login.login_or_raise(self.account.username, self.account.password)
         if not self.can_run:
             return False
         self.progressChanged.emit(66)
@@ -178,7 +178,11 @@ class JudgeThread(ProcessThread):
                 raise ValueError(self.tr("未知选项"))
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
-            self.error.emit(self.tr("服务器错误"), str(e))
+            if e.code == 102:
+                self.error.emit(self.tr("登录问题"), self.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"))
+                accounts.current.MFASignal.emit(True)
+            else:
+                self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()
         except requests.ConnectionError:
             logger.error("网络错误", exc_info=True)

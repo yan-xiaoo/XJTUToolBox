@@ -9,7 +9,7 @@ class JwappSession(CommonLoginSession):
     """
     def login(self, username, password):
         login_util = JwappNewLogin(session=self, visitor_id=str(cfg.loginId.value))
-        login_util.login(username, password)
+        login_util.login_or_raise(username, password)
 
         self.reset_timeout()
         self.has_login = True

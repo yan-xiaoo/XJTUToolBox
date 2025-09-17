@@ -28,7 +28,7 @@ def depad(text):
     return text.rstrip(b'\0')
 
 
-class Account:
+class Account(QObject):
     """保存曾经登录过的用户名，密码，名称（自定义）等信息"""
 
     class AccountType(Enum):
@@ -40,6 +40,9 @@ class Account:
     UNDERGRADUATE = AccountType.UNDERGRADUATE
     POSTGRADUATE = AccountType.POSTGRADUATE
 
+    # 账户是否需要 MFA 验证
+    MFASignal = pyqtSignal(bool)
+
     def __init__(self, username: str, password: str, nickname: str = None, uuid=None, type=None, avatar_path="avatar.png", origin_avatar_path="origin_avatar.png"):
         """
         创建一个账户记录。
@@ -48,6 +51,8 @@ class Account:
         :param nickname: 用户给这个账号起的名称，仅保存在本地。
         :param type: 账号类型，见 Account.AccountType，分为本科生/研究生两种
         """
+        super().__init__()
+
         self.username = username
         self.password = password
         self.nickname = nickname

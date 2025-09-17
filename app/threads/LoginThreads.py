@@ -7,7 +7,7 @@ from app.utils import logger, cfg
 from auth import ServerError
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from auth.new_login import NewLogin
+from auth.new_login import NewLogin, LoginState
 from ywtb import YWTBLogin
 from ywtb.util import YWTBUtil
 
@@ -18,6 +18,8 @@ class LoginChoice(Enum):
     LOGIN = 2,
     GET_STUDENT_ID = 3
     FINISH_LOGIN = 4
+    MFA_SEND = 5
+    MFA_VERIFY = 6
 
 
 class LoginThread(QThread):
@@ -34,6 +36,10 @@ class LoginThread(QThread):
     loginSuccess = pyqtSignal()
     # 需要选择账户信号
     needChooseAccount = pyqtSignal()
+    # 需要 MFA 信号（数据：手机号）
+    needMFA = pyqtSignal(str)
+    # 发送验证码结果
+    sendMFAResult = pyqtSignal(bool, str)
 
     LoginChoice = LoginChoice
 
@@ -47,6 +53,12 @@ class LoginThread(QThread):
         self.login = None
         # 选择的账户类型
         self.accountType = None
+        # MFA Content
+        self._mfaContent = None
+        # MFA 验证码
+        self._mfaCode = None
+        # 是否信任当前客户端
+        self.trustAgent = True
 
     def run(self):
         try:
@@ -62,20 +74,62 @@ class LoginThread(QThread):
             elif self.choice == LoginChoice.LOGIN:
                 try:
                     # 检查账户是否存在多个身份
-                    both_accounts = self.login.checkForBothAccounts(self.username, self.password, self.captcha or "")
+                    status, info = self.login.login(self.username, self.password, self.captcha or "", trust_agent=self.trustAgent)
                 except ServerError as e:
                     logger.error("服务器错误", exc_info=True)
                     self.loginFailed.emit(True, e.message)
                 else:
-                    if both_accounts:
-                        self.needChooseAccount.emit()
-                    else:
+                    if status == LoginState.SUCCESS:
                         self.loginSuccess.emit()
+                    elif status == LoginState.REQUIRE_ACCOUNT_CHOICE:
+                        self.needChooseAccount.emit()
+                    elif status == LoginState.REQUIRE_MFA:
+                        self._mfaContent: NewLogin.MFAContext = info
+                        number = self._mfaContent.get_phone_number()
+                        self.needMFA.emit(number)
+                    elif status == LoginState.FAIL:
+                        logger.error("登录错误: \n%s", info)
+                        self.loginFailed.emit(True, info)
+                    else:
+                        raise ValueError("未知的登录状态")
+            elif self.choice == LoginChoice.MFA_VERIFY:
+                try:
+                    if self._mfaContent is None:
+                        raise ValueError("MFA 内容未设置")
+                    if self._mfaCode is None:
+                        raise ValueError("MFA 验证码未设置")
+                    self._mfaContent.verify_phone_code(self._mfaCode)
+                    status, info = self.login.login(trust_agent=self.trustAgent)
+                except ServerError as e:
+                    logger.error("服务器错误", exc_info=True)
+                    self.loginFailed.emit(True, e.message)
+                else:
+                    if status == LoginState.SUCCESS:
+                        self.loginSuccess.emit()
+                    elif status == LoginState.REQUIRE_ACCOUNT_CHOICE:
+                        self.needChooseAccount.emit()
+                    elif status == LoginState.FAIL:
+                        logger.error("登录错误: \n%s", info)
+                        self.loginFailed.emit(True, info)
+                    else:
+                        raise ValueError("未知的登录状态")
+
+            elif self.choice == LoginChoice.MFA_SEND:
+                try:
+                    if self._mfaContent is None:
+                        raise ValueError("MFA 内容未设置")
+                    self._mfaContent.send_verify_code()
+                except (ServerError, HTTPError, json.decoder.JSONDecodeError) as e:
+                    logger.error("发送验证码时发生错误", exc_info=True)
+                    self.sendMFAResult.emit(False, str(e))
+                else:
+                    self.sendMFAResult.emit(True, "")
+
             elif self.choice == LoginChoice.FINISH_LOGIN:
                 try:
                     if self.accountType is None:
                         raise ValueError("必须选择账户类型")
-                    self.login.finishLogin(self.accountType)
+                    self.login.login(account_type=self.accountType, trust_agent=self.trustAgent)
                 except ServerError as e:
                     logger.error("服务器错误", exc_info=True)
                     self.loginFailed.emit(False, e.message)

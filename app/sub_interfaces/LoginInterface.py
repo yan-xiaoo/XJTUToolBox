@@ -5,6 +5,7 @@ from qfluentwidgets import TitleLabel, ScrollArea, LineEdit, PasswordLineEdit, P
     ImageLabel, InfoBar, InfoBarPosition, StateToolTip, isDarkTheme, Theme, MessageBox
 
 from auth.new_login import NewLogin
+from .VerifyCodeDialog import VerifyCodeDialog
 from ..threads.LoginThreads import LoginThread
 from ..utils import StyleSheet, cfg, accounts
 
@@ -96,6 +97,7 @@ class LoginInterface(ScrollArea):
         self.loginSuccess.connect(self.on_login_success)
 
         self.__thread.needChooseAccount.connect(self.__on_choose_account)
+        self.__thread.needMFA.connect(self.__on_need_mfa)
         self.__thread.loginSuccess.connect(self.__on_login_success)
         self.__thread.loginFailed.connect(self.__on_login_fail)
         self.__thread.captchaCode.connect(self.__on_receive_captcha_code)
@@ -220,6 +222,32 @@ class LoginInterface(ScrollArea):
 
         self.__thread.choice = LoginThread.LoginChoice.FINISH_LOGIN
         self.__thread.start()
+
+    @pyqtSlot(str)
+    def __on_need_mfa(self, phone_number: str):
+        @pyqtSlot()
+        def __on_click_send_mfa():
+            self.__thread.choice = LoginThread.LoginChoice.MFA_SEND
+            self.__thread.start()
+
+        @pyqtSlot(bool, str)
+        def __on_report_send_mfa_result(success: bool, msg: str):
+            w.reportSendResult(success, msg)
+
+        w = VerifyCodeDialog(phone_number, self)
+        w.sendSignal.connect(__on_click_send_mfa)
+
+        self.__thread.sendMFAResult.disconnect()
+        self.__thread.sendMFAResult.connect(__on_report_send_mfa_result)
+
+        if w.exec():
+            code = w.code
+            self.__thread.choice = LoginThread.LoginChoice.MFA_VERIFY
+            self.__thread._mfaCode = code
+            self.__thread.trustAgent = w.trust
+            self.__thread.start()
+        else:
+            self._unlock(False)
 
     @pyqtSlot()
     def __on_login_success(self):

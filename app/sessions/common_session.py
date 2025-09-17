@@ -1,11 +1,9 @@
 import time
 from abc import abstractmethod, ABCMeta
-from fake_useragent import UserAgent
 
 import requests
 
-
-_ua = UserAgent(platforms=['desktop'])
+from ..utils import cfg
 
 
 class CommonLoginSession(requests.Session, metaclass=ABCMeta):
@@ -23,7 +21,8 @@ class CommonLoginSession(requests.Session, metaclass=ABCMeta):
         """
         super().__init__()
         # 设置 UA
-        self.headers.update({"User-Agent": _ua.random})
+        self.headers.update({"User-Agent": cfg.userAgent.value})
+        print("UA: ", self.headers["User-Agent"])
         # 超时时间
         self._timeout = timeout
         # 上次发送请求的时间

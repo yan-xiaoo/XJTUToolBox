@@ -3,7 +3,7 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel
 from qfluentwidgets import ScrollArea, TitleLabel, VBoxLayout, StrongBodyLabel, BodyLabel, SubtitleLabel, LineEdit, \
     CardWidget, IconWidget, CaptionLabel, PushButton, TransparentToolButton, FluentIcon, RoundMenu, Action, MessageBox, \
-    MessageBoxBase, InfoBar, isDarkTheme
+    MessageBoxBase, InfoBar, isDarkTheme, PrimaryPushButton
 
 from auth.new_login import NewLogin
 from .sub_interfaces.AvatarDialog import AvatarDialog
@@ -140,7 +140,10 @@ class AccountCard(CardWidget):
         self.contentLabel = CaptionLabel(content, self)
         self.contentLabel.setMinimumWidth(70)
         # 添加徽章组件
-        self.badgeLabel = BadgeLabel(account.type, self)
+        self.badgeLabel = BadgeLabel(type, self)
+        # MFA 验证按钮，在需要验证时才显示
+        self.verifyButton = PrimaryPushButton(self.tr("验证账户"), self)
+        self.verifyButton.setVisible(False)
         self.openButton = PushButton(self.tr('切换'), self)
         self.moreButton = TransparentToolButton(FluentIcon.MORE, self)
 
@@ -174,6 +177,7 @@ class AccountCard(CardWidget):
         self.hBoxLayout.addLayout(self.vBoxLayout)
 
         self.hBoxLayout.addStretch(1)
+        self.hBoxLayout.addWidget(self.verifyButton, 0, Qt.AlignRight)
         self.hBoxLayout.addWidget(self.openButton, 0, Qt.AlignRight)
         self.hBoxLayout.addWidget(self.moreButton, 0, Qt.AlignRight)
 
@@ -200,6 +204,9 @@ class AccountCard(CardWidget):
         self.moreButton.setFixedSize(32, 32)
         self.moreButton.clicked.connect(self.onMoreButtonClicked)
         self.openButton.clicked.connect(self.onOpenButtonClicked)
+        self.verifyButton.clicked.connect(self._onVerifyButtonClicked)
+
+        account.MFASignal.connect(self._onShowVerifyButton)
 
         self.deleted = False
 
@@ -281,6 +288,16 @@ class AccountCard(CardWidget):
         self.accountChanged.emit()
         self.main_window.login_interface.loginSuccess.disconnect()
         self.main_window.login_interface.clearEdits()
+        # 隐藏可能存在的 MFA 按钮，因为成功登录后没有 MFA 问题了。
+        self._onShowVerifyButton(False)
+
+    @pyqtSlot(bool)
+    def _onShowVerifyButton(self, show: bool):
+        self.verifyButton.setVisible(show)
+
+    @pyqtSlot()
+    def _onVerifyButtonClicked(self):
+        self._onEditAccountPasswordClicked()
 
     def deleteLater(self):
         self.accountChanged.disconnect()

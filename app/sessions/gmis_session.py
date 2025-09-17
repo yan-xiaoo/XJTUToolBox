@@ -10,7 +10,7 @@ class GMISSession(CommonLoginSession):
     """
     def login(self, username, password):
         login_util = NewLogin(GMIS_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
-        login_util.login(username, password, account_type=NewLogin.POSTGRADUATE)
+        login_util.login_or_raise(username, password, account_type=NewLogin.POSTGRADUATE)
 
         self.reset_timeout()
         self.has_login = True

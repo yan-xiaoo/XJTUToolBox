@@ -9,8 +9,11 @@ import re
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from lxml import html
+from typing import Tuple, Optional
 
+from .constant import EHALL_LOGIN_URL
 from .util import get_session, ServerError, generate_fp_visitor_id, getVPNUrl
+
 
 
 # 使用 lxml 解析 HTML 并提取表单中的 execution 值
@@ -103,45 +106,95 @@ def extract_mfa_enabled(html_content: str) -> bool:
         return True
 
 
+class LoginState(enum.Enum):
+    """
+    登录状态枚举
+    """
+    REQUIRE_MFA = 0  # 需要 MFA 验证
+    REQUIRE_CAPTCHA = 1  # 需要验证码
+    SUCCESS = 2  # 登录成功
+    FAIL = 3  # 登录失败
+    REQUIRE_ACCOUNT_CHOICE = 4  # 需要选择账户
+
+
 class NewLogin:
     """
     通过西安交通大学统一身份认证网站，登录目标网页。
     此类用于 2025 年 7 月 17 日后的统一认证系统，即 login.xjtu.edu.cn。
-    登录流程根据是否需要动态选择身份可以分为两种。
-    首先需要了解，登录系统在待登录账号具有多种身份（即是本科生又是研究生）并且使用手机号/邮箱而非学号登录时，会出现额外的页面，要求选择登录账号。
-    在登录前，我们无法预测待登录的账号是不是这样的需要选择身份的账号。因此，我们提供了两种互斥的登录 API：
-    1. 预先指定账号身份：只使用 login 方法登录。
-    > from auth import EHALL_LOGIN_URL
-    > from auth.new_login import NewLogin
-    > # 选择登录网站（比如 Ehall）
-    > login = NewLogin(EHALL_LOGIN_URL)
-    > # 登录。这里 account_type 用于预先指定需要选择的身份。如果待登录账号没有多个身份，此参数没有作用；如果有多个身份，则按照此参数输入选择身份。
-    > session = login.login("username", "password", account_type=NewLogin.POSTGRADUATE)
-    > # session 即为登录后的 Session 对象，可以用来访问目标网站
-    2. 动态选择身份：采用 checkForBothAccounts + finishLogin 方法登录。
-    这种方法可以先获得账号是否有多个身份，如果有，再让用户选择需要登录的身份，最后完成登录。
-    这种方法适用于需要用户交互选择身份的场景，比如图形界面程序。
-    > from auth import EHALL_LOGIN_URL
-    > from auth.new_login import NewLogin
-    > # 选择登录网站（比如 Ehall）
-    > login = NewLogin(EHALL_LOGIN_URL)
-    > # 获取当前账号下是否有两个身份
-    > has_both_accounts = login.checkForBothAccounts("username", "password")
-    > if has_both_accounts:
-    >   type_ = input("请输入需要登录的身份（0: 本科生, 1: 研究生）:")
-    >   if type_ == "0":
-    >       account_type = NewLogin.UNDERGRADUATE
-    >   elif type_ == "1":
-    >       account_type = NewLogin.POSTGRADUATE
-    >   else:
-    >       raise ValueError("未知的身份类型")
-    >   # 选择单个身份登录
-    >   session = login.finishLogin(account_type)
-    两种登录方法只能选择一种，绝对不能混合使用。如果多次登录，登录系统会返回 404 错误。
+    登录系统中，存在大量“可能需要但并不强制要求”的步骤，比如：
+    1. 登录失败三次后，需要输入验证码；我们无法了解之前已经错误了几次，所以这是可选的步骤。
+    2. 系统可能要求我们进行 mfa 验证（两步验证），也可能不要求。
+    3. 如果账号下有多种身份（比如既是本科生又是研究生），则需要选择一个身份登录。我们在登录前同样无法了解这个账号是否有多重身份，所以这是可选的步骤。
+    因此，此类的 login 方法按照状态机的思想设计：
+    - 首次调用时，必须传入用户名和密码。
+    - 如果返回 REQUIRE_MFA，则需要进行 MFA 验证，验证完成后再次调用 login 方法继续登录流程。
+    - 如果返回 REQUIRE_CAPTCHA，则需要输入验证码，输入完成后再次调用 login 方法继续登录流程。
+    - 如果返回 REQUIRE_ACCOUNT_CHOICE，则需要选择账户，选择完成后再次调用 login 方法继续登录流程。
+    - 如果返回 SUCCESS，则登录成功，附带 Session 对象。
+    - 如果返回 FAIL，则登录失败，附带错误信息。
+    通过不断调用 login 方法，直到返回 SUCCESS 或 FAIL，登录流程结束。
+    此类不会自动处理验证码、MFA 验证和账户选择等步骤，而是将这些步骤交给调用者处理。
+    对于具体调用示例，可以查看下方的 console_login 函数。
     """
     class AccountType(enum.Enum):
         UNDERGRADUATE = 0
         POSTGRADUATE = 1
+
+    class MFAContext:
+        def __init__(self, new_login_instance, state, required=True):
+            self._new_login = new_login_instance
+            self.state = state
+            self.gid = None
+            self.required = required
+            self._phone_number = None
+
+        def get_phone_number(self) -> str:
+            """
+            在登录系统要求两步验证时，获得绑定手机号（屏蔽中间四位）
+            """
+            # 缓存
+            if self._phone_number is not None:
+                return self._phone_number
+
+            data = self._new_login._get("https://login.xjtu.edu.cn/cas/mfa/initByType/securephone",
+                                        params={"state": self.state})
+            data.raise_for_status()
+            json_result = data.json()
+            if json_result["code"] == 0:
+                self.gid = json_result["data"]["gid"]
+                self._phone_number = json_result["data"]["securePhone"]
+                return self._phone_number
+            else:
+                raise ServerError(json_result["code"], "获得绑定手机信息失败")
+
+        def send_verify_code(self) -> str:
+            """
+            在登录系统要求两步验证时，发送登录验证码到绑定手机，并返回手机号（中间屏蔽四位）
+            """
+            phone = self.get_phone_number()
+            send_data = self._new_login._post("https://login.xjtu.edu.cn/attest/api/guard/securephone/send",
+                                              json={"gid": self.gid})
+            send_data.raise_for_status()
+            json_result = send_data.json()
+            if json_result["code"] == 0:
+                return phone
+            else:
+                raise ServerError(json_result["code"], json_result["message"])
+
+        def verify_phone_code(self, code: str):
+            """
+            在登录系统要求两步验证且发送了登录验证码后，向系统核对验证码。
+            :param code: 收到的验证码
+            """
+            if self.gid is None:
+                raise RuntimeError("必须先发送验证码才能核对验证码。")
+
+            data = self._new_login._post("https://login.xjtu.edu.cn/attest/api/guard/securephone/valid",
+                                         json={"gid": self.gid, "code": code})
+            data.raise_for_status()
+            json_result = data.json()
+            if json_result["code"] != 0:
+                raise ServerError(json_result["code"], json_result["message"])
 
     UNDERGRADUATE = AccountType.UNDERGRADUATE
     POSTGRADUATE = AccountType.POSTGRADUATE
@@ -177,6 +230,12 @@ class NewLogin:
         self.has_login = False
         # 保存 checkForBothAccounts 方法可能获得的响应
         self._choose_account_response = None
+        # 两步验证上下文
+        self.mfa_context: NewLogin.MFAContext | None = None
+        # 登录凭据
+        self._username = None
+        self._password = None
+        self._jcaptcha = ""
 
     def isShowJCaptchaCode(self) -> bool:
         """
@@ -206,27 +265,52 @@ class NewLogin:
             f.write(jcaptcha)
             f.close()
 
-    def login(self, username: str, password: str, jcaptcha: str = "", account_type: AccountType = POSTGRADUATE):
+    def login(self, username: Optional[str] = None, password: Optional[str] = None, jcaptcha: str = "",
+              account_type: AccountType = POSTGRADUATE, trust_agent=True) -> Tuple[LoginState, MFAContext | object | None]:
         """
         请求登录。
-        请注意，此方法和 get_accounts 方法完全互斥，不能同时使用。具体正确使用示例请见类文档注释。
-        :param username: 用户名，可以传入学号、手机号或邮箱
-        :param password: 密码。传入明文密码即可，函数在请求前会自动加密密码。
+        此方法为登录流程的“驱动器”，会根据当前状态执行相应的操作。
+        首次调用时，必须传入 username 和 password。
+        在 MFA 验证、验证码填写或账户选择后，根据返回的状态再次调用此方法以继续登录流程。
+
+        :param username: 用户名，可以传入学号、手机号或邮箱。仅在首次调用时需要。
+        :param password: 密码。传入明文密码即可，函数在请求前会自动加密密码。仅在首次调用时需要。
         :param jcaptcha: 验证码。如果 isShowJCaptchaCode 返回 False，则不用传入此参数。否则，需要传入验证码字符串。
-        :param account_type: 账户的类型。如果当前登录的账号下有多种身份（比如既是本科生又是研究生），且采用手机号/邮箱登录，则需要传入此参数以选择登录的身份。否则，此参数无效。
-        由于一般同时具有本科生/研究生账号时都是在读研究生，因此默认选择登录研究生账号。
-        :raises ServerError: 如果登录失败，抛出此异常。异常信息中包含错误代码和错误信息。
+        :param account_type: 账户的类型。如果当前登录的账号下有多种身份（比如既是本科生又是研究生），且采用手机号/邮箱登录，
+                             在 login 返回 `REQUIRE_ACCOUNT_CHOICE` 状态后，再次调用此方法并传入此参数以选择登录的身份。否则，此参数无效。
+        :param trust_agent: 是否将当前客户端标识为可信设备。默认为 True。如果不希望服务器记住当前设备，则传入 False。
+        :return: 一个元组，第一个元素是登录状态（LoginState），第二个元素是附带信息。
+                 - (LoginState.REQUIRE_MFA, mfa_context): 需要 MFA 验证，附带 MFA 上下文对象。MFA 验证需要调用 mfa_context 的 send_verify_code 方法发送验证码，
+                   然后调用 verify_phone_code 方法验证验证码，验证完成后再次无参数的调用 login 方法继续登录流程。
+                 - (LoginState.REQUIRE_CAPTCHA, None): 需要验证码。
+                 - (LoginState.SUCCESS, session): 登录成功，附带 Session 对象。
+                 - (LoginState.FAIL, message): 登录失败，附带错误信息。
+                 - (LoginState.REQUIRE_ACCOUNT_CHOICE, choices): 需要选择账户，附带账户选项列表。
+        对于具体调用示例，可以查看下方的 console_login 函数。
         :raises RuntimeError: 如果已经登录过一次，则抛出此异常。请重新创建 NewLogin 对象以登录其他账号。
         """
+        # 如果需要选择账户，则执行账户选择逻辑
+        if self._choose_account_response:
+            return self._finish_account_choice(account_type)
+
         if self.has_login:
             raise RuntimeError("已经登录，不能重复登录。请重新创建 NewLogin 对象以登录其他账号。")
 
-        encrypt_password = self.encrypt_password(password)
-        if self.mfa_enabled:
-            # POST 一个 mfa 验证接口
+        if username and password:
+            self._username = username
+            self._password = self.encrypt_password(password)
+            self._jcaptcha = jcaptcha
+        elif not all([self._username, self._password]):
+            raise ValueError("首次调用 login 时必须提供 username 和 password。")
+
+        if self.isShowJCaptchaCode() and not jcaptcha and not self._jcaptcha:
+            return LoginState.REQUIRE_CAPTCHA, None
+
+        # MFA 检测
+        if self.mfa_enabled and self.mfa_context is None:
             response = self._post("https://login.xjtu.edu.cn/cas/mfa/detect",
-                                  data={"username": username,
-                                        "password": encrypt_password,
+                                  data={"username": self._username,
+                                        "password": self._password,
                                         "fpVisitorId": self.fp_visitor_id},
                                   headers={"Referer": self.post_url})
             try:
@@ -236,80 +320,99 @@ class NewLogin:
 
             state = data["data"]["state"]
             need = data["data"]["need"]
+            self.mfa_context = self.MFAContext(self, state, required=bool(need))
+
             if need:
-                raise ServerError(403, f"需要进行多因素认证，但目前程序不支持 MFA 登录，因此无法继续登录")
+                return LoginState.REQUIRE_MFA, self.mfa_context
+            print("不需要进行 MFA 验证，直接继续")
+
+        mfa_state = self.mfa_context.state if self.mfa_context else ""
+
+        if self.mfa_context is not None and self.mfa_context.required:
+            trust_agent = "true" if trust_agent else "false"
         else:
-            state = ""
+            trust_agent = ""
 
         login_response = self._post(self.post_url,
-                                    data={"username": username,
-                                          "password": encrypt_password,
+                                    data={"username": self._username,
+                                          "password": self._password,
                                           "execution": self.execution_input,
                                           "_eventId": "submit",
                                           "submit1": "Login1",
                                           "fpVisitorId": self.fp_visitor_id,
-                                          "captcha": jcaptcha,
+                                          "captcha": self._jcaptcha,
                                           "currentMenu": "1",
                                           "failN": str(self.fail_count),
-                                          "mfaState": state,
+                                          "mfaState": mfa_state,
                                           "geolocation": "",
-                                          "trustAgent": ""}, allow_redirects=True)
-        # 神人系统用返回值 401 判断是否登录失败
+                                          "trustAgent": trust_agent}, allow_redirects=True)
+
         if login_response.status_code == 401:
             self.fail_count += 1
-            raise ServerError(401, "登录失败，用户名或密码错误。")
+            return LoginState.FAIL, "登录失败，用户名或密码错误。"
+
+        login_response.raise_for_status()
+        message = extract_alert_message(login_response.text)
+        if message:
+            self.fail_count += 1
+            return LoginState.FAIL, f"登录失败: {message['title']}"
+
+        self.fail_count = 0
+        self.has_login = True
+
+        account_choices = extract_account_choices(login_response.text)
+        if account_choices:
+            self._choose_account_response = login_response
+            # 登录流程尚未结束，不算完全登录
+            self.has_login = False
+            return LoginState.REQUIRE_ACCOUNT_CHOICE, account_choices
+
+        self.postLogin(login_response)
+        return LoginState.SUCCESS, self.session
+
+    def _finish_account_choice(self, account_type: AccountType, trust_agent=True):
+        if not self._choose_account_response:
+            raise RuntimeError("当前不需要选择账户。")
+
+        account_choices = extract_account_choices(self._choose_account_response.text)
+        if account_choices is None:
+            raise RuntimeError("当前不需要选择账户。")
+
+        selected_label = None
+        if account_type == self.UNDERGRADUATE:
+            for choice in account_choices:
+                if "本科" in choice['name']:
+                    selected_label = choice['label']
+                    break
+        else:  # POSTGRADUATE
+            for choice in account_choices:
+                if "研究" in choice['name']:
+                    selected_label = choice['label']
+                    break
+
+        if not selected_label:
+            raise ValueError("未找到匹配的账户类型或未提供账户类型。")
+        
+        if self.mfa_context is not None and self.mfa_context.required:
+            trust_agent = "true" if trust_agent else "false"
         else:
-            login_response.raise_for_status()
-            # 更加神人的是，系统在验证码错误等问题时只会返回 200，你得从返回的 html 里解析错误提示组件才知道错误是啥
-            # 这系统前后端分离了，但好像也没分离
-            message = extract_alert_message(login_response.text)
-            if message:
-                # 如果有错误提示，说明登录失败
-                self.fail_count += 1
-                raise ServerError(400, f"登录失败: {message['title']}")
-            else:
-                # 登录成功，重置失败次数
-                self.fail_count = 0
-                self.has_login = True
-                # 检查是否出现了多账号选择页面
-                account_choices = extract_account_choices(login_response.text)
-                if account_choices:
-                    # 如果检测到账户选择页面，根据 account_type 参数选择对应的账户
-                    selected_label = None
-                    if account_type == self.UNDERGRADUATE:
-                        # 查找本科生账户
-                        for choice in account_choices:
-                            if "本科" in choice['name']:
-                                selected_label = choice['label']
-                                break
-                    else:  # POSTGRADUATE
-                        # 查找研究生账户
-                        for choice in account_choices:
-                            if "研究" in choice['name']:
-                                selected_label = choice['label']
-                                break
+            trust_agent = ""
 
-                    if selected_label:
-                        # 提交账户选择
-                        choice_response = self._post("https://login.xjtu.edu.cn/cas/login",
-                                                     data={"execution": extract_execution_value(login_response.text),
-                                                           "_eventId": "submit",
-                                                           "geolocation": "",
-                                                           "fpVisitorId": self.fp_visitor_id,
-                                                           "trustAgent": "",
-                                                           "username": selected_label,
-                                                           "useDefault": "false"},
-                                                     allow_redirects=True)
-                        choice_response.raise_for_status()
-                    else:
-                        raise ValueError("未知的账户类型")
+        choice_response = self._post("https://login.xjtu.edu.cn/cas/login",
+                                     data={"execution": extract_execution_value(self._choose_account_response.text),
+                                           "_eventId": "submit",
+                                           "geolocation": "",
+                                           "fpVisitorId": self.fp_visitor_id,
+                                           "trustAgent": trust_agent,
+                                           "username": selected_label,
+                                           "useDefault": "false"},
+                                     allow_redirects=True)
+        choice_response.raise_for_status()
 
-                    login_response = choice_response
-
-                # 调用登录后处理函数
-                self.postLogin(login_response)
-
-        return self.session
+        self._choose_account_response = None
+        self.has_login = True
+        self.postLogin(choice_response)
+        return LoginState.SUCCESS, self.session
 
     def postLogin(self, login_response) -> None:
         """
@@ -319,122 +422,6 @@ class NewLogin:
         :param login_response: 登录请求的响应对象
         :return: None。此函数的返回值不会有任何作用。
         """
-
-    def checkForBothAccounts(self, username: str, password: str, jcaptcha: str = "") -> bool:
-        """
-        通过登录并检查是否存在选择账户页面，获取当前账号下是否存在多个身份（即是本科生又是研究生）。
-        请注意，此方法和 login 方法完全互斥，只能选择一个调用。在调用此方法后，必须通过 finish_login 方法完成登录。
-        这是因为登录系统不允许登录成功后再次尝试登录；第二次尝试会返回 404 错误。
-        具体两种可用的调用方法请见本类的文档。
-        :param username: 用户名，可以传入学号、手机号或邮箱
-        :param password: 密码。传入明文密码即可，函数在请求前会自动加密密码。
-        :param jcaptcha: 验证码。如果 isShowJCaptchaCode 返回 False，则不用传入此参数。否则，需要传入验证码字符串。
-        :return: True: 当前账户包含本科生/研究生两个身份；False：当前账户只有一个身份。
-        :raises ServerError: 如果登录失败，抛出此异常。
-        :raise RuntimeError: 如果已经登录过一次，则抛出此异常。请重新创建 NewLogin 对象以登录其他账号。
-        (抛出 RuntimeError 说明你的程序在逻辑上存在问题：请不要同时使用两种登录方式，或在登录成功后再次调用登录方法）
-        """
-        if self.has_login:
-            raise RuntimeError("已经登录，不能重复登录。请重新创建 NewLogin 对象以登录其他账号。")
-
-        encrypt_password = self.encrypt_password(password)
-        if self.mfa_enabled:
-            # POST 一个 mfa 验证接口
-            response = self._post("https://login.xjtu.edu.cn/cas/mfa/detect",
-                                  data={"username": username,
-                                        "password": encrypt_password,
-                                        "fpVisitorId": self.fp_visitor_id},
-                                  headers={"Referer": self.post_url})
-            try:
-                data = response.json()
-            except json.decoder.JSONDecodeError:
-                raise ServerError(500, "服务器在 mfa 验证时返回了无法解析的信息")
-
-            state = data["data"]["state"]
-            need = data["data"]["need"]
-            if need:
-                raise ServerError(403, f"需要进行多因素认证，但目前程序不支持 MFA 登录，因此无法继续登录")
-        else:
-            state = ""
-
-        login_response = self._post(self.post_url,
-                                    data={"username": username,
-                                          "password": encrypt_password,
-                                          "execution": self.execution_input,
-                                          "_eventId": "submit",
-                                          "submit1": "Login1",
-                                          "fpVisitorId": self.fp_visitor_id,
-                                          "captcha": jcaptcha,
-                                          "currentMenu": "1",
-                                          "failN": str(self.fail_count),
-                                          "mfaState": state,
-                                          "geolocation": "",
-                                          "trustAgent": ""}, allow_redirects=True)
-        if login_response.status_code == 401:
-            self.fail_count += 1
-            raise ServerError(401, "登录失败，用户名或密码错误。")
-        else:
-            login_response.raise_for_status()
-            message = extract_alert_message(login_response.text)
-            if message:
-                # 如果有错误提示，说明登录失败
-                self.fail_count += 1
-                raise ServerError(400, f"登录失败: {message['title']}")
-            else:
-                self.fail_count = 0
-                self.has_login = True
-                account_choices = extract_account_choices(login_response.text)
-                if account_choices:
-                    self._choose_account_response = login_response
-                    return True
-                else:
-                    # 没有账户选择页面，直接登录成功
-                    self.postLogin(login_response)
-                    return False
-
-    def finishLogin(self, account_type: AccountType = POSTGRADUATE):
-        """
-        此方法和 checkForBothAccounts 方法配合使用。
-        当 checkForBothAccounts 方法返回 True 时（账户存在两个身份），才需要调用此方法。如果账户只有一个身份，则不需要调用此方法。
-        在无需调用时调用此方法不会有任何效果，也不会产生错误。
-        """
-        # 没有 checkForBothAccounts 的响应结果，说明不需要选择账户，直接返回
-        if self._choose_account_response is None:
-            return self.session
-
-        account_choices = extract_account_choices(self._choose_account_response.text)
-        # 如果检测到账户选择页面，根据 account_type 参数选择对应的账户
-        selected_label = None
-        if account_type == self.UNDERGRADUATE:
-            # 查找本科生账户
-            for choice in account_choices:
-                if "本科" in choice['name']:
-                    selected_label = choice['label']
-                    break
-        else:  # POSTGRADUATE
-            # 查找研究生账户
-            for choice in account_choices:
-                if "研究" in choice['name']:
-                    selected_label = choice['label']
-                    break
-
-        if selected_label:
-            # 提交账户选择
-            choice_response = self._post("https://login.xjtu.edu.cn/cas/login",
-                                         data={"execution": extract_execution_value(self._choose_account_response.text),
-                                               "_eventId": "submit",
-                                               "geolocation": "",
-                                               "fpVisitorId": self.fp_visitor_id,
-                                               "trustAgent": "",
-                                               "username": selected_label,
-                                               "useDefault": "false"},
-                                         allow_redirects=True)
-            choice_response.raise_for_status()
-        else:
-            raise ValueError("未知的账户类型")
-
-        self.postLogin(choice_response)
-        return self.session
 
     def encrypt_password(self, password: str, public_key=None) -> str:
         """
@@ -485,6 +472,39 @@ class NewLogin:
         """
         return self.session.post(url, **kwargs)
 
+    def login_or_raise(self, username: Optional[str] = None, password: Optional[str] = None, jcaptcha: str = "",
+                       account_type: AccountType = POSTGRADUATE):
+        """
+        以单次调用的方式执行登录，如果需要额外信息则抛出异常。
+        此方法是对 login 方法的封装，用于不希望处理状态机交互的场景。
+
+        :param username: 用户名
+        :param password: 密码
+        :param jcaptcha: 验证码
+        :param account_type: 账户类型
+        :return: 登录成功后的 Session 对象。
+        :raises ServerError: 登录失败或需要额外信息时抛出。此时的 ServerError 具有自定义的 error code：
+        100: 登录失败，附带错误信息
+        101: 需要验证码
+        102: 需要 MFA 验证
+        103: 需要选择账户
+        500: 其他未知错误
+        """
+        state, info = self.login(username, password, jcaptcha, account_type)
+
+        if state == LoginState.SUCCESS:
+            return info
+        elif state == LoginState.FAIL:
+            raise ServerError(100, f"登录失败: {info}")
+        elif state == LoginState.REQUIRE_CAPTCHA:
+            raise ServerError(101, "登录需要验证码。")
+        elif state == LoginState.REQUIRE_MFA:
+            raise ServerError(102, "登录需要 MFA 验证。")
+        elif state == LoginState.REQUIRE_ACCOUNT_CHOICE:
+            raise ServerError(103, "登录需要选择账户。")
+        else:
+            raise ServerError(500, "未知的登录状态。")
+
 
 class NewWebVPNLogin(NewLogin):
     """
@@ -517,3 +537,44 @@ class NewWebVPNLogin(NewLogin):
         else:
             encrypted = url
         return self.session.post(encrypted, **kwargs)
+
+
+def console_login():
+    """
+    此函数是登录系统使用的示例函数，通过 input 从标准输入接收所有可能需要的用户响应（比如验证码、手机验证码、账户选择）。
+    """
+    login_instance = NewLogin(EHALL_LOGIN_URL)
+    state, info = login_instance.login("your_username", "your_password")
+
+    session = None
+
+    # login 对象是一个状态机。只需要一直调用 login 方法，根据其返回的类型/值处理不同情况即可。
+    while True:
+        if state == LoginState.SUCCESS:
+            print("登录成功！")
+            session = info
+            break
+        elif state == LoginState.FAIL:
+            print(f"登录失败: {info}")
+            break
+        elif state == LoginState.REQUIRE_CAPTCHA:
+            # (弹出验证码窗口，让用户输入)
+            captcha = input("请输入验证码: ")
+            # 再次调用 login，传入验证码
+            state, info = login_instance.login(jcaptcha=captcha)
+        elif state == LoginState.REQUIRE_MFA:
+            mfa_context: NewLogin.MFAContext = info
+            phone = mfa_context.send_verify_code()
+            # (提示用户)
+            code = input(f"验证码已发送至 {phone}，请输入: ")
+            mfa_context.verify_phone_code(code)
+            # 继续登录流程
+            state, info = login_instance.login()
+        elif state == LoginState.REQUIRE_ACCOUNT_CHOICE:
+            choices = info
+            # (让用户从 choices 中选择一个)
+            print("检测到本科生/研究生身份，请选择一个登录：")
+            selected_index = int(input("请输入选项编号: 0:本科生；1:研究生"))
+            
+            # 再次调用 login，传入选择的身份 label
+            state, info = login_instance.login(account_type=login_instance.UNDERGRADUATE if selected_index == 0 else login_instance.POSTGRADUATE)
