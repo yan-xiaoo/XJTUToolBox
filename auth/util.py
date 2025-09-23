@@ -17,15 +17,21 @@ def get_timestamp() -> int:
 _ua = UserAgent(platforms=['desktop'])
 
 
-def get_session() -> requests.Session:
+def get_session(fit_system=False) -> requests.Session:
     """
     获得一个修改了 UA 的 requests.Session 对象
 
     "使用 requests 自带的 UA 发起请求可能导致连接拒绝、连接中断、HTTP 502、抑郁、头疼、甚至死亡"
+    :param fit_system: 是否根据当前操作系统生成一个该系统上浏览器的 UA。如果是，只会生成当前操作系统上浏览器的 UA；如果否，则会从所有桌面浏览器中随机选择一个。
+    这样做的好处是可以让同一设备上生成的 UA 较为固定
     :return: requests.Session
     """
     session = requests.Session()
-    session.headers.update({"User-Agent": _ua.random})
+    if fit_system:
+        ua_data = generate_user_agent()
+    else:
+        ua_data = _ua.random
+    session.headers.update({"User-Agent": ua_data})
     return session
 
 

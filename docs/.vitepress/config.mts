@@ -112,7 +112,7 @@ export default withMermaid(defineConfig({
   },
   title: "XJTUToolBox 文档",
   description: "使用说明与开发教程",
-  base: '/XJTUToolBox/',
+  base: '/',
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     sidebarMenuLabel:'目录',
