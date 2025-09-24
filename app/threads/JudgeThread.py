@@ -1,3 +1,5 @@
+from typing import Optional
+
 import requests
 from PyQt5.QtCore import pyqtSignal
 
@@ -33,6 +35,7 @@ class JudgeThread(ProcessThread):
         self.judge_ = None
         self.questionnaire = None
         self.template = None
+        self.score: int = 100
 
     @property
     def session(self) -> EhallSession:
@@ -79,7 +82,7 @@ class JudgeThread(ProcessThread):
         if not self.can_run:
             return False
         for one_data in data:
-            self.template.complete(one_data, options, True)
+            self.template.complete(one_data, options, True, default_score=self.score)
         if not self.can_run:
             return False
         self.progressChanged.emit(80)
@@ -108,7 +111,7 @@ class JudgeThread(ProcessThread):
         if not self.can_run:
             return False
         for one_data in data:
-            self.template.complete(one_data, options, True)
+            self.template.complete(one_data, options, True, default_score=self.score)
         if not self.can_run:
             return False
         self.progressChanged.emit(80)

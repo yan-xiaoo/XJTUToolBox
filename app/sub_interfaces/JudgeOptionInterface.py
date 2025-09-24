@@ -245,6 +245,7 @@ class JudgeOptionInterface(ScrollArea):
             if one_data.TXDM != '01':
                 one_data.ZGDA = self.textArea.toPlainText() if self.textArea.toPlainText() else self.tr("无")
         self.thread_.template = template
+        self.thread_.score = template.score_to_int(self.scoreBox.currentData())
 
         if self.finished_:
             self.thread_.choice = JudgeChoice.EDIT

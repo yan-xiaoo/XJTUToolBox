@@ -69,6 +69,27 @@ class QuestionnaireData:
         :return:
         """
 
+    def getMaxScore(self) -> int:
+        if self.TXDM != "03":
+            raise ValueError("此题目不是分值题")
+        if self.FZ is None:
+            raise ValueError("此题目的分值信息不可用")
+        return int(self.FZ)
+
+    def setScore(self, score: int):
+        """
+        如果本题目类型为分值题，可以直接设置分值作为答案。
+        :param score: 分值数值，可以通过 self.getMaxScore() 获得。注意该函数和 getOptionMaxScore() 不同，该函数用于填写分值题，另一函数用于填写选择题。
+        """
+        if self.TXDM != "03":
+            raise ValueError("此题目不是分值题")
+        if self.FZ is None:
+            raise ValueError("此题目的分值信息不可用")
+        max_score = int(self.FZ)
+        if score < 0 or score > max_score:
+            raise ValueError(f"分值必须在 0 到 {max_score} 之间")
+        self.DA = str(score)
+
     def setOption(self, option, score="1"):
         """如果本题目类型为客观题，可以通过答案对象和选择选项的分值来设置答案
         :param option: 答案对象的字典，可以利用 AutoJudge.questionnaireOptions 获得
@@ -304,7 +325,8 @@ class AutoJudge:
         data = result["datas"]["cxwjzb"]["rows"]
         questionnaire_data = [
             QuestionnaireData(one["WJDM"], username, questionnaire.BPR, questionnaire.PGNR, one["ZBDM"],
-                              questionnaire.PCDM, one["TXDM"], questionnaire.JXBID, "", one["ZBMC"], one["DADM"]) for
+                              questionnaire.PCDM, one["TXDM"], questionnaire.JXBID, "", one["ZBMC"], DADM=one["DADM"], SFBT=one["SFBT"],
+                              FZ=one["FZ"]) for
             one in data]
         """
         response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/wj/cxxspjjg.do",

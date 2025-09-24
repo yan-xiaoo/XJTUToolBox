@@ -72,6 +72,9 @@ class QuestionnaireTemplate:
     def append(self, data: QuestionnaireTemplateData):
         self.data.append(data)
 
+    def score_to_int(self, score: Score) -> int:
+        return {self.Score.HUNDRED: 100, self.Score.EIGHTY: 80, self.Score.SIXTY: 60, self.Score.FORTY: 40}[score]
+
     def json(self):
         return {
             "name": self.name,
@@ -82,13 +85,13 @@ class QuestionnaireTemplate:
     def from_json(cls, data):
         return cls(data["name"], [QuestionnaireTemplateData.from_json(one) for one in data["data"]])
 
-    def complete(self, data: QuestionnaireData, options: List[QuestionnaireOptionData], always_complete=False, default_value="1", default_subjective="无"):
+    def complete(self, data: QuestionnaireData, options: List[QuestionnaireOptionData], always_complete=False, default_score=100, default_subjective="无"):
         """
         利用模版中存储的信息，匹配一道问卷题目并完成此题目。
         :param data: 问卷题目对象，此方法会直接修改此数据的答案部分
         :param options: 问卷题目的选项对象
         :param always_complete: 在输入的问卷题目没有匹配到模版数据的情况下，是否仍要填写答案
-        :param default_value: 在没有匹配到模版时，单选题题目填写的默认答案
+        :param default_score: 在没有匹配到模版时，默认使用的分数。需要填写 0-100 内的数字。选择题与分值题会根据每个题目的选项数量/分值大小折算一个最接近的选项并选择。
         :param default_subjective: 在没有匹配到模版时，填空题题目填写的默认答案
         :return:
         """
@@ -97,8 +100,9 @@ class QuestionnaireTemplate:
             if one.ZBDM == data.ZBDM:
                 if data.TXDM == "01":
                     data.setOption(options, one.DAPX)
-                else:
+                elif data.TXDM == "02":
                     data.setSubjectiveOption(one.ZGDA)
+                # 分值题在匹配不到的时候处理，用默认分数填写。
                 break
         # 匹配不到编号的情况下，匹配名称
         else:
@@ -106,14 +110,18 @@ class QuestionnaireTemplate:
                 if one.name in data.ZBMC:
                     if data.TXDM == "01":
                         data.setOption(options, one.DAPX)
-                    else:
+                    elif data.TXDM == "02":
                         data.setSubjectiveOption(one.ZGDA)
                     break
             # 什么都匹配不到的情况下，根据设置决定是否强行填写
             else:
                 if always_complete:
                     if data.TXDM == "01":
-                        data.setOption(options, default_value)
+                        # 将 100-0 折算为一个 1-5 的分数
+                        data.setOption(options, str(min(6 - default_score / 20, 5)))
+                    elif data.TXDM == "03":
+                        max_option = data.getMaxScore()
+                        data.setScore(int(default_score / 100 * max_option))
                     else:
                         data.setSubjectiveOption(default_subjective)
 
