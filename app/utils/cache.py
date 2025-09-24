@@ -157,5 +157,5 @@ class AccountDataManager(DataManager):
 def remove_all_cache():
     try:
         shutil.rmtree(DEFAULT_DATA_DIRECTORY)
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         pass

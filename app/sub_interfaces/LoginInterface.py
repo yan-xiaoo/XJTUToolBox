@@ -250,6 +250,8 @@ class LoginInterface(ScrollArea):
             self.__thread.trustAgent = w.trust
             self.__thread.start()
         else:
+            # 需要重置一下 login 对象
+            self.resetLogin()
             self._unlock(False)
 
     @pyqtSlot()
