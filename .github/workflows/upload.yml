@@ -1,0 +1,66 @@
+name: Upload release to Cloudflare R2
+
+on:
+  # Run when a release is published as stable directly, when a prerelease is published (will be gated out),
+  # and when a release is edited (e.g., toggled from prerelease -> release).
+  release:
+    types: [released, published, edited]
+
+# Minimal token needed to read release assets
+permissions:
+  contents: read
+
+# Avoid duplicate uploads if multiple edits happen close together
+concurrency:
+  group: upload-r2-${{ github.event.release.id }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    # Only run for stable, non-draft releases. If the event is "edited", ensure the change touched the
+    # 'prerelease' field so normal description edits don't retrigger uploads.
+    if: >-
+      ${{
+        github.event.release.draft == false &&
+        github.event.release.prerelease == false &&
+        (github.event.action != 'edited' || contains(toJson(github.event.changes), '"prerelease"'))
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        uses: softprops/action-download-release@v2
+        with:
+          tag: ${{ github.event.release.tag_name }}
+          download_dir: release-assets
+
+      - name: Install awscli (for S3-compatible upload)
+        run: |
+          python -m pip install --upgrade pip
+          pip install awscli
+
+      - name: Upload assets to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          TAG='${{ github.event.release.tag_name }}'
+          DEST="s3://${R2_BUCKET}/releases/${TAG}/"
+
+          if [ ! -d release-assets ]; then
+            echo "No release-assets directory found; nothing to upload." >&2
+            exit 1
+          fi
+
+          echo "Uploading assets in ./release-assets to ${DEST}"
+          aws s3 sync "release-assets/" "$DEST" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --acl private \
+            --no-progress
+
