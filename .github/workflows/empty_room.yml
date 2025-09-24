@@ -1,0 +1,38 @@
+name: Upload Empty Room JSON to R2
+
+on:
+  schedule:
+    # 每天 16:00 UTC 等于北京时间次日 00:00 (UTC+8)
+    - cron: '0 16 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run-uploader:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      USERNAME: ${{ secrets.XJTU_USERNAME }}
+      PASSWORD: ${{ secrets.XJTU_PASSWORD }}
+      FP_VISITOR_ID: ${{ secrets.FP_VISITOR_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install boto3
+
+      - name: Run uploader
+        run: |
+          python upload_empty_room.py
