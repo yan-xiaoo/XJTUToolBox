@@ -5,6 +5,18 @@ on:
   # and when a release is edited (e.g., toggled from prerelease -> release).
   release:
     types: [released, published, edited]
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to upload (e.g., v1.2.3)'
+        required: true
+        type: string
+      allow_prerelease:
+        description: 'Allow uploading a prerelease (only applies to manual runs)'
+        required: false
+        default: false
+        type: boolean
 
 # Minimal token needed to read release assets
 permissions:
@@ -12,7 +24,7 @@ permissions:
 
 # Avoid duplicate uploads if multiple edits happen close together
 concurrency:
-  group: upload-r2-${{ github.event.release.id }}
+  group: upload-r2-${{ github.event_name == 'release' && github.event.release.id || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -20,20 +32,24 @@ jobs:
     # Only run for stable, non-draft releases. If the event is "edited", ensure the change touched the
     # 'prerelease' field so normal description edits don't retrigger uploads.
     if: >-
-      ${{
-        github.event.release.draft == false &&
-        github.event.release.prerelease == false &&
-        (github.event.action != 'edited' || contains(toJson(github.event.changes), '"prerelease"'))
+      ${{ github.event_name == 'workflow_dispatch' || (
+          github.event.release.draft == false &&
+          github.event.release.prerelease == false &&
+          (github.event.action != 'edited' || contains(toJson(github.event.changes), '"prerelease"'))
+        )
       }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Download release assets
-        uses: softprops/action-download-release@v2
+        uses: robinraju/release-downloader@v1
         with:
-          tag: ${{ github.event.release.tag_name }}
-          download_dir: release-assets
+          tag: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+          fileName: "*"
+          out-file-path: release-assets
+          tarBall: false
+          zipBall: false
 
       - name: Install awscli (for S3-compatible upload)
         run: |
@@ -50,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          TAG='${{ github.event.release.tag_name }}'
+          TAG="${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}"
           DEST="s3://${R2_BUCKET}/releases/${TAG}/"
 
           if [ ! -d release-assets ]; then
