@@ -86,3 +86,5 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 - [xidian-script（Ehall 开发实例）](https://github.com/xdlinux/xidian-scripts)
 - [chine-holiday-calendar（节假日日历接口）](https://github.com/lanceliao/china-holiday-calender)
 - [holiday-cn（另一个节假日接口）](https://github.com/NateScarlet/holiday-cn)
+
+此外，感谢 Cloudflare 和 GitHub 提供的各项免费服务，让我们无需支付昂贵的 CDN 费用即可缓存安装包、更新信息等必要数据。

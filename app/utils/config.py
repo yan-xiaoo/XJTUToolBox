@@ -151,6 +151,8 @@ class Config(QConfig):
 
     hasReadLoginTip = OptionsConfigItem("one_time_notice", "read_login_tip", False,
                                         OptionsValidator([True, False]), BooleanSerializer())
+    hasReadCloudflareTip = OptionsConfigItem("one_time_notice", "read_cloudflare_tip", False,
+                                             OptionsValidator([True, False]), BooleanSerializer())
     defaultAttendanceLoginMethod = OptionsConfigItem("Settings", "default_attendance_login_method",
                                                      AttendanceLoginMethod.NONE,
                                                      OptionsValidator(

@@ -1,13 +1,16 @@
+import datetime
 import json
+from math import acosh
 
 from PyQt5.QtCore import pyqtSlot, QDate, Qt, QStandardPaths, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QTableWidgetItem, \
     QFileDialog
 from PyQt5.QtGui import QFont, QPixmap
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, ComboBox, CalendarPicker, PrimaryPushButton, \
-    TableWidget, InfoBar, InfoBarPosition, PushButton, FluentStyleSheet, Theme, isDarkTheme
+    TableWidget, InfoBar, InfoBarPosition, PushButton, FluentStyleSheet, Theme, isDarkTheme, MessageBox
 
 from ..components.MultiSelectionComboBox import MultiSelectionComboBox
+from ..threads.CFEmptyRoomThread import CFEmptyRoomThread
 from ..threads.EmptyRoomThread import EmptyRoomThread
 from ..threads.ProcessWidget import ProcessWidget
 from ..utils import StyleSheet, DataManager, cfg, accounts
@@ -132,15 +135,19 @@ class EmptyRoomInterface(ScrollArea):
         self.titleLabel.setObjectName("titleLabel")
         self.vBoxLayout.addWidget(self.titleLabel)
 
-        self.minorLabel = StrongBodyLabel(self.tr("查询当前空闲的教室"), self.view)
-        self.minorLabel.setContentsMargins(15, 5, 0, 0)
-        self.vBoxLayout.addWidget(self.minorLabel)
-        self.vBoxLayout.addSpacing(10)
+        # self.minorLabel = StrongBodyLabel(self.tr("查询当前空闲的教室"), self.view)
+        # self.minorLabel.setContentsMargins(15, 5, 0, 0)
+        # self.vBoxLayout.addWidget(self.minorLabel)
+        # self.vBoxLayout.addSpacing(10)
 
         self.viewFrame = QFrame(self.view)
         self.viewLayout = QVBoxLayout(self.viewFrame)
         self.viewLayout.setSpacing(20)
         self.vBoxLayout.addWidget(self.viewFrame, stretch=1)
+
+        self.methodComboBox = ComboBox(parent=self.view)
+        self.methodComboBox.addItems([self.tr("直接查询"), self.tr("Cloudflare CDN 查询")])
+        self.viewLayout.addWidget(self.methodComboBox)
 
         self.commandFrame = QFrame(self.view)
         self.commandLayout = QHBoxLayout(self.commandFrame)
@@ -155,9 +162,19 @@ class EmptyRoomInterface(ScrollArea):
         self.calendar = CalendarPicker()
         self.calendar.setDate(QDate.currentDate())
 
+        self.cfCalendarComboBox = ComboBox(parent=self.view)
+        # CF 查询只支持两天
+        self.cfCalendarComboBox.addItems([self.tr("今天"), self.tr("明天")])
+        self.cfCalendarComboBox.setCurrentIndex(0)
+        self.cfCalendarComboBox.setVisible(False)
+
         self.searchButton = PrimaryPushButton(self.tr("查询"), self.view)
         self.searchButton.setMinimumWidth(150)
         self.searchButton.clicked.connect(self._onSearchButtonClicked)
+
+        self.cfSearchButton = PrimaryPushButton(self.tr("查询"), self.view)
+        self.cfSearchButton.setMinimumWidth(150)
+        self.cfSearchButton.setVisible(False)
 
         self.exportButton = PushButton(self.tr("导出图片..."), self.view)
         self.exportButton.clicked.connect(self._onExportButtonClicked)
@@ -178,7 +195,9 @@ class EmptyRoomInterface(ScrollArea):
         self.commandLayout.addWidget(self.campusBox, stretch=1)
         self.commandLayout.addWidget(self.buildingBox, stretch=2)
         self.commandLayout.addWidget(self.calendar, stretch=1)
+        self.commandLayout.addWidget(self.cfCalendarComboBox, stretch=1)
         self.commandLayout.addWidget(self.searchButton, stretch=1)
+        self.commandLayout.addWidget(self.cfSearchButton, stretch=1)
         self.commandLayout.addWidget(self.exportButton, stretch=1)
 
         self.thread_ = EmptyRoomThread()
@@ -186,8 +205,18 @@ class EmptyRoomInterface(ScrollArea):
         self.thread_.result.connect(self._onReceiveResultAndSave)
         self.thread_.error.connect(self.onThreadError)
         self.thread_.success.connect(self.onThreadSuccess)
+
+        self.cfThread = CFEmptyRoomThread()
+        self.cfThread.finished.connect(self.unlock)
+        self.cfThread.result.connect(self._onReceiveResultAndSave)
+        self.cfThread.error.connect(self.onThreadError)
+        self.cfThread.success.connect(self.onThreadSuccess)
+
         self.processWidget = ProcessWidget(self.thread_, parent=self.view, stoppable=True)
         self.processWidget.setVisible(False)
+
+        self.cfProcessWidget = ProcessWidget(self.cfThread, parent=self.view, stoppable=True)
+        self.cfProcessWidget.setVisible(False)
 
         # 延迟加载教室数据的相关变量
         self._pendingRoomData = {}  # 待处理的教室数据
@@ -198,6 +227,7 @@ class EmptyRoomInterface(ScrollArea):
 
         self.viewLayout.addWidget(self.commandFrame)
         self.viewLayout.addWidget(self.processWidget)
+        self.viewLayout.addWidget(self.cfProcessWidget)
         self.viewLayout.addWidget(self.emptyRoomTable, stretch=1)
 
         # 先更新一次教学楼下拉框的内容
@@ -207,8 +237,13 @@ class EmptyRoomInterface(ScrollArea):
         self.loadQueryResult()
         self.campusBox.currentIndexChanged.connect(self._updateBuildingBox)
         self.buildingBox.selectChanged.connect(self.saveQuerySetting)
+        self.methodComboBox.currentIndexChanged.connect(self._onMethodComboBoxChanged)
+        self.cfSearchButton.clicked.connect(self._onCFSearchButtonClicked)
 
         cfg.themeChanged.connect(self._onThemeChanged)
+        accounts.currentAccountChanged.connect(self._onCurrentAccountChanged)
+
+        self._onCurrentAccountChanged()
 
         StyleSheet.EMPTY_ROOM_INTERFACE.apply(self)
         self.setWidget(self.view)
@@ -233,9 +268,39 @@ class EmptyRoomInterface(ScrollArea):
             self.saveQuerySetting()
 
     @pyqtSlot()
+    def _onCurrentAccountChanged(self):
+        if accounts.current is not None:
+            if accounts.current.type == accounts.current.POSTGRADUATE:
+                self.methodComboBox.setCurrentIndex(1)
+                self.methodComboBox.setEnabled(False)
+                self.selectQueryType(use_cloudflare=True)
+            else:
+                self.methodComboBox.setEnabled(True)
+                self.selectQueryType(use_cloudflare=self.methodComboBox.currentIndex() == 1)
+
+    @pyqtSlot()
+    def _onMethodComboBoxChanged(self):
+        self.selectQueryType(use_cloudflare=self.methodComboBox.currentIndex() == 1)
+
+    def selectQueryType(self, use_cloudflare=False):
+        """
+        设置当前使用直接查询还是 Cloudflare CDN 查询方式。设置后，部分页面控件将会变更。
+        """
+        if use_cloudflare:
+            self.cfCalendarComboBox.setVisible(True)
+            self.cfSearchButton.setVisible(True)
+            self.calendar.setVisible(False)
+            self.searchButton.setVisible(False)
+        else:
+            self.cfCalendarComboBox.setVisible(False)
+            self.cfSearchButton.setVisible(False)
+            self.calendar.setVisible(True)
+            self.searchButton.setVisible(True)
+
+    @pyqtSlot()
     def _onSearchButtonClicked(self):
         if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
-            self.error("", self.tr("抱歉，由于学校没有接口，研究生账号无法查询空闲教室。"), duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self)
+            self.error("", self.tr("研究生账号请使用 Cloudflare CDN 方式查询"), duration=3000, position=InfoBarPosition.TOP_RIGHT, parent=self)
             return
 
         if not self.campusBox.currentText() or not self.buildingBox.selectedItems():
@@ -248,6 +313,42 @@ class EmptyRoomInterface(ScrollArea):
         self.thread_.date = self.calendar.getDate().toPyDate().isoformat()
         self.processWidget.setVisible(True)
         self.thread_.start()
+
+    @pyqtSlot()
+    def _onCFSearchButtonClicked(self):
+        if not cfg.hasReadCloudflareTip.value:
+            if not self.showCFTip():
+                return
+
+        if not self.campusBox.currentText() or not self.buildingBox.selectedItems():
+            self.error("", self.tr("请选择校区和教学楼。"), duration=3000, position=InfoBarPosition.TOP_RIGHT,
+                       parent=self)
+            return
+
+        self.lock()
+        self.cfThread.campus_name = self.campusBox.currentText()
+        self.cfThread.building_names = [one.text for one in self.buildingBox.selectedItems()]
+        index = self.cfCalendarComboBox.currentIndex()
+        if index == 1:
+            self.cfThread.date = datetime.date.today() + datetime.timedelta(days=1)
+        else:
+            self.cfThread.date = datetime.date.today()
+        self.cfProcessWidget.setVisible(True)
+        self.cfThread.start()
+
+    def showCFTip(self) -> bool:
+        """显示第一次使用 Cloudflare CDN 时的说明"""
+        w = MessageBox(self.tr("Cloudflare CDN 使用说明"), self.tr("程序将从 Cloudflare CDN 获取空闲教室信息，这种方式不需要登录校园网，但数据可能不是最新的。\n"
+                                                               "获取数据时，程序不会发送任何与账户相关的隐私信息。\n"
+                                                               "此功能并不保证稳定，如果出现错误，请改用直接查询方式。"),
+                       self)
+        w.yesButton.setText(self.tr("继续"))
+        w.cancelButton.setText(self.tr("取消"))
+        if w.exec():
+            cfg.hasReadCloudflareTip.value = True
+            return True
+        else:
+            return False
 
     @pyqtSlot()
     def _onExportButtonClicked(self):
