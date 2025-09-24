@@ -209,6 +209,9 @@ class AutoJudgeInterface(ScrollArea):
     @pyqtSlot()
     def onStartButtonClicked(self):
         self.clearWidgets()
+        if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
+            self.onThreadError("", self.tr("抱歉，研究生账号暂时不支持自动评教"))
+            return
         self.thread_.choice = JudgeChoice.GET_COURSES
         self.thread_.start()
 

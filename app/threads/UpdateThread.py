@@ -44,7 +44,7 @@ class UpdateThread(QThread):
         super().__init__()
         self.title = None
         self.content = None
-        self.asset_url = None
+        self.asset_urls = []
         # 失败原因
         self.fail_reason = None
         self.total_size = 0
@@ -59,6 +59,17 @@ class UpdateThread(QThread):
         )
         response.raise_for_status()
         return response.json()[0] if cfg.prereleaseEnable.value else response.json()
+
+    @staticmethod
+    def generate_cloudflare_service_url(version, original_download_url):
+        """
+        根据待下载的版本和系统信息，生成 cloudflare CDN 的请求 URL。
+        CDN 部署在 Cloudflare workers 上，且其请求格式为:
+        https://gh-release.xjtutoolbox.com/?file=releases/{version}/{original_filename}
+        :param version: 版本信息，需要包含 v 开头，比如 v1.1.4
+        :param original_download_url: GitHub Release 上的原始下载 URL，我们需要从中提取文件名。
+        """
+        return f"https://gh-release.xjtutoolbox.com/?file=releases/{version}/{original_download_url.split('/')[-1]}"
 
     @staticmethod
     def get_download_url_from_assets(assets):
@@ -90,12 +101,17 @@ class UpdateThread(QThread):
             content = data["body"]
             asset_url, self.total_size = self.get_download_url_from_assets(data["assets"])
 
+            if asset_url is None:
+                cloudflare_asset_url = None
+            else:
+                cloudflare_asset_url = self.generate_cloudflare_service_url(version, asset_url)
+
             if parse(version) > cfg.version:
                 self.title = f"发现新版本：{cfg.version} ——> {parse(version)}\n更新日志: "
                 self.content = "<style>a {color: #f18cb9; font-weight: bold;}</style>" + markdown.markdown(content)
-                self.asset_url = asset_url
+                self.asset_urls = [asset_url, cloudflare_asset_url]
                 # 自动更新仅对打包后的版本有效
-                if self.asset_url is not None and getattr(sys, 'frozen', False):
+                if asset_url is not None and cloudflare_asset_url is not None and getattr(sys, 'frozen', False):
                     self.updateSignal.emit(UpdateStatus.UPDATE_EXE_AVAILABLE)
                 else:
                     self.updateSignal.emit(UpdateStatus.UPDATE_AVAILABLE)
@@ -180,7 +196,7 @@ def checkUpdate(self, timeout=5):
             if message_box.exec():
                 # 下载更新
                 self.bar_widget = ProgressInfoBar(title="", content="正在下载更新...", parent=self, position=InfoBarPosition.BOTTOM_RIGHT)
-                self.download_thread = DownloadUpdateThread(self.update_thread.asset_url, total_size=self.update_thread.total_size)
+                self.download_thread = DownloadUpdateThread(self.update_thread.asset_urls, total_size=self.update_thread.total_size)
                 self.bar_widget.connectToThread(self.download_thread)
                 self.download_thread.error.connect(handle_thread_error)
                 self.download_thread.start()

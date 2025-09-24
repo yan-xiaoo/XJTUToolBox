@@ -9,9 +9,10 @@ from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxS
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
     InfoBadge, ExpandGroupSettingCard, SwitchButton, IndicatorPosition, BodyLabel, TimePicker, PushButton
 from qfluentwidgets import FluentIcon as FIF
-from PyQt5.QtWidgets import QWidget, QHBoxLayout
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QApplication
 from PyQt5.QtGui import QColor, QDesktopServices
 
+from .cards.copyable_switch_card import CopyablePushSettingCard
 from .cards.custom_switch_card import CustomSwitchSettingCard
 from .components.CustomMessageBox import ConfirmBox
 from .sub_interfaces.ResetVisitorIdDialog import ResetVisitorIdDialog
@@ -256,7 +257,7 @@ class SettingInterface(ScrollArea):
             self.tr("打开应用的日志目录"),
             self.aboutGroup
         )
-        self.visitorIdCard = PushSettingCard(
+        self.visitorIdCard = CopyablePushSettingCard(
             self.tr("重置 ID"),
             FIF.CONNECT,
             self.tr("客户端登录 ID"),
@@ -304,6 +305,7 @@ class SettingInterface(ScrollArea):
         self.autoStartCard.checkedChanged.connect(self._onAutoStartClicked)
         self.showAvatarCard.checkedChanged.connect(self._showAvatarClicked)
         self.visitorIdCard.clicked.connect(self._onVisitorIdClicked)
+        self.visitorIdCard.copied.connect(self._onVisitorIdCopiedClicked)
 
         if sys.platform == "darwin":
             # macOS 不支持直接设置自动启动
@@ -448,6 +450,10 @@ class SettingInterface(ScrollArea):
             self.visitorIdCard.setContent(w.visitorId)
             cfg.loginId.value = w.visitorId
             InfoBar.success(self.tr("重置 ID 成功"), self.tr("新的客户端登录 ID 已经设置"), parent=self)
+
+    @pyqtSlot()
+    def _onVisitorIdCopiedClicked(self):
+        QApplication.clipboard().setText(cfg.loginId.value)
 
     @pyqtSlot()
     def onUpdateClicked(self):

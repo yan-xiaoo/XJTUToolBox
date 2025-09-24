@@ -3,6 +3,8 @@
 
 
 import time
+import traceback
+
 import requests
 import concurrent.futures
 
@@ -19,16 +21,25 @@ class FastestMirror:
 
     @staticmethod
     def get_github_api_mirror(user, repo, latest=True):
-        # mirror_urls = [
-        #     f"https://api.github.com/repos/{user}/{repo}/releases/latest",
-        #     f"https://github.kotori.top/https://api.github.com/repos/{user}/{repo}/releases/latest",
-        # ]
-        # return FastestMirror.find_fastest_mirror(mirror_urls, 5)
-
         if latest:
-            return f"https://api.github.com/repos/{user}/{repo}/releases/latest"
+            mirror_urls = [
+                f"https://api.github.com/repos/{user}/{repo}/releases/latest",
+                f"https://gh-api.xjtutoolbox.com/https://api.github.com/repos/{user}/{repo}/releases/latest",
+            ]
+            return FastestMirror.find_fastest_mirror(mirror_urls, 15)
         else:
-            return f"https://api.github.com/repos/{user}/{repo}/releases"
+            mirror_urls = [
+                f"https://api.github.com/repos/{user}/{repo}/releases",
+                f"https://gh-api.xjtutoolbox.com/https://api.github.com/repos/{user}/{repo}/releases",
+            ]
+            return FastestMirror.find_fastest_mirror(mirror_urls, 15)
+
+    @staticmethod
+    def get_download_mirror(download_urls):
+        """
+        比较多个下载 URL，以便确定最快的一个
+        """
+        return FastestMirror.find_fastest_mirror(download_urls, 15)
 
     @staticmethod
     def find_fastest_mirror(mirror_urls, timeout=5):
@@ -41,11 +52,18 @@ class FastestMirror:
                 if response.status_code == 200:
                     return mirror_url, end_time - start_time
             except Exception:
+                traceback.print_exc()
                 pass
             return None, None
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = [executor.submit(check_mirror, url) for url in mirror_urls]
-            fastest_mirror, _ = min((future.result() for future in concurrent.futures.as_completed(futures)), key=lambda x: (x[1] is not None, x[1]), default=(None, None))
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+            valid_results = [(url, t) for url, t in results if t is not None]
+
+            if valid_results:
+                fastest_mirror, _ = min(valid_results, key=lambda x: x[1])
+            else:
+                fastest_mirror = None
 
         return fastest_mirror if fastest_mirror else mirror_urls[0]
