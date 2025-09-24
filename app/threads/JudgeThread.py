@@ -8,7 +8,7 @@ from .ProcessWidget import ProcessThread
 from ..sessions.ehall_session import EhallSession
 from ..utils import Account, logger, cfg, accounts
 
-from ehall import AutoJudge
+from ehall import AutoJudge, QuestionnaireTemplate
 from auth import EHALL_LOGIN_URL, ServerError
 from enum import Enum
 
@@ -20,6 +20,8 @@ class JudgeChoice(Enum):
     JUDGE = 1
     # 编辑并重新提交问卷
     EDIT = 2
+    # 自动评价所有课程
+    JUDGE_ALL = 3
 
 
 class JudgeThread(ProcessThread):
@@ -36,6 +38,8 @@ class JudgeThread(ProcessThread):
         self.questionnaire = None
         self.template = None
         self.score: int = 100
+        self.msgAll: str = ""    # 自定义评语
+        self.scoreAll: QuestionnaireTemplate.Type = None
 
     @property
     def session(self) -> EhallSession:
@@ -122,6 +126,86 @@ class JudgeThread(ProcessThread):
             return False
         return True
 
+    def judge_all(self) -> bool:
+        self.setIndeterminate.emit(False)
+        self.messageChanged.emit(self.tr("正在获取所有待评教课程..."))
+        self.progressChanged.emit(10)
+        questionnaires = self.judge_.unfinishedQuestionnaires()
+        
+        if not questionnaires:
+            self.error.emit("没有待评教课程", "所有课程已经完成评教")
+            return False
+        
+        total_count = len(questionnaires)
+        success_count = 0
+        
+        for i, questionnaire in enumerate(questionnaires):
+            if not self.can_run:
+                return False
+                
+            progress_base = 10 + (i * 90 // total_count)
+            
+            try:
+                self.messageChanged.emit(self.tr(f"正在评教第{i+1}/{total_count}门: {questionnaire.KCM}"))
+                self.progressChanged.emit(progress_base + 5)
+                data = self.judge_.questionnaireData(questionnaire, self.account.username)
+                self.progressChanged.emit(progress_base + 20)
+                
+                options = self.judge_.questionnaireOptions(questionnaire, self.account.username)
+                self.progressChanged.emit(progress_base + 40)
+                
+                # 获取模版
+                type_dict = {
+                    QuestionnaireTemplate.Type.THEORY: "理论课",
+                    QuestionnaireTemplate.Type.IDEOLOGY: "思政课",
+                    QuestionnaireTemplate.Type.GENERAL: "通识课",
+                    QuestionnaireTemplate.Type.EXPERIMENT: "实验课",
+                    QuestionnaireTemplate.Type.PROJECT: "项目设计课",
+                    QuestionnaireTemplate.Type.PHYSICAL: "体育课"
+                }
+
+                questionnaireType = None
+                for item in type_dict:
+                    if type_dict[item] in questionnaire.WJMC:
+                        questionnaireType = item
+                        break
+                if questionnaireType == None:
+                    # 默认理论课
+                    questionnaireType = QuestionnaireTemplate.Type.THEORY
+
+                template = QuestionnaireTemplate.from_file(
+                    questionnaireType,
+                    self.scoreAll
+                )
+
+                for one_data in template.data:
+                    if one_data.TXDM != '01':
+                        one_data.ZGDA = self.msgAll if self.msgAll else self.tr("无")
+
+                for one_data in data:
+                    template.complete(one_data, options, True, default_score=self.score)
+                self.progressChanged.emit(progress_base + 60)
+                
+                result, msg = self.judge_.submitQuestionnaire(questionnaire, data)
+                self.progressChanged.emit(progress_base + 80)
+                
+                if result:
+                    success_count += 1
+                    self.messageChanged.emit(self.tr(f"第{i+1}/{total_count}门课程评教成功: {questionnaire.KCM}"))
+                else:
+                    self.messageChanged.emit(self.tr(f"第{i+1}/{total_count}门课程评教失败: {questionnaire.KCM}"))
+                    logger.warning(f"评教失败: {msg}")
+                
+            except Exception as e:
+                self.messageChanged.emit(self.tr(f"第{i+1}/{total_count}门课程评教异常: {questionnaire.KCM}"))
+                logger.error(f"评教异常: {str(e)}")
+                
+            self.progressChanged.emit(progress_base + 90)
+        
+        self.messageChanged.emit(self.tr(f"所有评教完成，成功{success_count}/{total_count}门"))
+        self.progressChanged.emit(100)
+        return success_count > 0
+
     def run(self):
         # 强制重置可运行状态，避免上次取消后本次直接退出
         self.can_run = True
@@ -176,6 +260,18 @@ class JudgeThread(ProcessThread):
                     self.canceled.emit()
                     return
                 self.editSuccess.emit()
+                self.hasFinished.emit()
+            elif self.choice == JudgeChoice.JUDGE_ALL:
+                if not self.session.has_login:
+                    result = self.login()
+                    if not result:
+                        self.canceled.emit()
+                        return
+                result = self.judge_all()
+                if not result:
+                    self.canceled.emit()
+                    return
+                self.submitSuccess.emit()
                 self.hasFinished.emit()
             else:
                 raise ValueError(self.tr("未知选项"))

@@ -5,6 +5,7 @@ from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ComboBox, Scroll
     ToolTipPosition, InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, PushButton, TitleLabel
 from ehall import Questionnaire, QuestionnaireTemplate
 from .JudgeOptionInterface import JudgeOptionMessageBox
+from .JudgeAllOptionInterface import JudgeAllOptionMessageBox
 from ..utils import StyleSheet
 from ..threads.JudgeThread import JudgeThread, JudgeChoice
 from ..threads.ProcessWidget import ProcessWidget
@@ -86,9 +87,13 @@ class AutoJudgeInterface(ScrollArea):
                                     triggered=self.onShowFinishedQuestionnairesTriggered)
         self.viewAction = Action(FluentIcon.LINK, self.tr("前往 Ehall 查看"), self.commandBar)
         self.viewAction.triggered.connect(self.onViewEhallTriggered)
+        self.judgeAllAction = Action(FluentIcon.PLAY, self.tr("全部评教"), self.commandBar)
+        self.judgeAllAction.triggered.connect(self.onJudgeAllButtonClicked)
+        
         self.commandBar.addAction(self.refreshAction)
         self.commandBar.addAction(self.showAllAction)
         self.commandBar.addAction(self.viewAction)
+        self.commandBar.addAction(self.judgeAllAction)
         self.commandBar.setMinimumWidth(500)
         self.vBoxLayout.addWidget(self.commandBar, 1, alignment=Qt.AlignTop | Qt.AlignHCenter)
 
@@ -237,19 +242,14 @@ class AutoJudgeInterface(ScrollArea):
                             duration=-1, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
 
     @pyqtSlot()
-    def onSubmitSuccess(self):
-        questionnaire = self.thread_.questionnaire
-        if self.window().isActiveWindow():
-            InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 评教成功"),
-                            duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
-        else:
-            InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 评教成功"),
-                            duration=-1, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
-        for one in self.questionnaireWidgets:
-            if one.questionnaire == questionnaire:
-                self.setQuestionnaireFinished(one)
-                one.setVisible(self.showAllAction.isChecked())
-                break
+    def onJudgeAllButtonClicked(self):
+        # 先检查是否有待评教的课程
+        if len(self.questionnaireWidgets) == 0:
+            self.onThreadError("没有待评教课程", "请先刷新获取评教问卷")
+            return
+
+        dev_interface = JudgeAllOptionMessageBox(self.thread_, self)
+        dev_interface.exec()
 
     @pyqtSlot(list, list)
     def onGetQuestionnaireFinish(self, questionnaires: list, finished_questionnaires: list):
@@ -264,3 +264,30 @@ class AutoJudgeInterface(ScrollArea):
         for questionnaire in finished_questionnaires:
             self.addQuestionnaire(questionnaire, True)
         self.switchTo(self.questionnaireFrame)
+
+    @pyqtSlot()
+    def onSubmitSuccess(self):
+        # 处理单个课程提交成功的情况
+        if self.thread_.choice == JudgeChoice.JUDGE:
+            questionnaire = self.thread_.questionnaire
+            if self.window().isActiveWindow():
+                InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 评教成功"),
+                                duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+            else:
+                InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCM} {questionnaire.BPJS} 评教成功"),
+                                duration=-1, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+            for one in self.questionnaireWidgets:
+                if one.questionnaire == questionnaire:
+                    self.setQuestionnaireFinished(one)
+                    one.setVisible(self.showAllAction.isChecked())
+                    break
+        # 处理所有课程评价完成的情况
+        elif self.thread_.choice == JudgeChoice.JUDGE_ALL:
+            # 刷新列表以显示最新状态
+            self.onStartButtonClicked()
+            if self.window().isActiveWindow():
+                InfoBar.success(self.tr("自动评价完成"), self.tr("所有课程评教已完成"),
+                                duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+            else:
+                InfoBar.success(self.tr("自动评价完成"), self.tr("所有课程评教已完成"),
+                                duration=-1, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
