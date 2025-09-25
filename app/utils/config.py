@@ -90,7 +90,7 @@ class CardSerializer(ConfigSerializer):
 
 class VisitorIdValidator(ConfigValidator):
     def validate(self, value):
-        return isinstance(value, str) and len(value) == 32 and all(c in "0123456789abcdef" for c in value)
+        return isinstance(value, str) and len(value) == 32 or len(value) == 16 and all(c in "0123456789abcdef" for c in value)
 
     def correct(self, value):
         if not self.validate(value):

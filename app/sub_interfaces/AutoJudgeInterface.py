@@ -115,6 +115,8 @@ class AutoJudgeInterface(ScrollArea):
         self.finishedQuestionnaireWidgets = []
         self.noQuestionnaireLabel = TitleLabel(self.tr("没有需要完成的问卷"), self.questionnaireFrame)
         self.noQuestionnaireLabel.setVisible(False)
+        # 标识当前的界面
+        self.currentFrame = self.startFrame
 
         self.questionnaireFrameLayout = QVBoxLayout(self.questionnaireFrame)
 
@@ -169,6 +171,7 @@ class AutoJudgeInterface(ScrollArea):
             self.startFrame.setVisible(False)
             self.hintLabel.setVisible(True)
             self.questionnaireFrame.setVisible(True)
+        self.currentFrame = item
 
     def addQuestionnaire(self, questionnaire: Questionnaire, finished=False):
         widget = JudgeCard(questionnaire, self, finished, self.questionnaireFrame)
@@ -245,7 +248,13 @@ class AutoJudgeInterface(ScrollArea):
     def onJudgeAllButtonClicked(self):
         # 先检查是否有待评教的课程
         if len(self.questionnaireWidgets) == 0:
-            self.onThreadError("没有待评教课程", "请先刷新获取评教问卷")
+            if self.currentFrame == self.questionnaireFrame:
+                if len(self.finishedQuestionnaireWidgets) > 0:
+                    self.onThreadError("没有待评教课程", "所有课程均已评教完成")
+                else:
+                    self.onThreadError("没有待评教课程", "似乎没有需要评教的课程")
+            else:
+                self.onThreadError("没有待评教课程", "请先刷新获取评教问卷")
             return
 
         dev_interface = JudgeAllOptionMessageBox(self.thread_, self)

@@ -241,11 +241,13 @@ class JudgeOptionInterface(ScrollArea):
         self.thread_.questionnaire = self.questionnaire
         template = QuestionnaireTemplate.from_file(self.classTypeBox.currentData(),
                                                    self.scoreBox.currentData())
+        subjective_answer = self.textArea.toPlainText() if self.textArea.toPlainText() else self.tr("无")
         for one_data in template.data:
             if one_data.TXDM != '01':
-                one_data.ZGDA = self.textArea.toPlainText() if self.textArea.toPlainText() else self.tr("无")
+                one_data.ZGDA = subjective_answer
         self.thread_.template = template
         self.thread_.score = template.score_to_int(self.scoreBox.currentData())
+        self.thread_.msgAll = subjective_answer
 
         if self.finished_:
             self.thread_.choice = JudgeChoice.EDIT

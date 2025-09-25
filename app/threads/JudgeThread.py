@@ -86,7 +86,7 @@ class JudgeThread(ProcessThread):
         if not self.can_run:
             return False
         for one_data in data:
-            self.template.complete(one_data, options, True, default_score=self.score)
+            self.template.complete(one_data, options, True, default_score=self.score, default_subjective=self.msgAll)
         if not self.can_run:
             return False
         self.progressChanged.emit(80)
@@ -115,7 +115,7 @@ class JudgeThread(ProcessThread):
         if not self.can_run:
             return False
         for one_data in data:
-            self.template.complete(one_data, options, True, default_score=self.score)
+            self.template.complete(one_data, options, True, default_score=self.score, default_subjective=self.msgAll)
         if not self.can_run:
             return False
         self.progressChanged.emit(80)
@@ -169,7 +169,7 @@ class JudgeThread(ProcessThread):
                     if type_dict[item] in questionnaire.WJMC:
                         questionnaireType = item
                         break
-                if questionnaireType == None:
+                if questionnaireType is None:
                     # 默认理论课
                     questionnaireType = QuestionnaireTemplate.Type.THEORY
 
@@ -183,7 +183,7 @@ class JudgeThread(ProcessThread):
                         one_data.ZGDA = self.msgAll if self.msgAll else self.tr("无")
 
                 for one_data in data:
-                    template.complete(one_data, options, True, default_score=self.score)
+                    template.complete(one_data, options, True, default_score=self.score, default_subjective=self.msgAll)
                 self.progressChanged.emit(progress_base + 60)
                 
                 result, msg = self.judge_.submitQuestionnaire(questionnaire, data)
