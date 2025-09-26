@@ -86,7 +86,8 @@ class AttendanceWaterRecord:
 
     @classmethod
     def from_response_json(cls, json):
-        return cls(str(json["classWaterBean"]["bh"]), json["stuClassBean"]["termNo"], json["accountBean"]["startJc"], json["accountBean"]["endJc"]
+        # 研究生系统的学年学期编号在 calendarBean 里，本科生系统在 stuClassBean 里
+        return cls(str(json["classWaterBean"]["bh"]), json["calendarBean"]["name"] or json["stuClassBean"]["termNo"], json["accountBean"]["startJc"], json["accountBean"]["endJc"]
                    , json["accountBean"]["week"], json["buildBean"]["name"] + "-" + json["roomBean"]["roomnum"], json["teachNameList"], WaterType(int(json["classWaterBean"]["status"])),
                    datetime.datetime.strptime(json["accountBean"]["checkdate"], "%Y-%m-%d").date())
 
@@ -127,9 +128,10 @@ class AttendanceNewLogin(NewLogin):
 
     def __init__(self, session: requests.Session = None, is_postgraduate=False, visitor_id=None):
         super().__init__(POSTGRADUATE_ATTENDANCE_URL if is_postgraduate else ATTENDANCE_URL, session, visitor_id=visitor_id)
+        self.is_postgraduate = is_postgraduate
 
     def postLogin(self, login_response) -> None:
-        response = self._get(ATTENDANCE_URL, allow_redirects=True)
+        response = self._get(POSTGRADUATE_ATTENDANCE_URL if self.is_postgraduate else ATTENDANCE_URL, allow_redirects=True)
         try:
             token = response.url.split("token=")[1].split('&')[0]
         except IndexError:
