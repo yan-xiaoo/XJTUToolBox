@@ -186,3 +186,21 @@ class GraduateScore:
         response = self.session.get("https://gmis.xjtu.edu.cn/pyxx/pygl/xscjcx/index")
         html = response.text
         return extract_scores_with_grades_only(html)
+
+    def all_course_info(self) -> list:
+        """
+        获得所有此页面课程的信息，无论其是否已经有成绩。
+        返回示例：
+        [
+            {
+                "courseName": "自然辩证法概论",
+                "coursePoint": 1,
+                "score": "",
+                "type":"学位课程"（或者"选修课程"/"必修环节"）,
+                "examDate": "2025-01-19",
+            }
+        ]
+        """
+        response = self.session.get("https://gmis.xjtu.edu.cn/pyxx/pygl/xscjcx/index")
+        html = response.text
+        return parse_score_html(html)

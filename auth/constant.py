@@ -31,3 +31,5 @@ YWTB_LOGIN_URL = "https://login.xjtu.edu.cn/cas/login?service=https%3A%2F%2Fywtb
 # 研究生管理信息系统（Graduate Management Information System, gmis）的登录地址
 # 网站为 https://gmis.xjtu.edu.cn/
 GMIS_LOGIN_URL = " https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1036&state=abcd1234&redirectUri=http://gmis.xjtu.edu.cn/pyxx/sso/login&responseType=code&scope=user_info"
+# 研究生评教系统的登录地址
+GSTE_LOGIN_URL = "https://cas.xjtu.edu.cn/login?TARGET=http%3A%2F%2Fgste.xjtu.edu.cn%2Flogin.do"

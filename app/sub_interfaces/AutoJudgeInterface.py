@@ -1,11 +1,16 @@
-from PyQt5.QtCore import Qt, pyqtSlot, QUrl
+from typing import Union, Dict
+
+from PyQt5.QtCore import Qt, pyqtSlot, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFrame
-from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ComboBox, ScrollArea, PrimaryPushButton, ToolTipFilter, \
-    ToolTipPosition, InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, PushButton, TitleLabel
-from ehall import Questionnaire, QuestionnaireTemplate
+from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ScrollArea, PrimaryPushButton, \
+    InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, TitleLabel, MessageBox
+from ehall import Questionnaire
+from gste.judge import GraduateQuestionnaire, GraduateQuestionnaireData
+from .GraduateJudgeOptionInterface import GraduateJudgeOptionMessageBox
 from .JudgeOptionInterface import JudgeOptionMessageBox
 from .JudgeAllOptionInterface import JudgeAllOptionMessageBox
+from ..threads.GraduateJudgeThread import GraduateJudgeThread, GraduateJudgeChoice
 from ..utils import StyleSheet
 from ..threads.JudgeThread import JudgeThread, JudgeChoice
 from ..threads.ProcessWidget import ProcessWidget
@@ -13,20 +18,25 @@ from ..utils import accounts
 
 
 class JudgeCard(CardWidget):
-    def __init__(self, questionnaire: Questionnaire, interface: "AutoJudgeInterface", finished=False, parent=None):
+    # 发送自身的 questionnaire 属性的内容
+    judgeButtonClicked = pyqtSignal(object, bool)
+
+    def __init__(self, questionnaire, title: str, description: str, interface: "AutoJudgeInterface", finished=False, parent=None):
         super().__init__(parent)
 
         # 用于修改线程信息
         self.thread_ = interface.thread_
         self.parent_ = interface
-        self.questionnaire = questionnaire
         self.finished = finished
+        self.title = title
+        self.questionnaire = questionnaire
+        self.description = description
 
         if not finished:
-            self.titleLabel = BodyLabel(questionnaire.KCM + " " + questionnaire.BPJS, self)
+            self.titleLabel = BodyLabel(title, self)
         else:
-            self.titleLabel = BodyLabel(questionnaire.KCM + " " + questionnaire.BPJS + " (已完成)", self)
-        self.contentLabel = CaptionLabel(questionnaire.WJMC, self)
+            self.titleLabel = BodyLabel(title + self.tr(" (已完成)"), self)
+        self.contentLabel = CaptionLabel(description, self)
         if not finished:
             self.submitButton = PrimaryPushButton(self.tr("开始评教"), self)
         else:
@@ -56,17 +66,16 @@ class JudgeCard(CardWidget):
 
     @pyqtSlot()
     def onJudgeButtonClicked(self):
-        dev_interface = JudgeOptionMessageBox(self.questionnaire, self.thread_, self.finished, self.parent_)
-        dev_interface.exec()
+        self.judgeButtonClicked.emit(self.questionnaire, self.finished)
 
     def setFinished(self, status):
         self.finished = status
         if status:
             self.submitButton.setText(self.tr("编辑评教"))
-            self.titleLabel.setText(self.tr(self.questionnaire.KCM + " " + self.questionnaire.BPJS + " (已完成)"))
+            self.titleLabel.setText(self.title + self.tr(" (已完成)"))
         else:
             self.submitButton.setText(self.tr("开始评教"))
-            self.titleLabel.setText(self.tr(self.questionnaire.KCM + " " + self.questionnaire.BPJS))
+            self.titleLabel.setText(self.title)
 
 
 class AutoJudgeInterface(ScrollArea):
@@ -85,7 +94,7 @@ class AutoJudgeInterface(ScrollArea):
         self.refreshAction.triggered.connect(self.onStartButtonClicked)
         self.showAllAction = Action(FluentIcon.SEARCH, self.tr("显示已完成的问卷"), self.commandBar, checkable=True,
                                     triggered=self.onShowFinishedQuestionnairesTriggered)
-        self.viewAction = Action(FluentIcon.LINK, self.tr("前往 Ehall 查看"), self.commandBar)
+        self.viewAction = Action(FluentIcon.LINK, self.tr("前往评教系统查看"), self.commandBar)
         self.viewAction.triggered.connect(self.onViewEhallTriggered)
         self.judgeAllAction = Action(FluentIcon.PLAY, self.tr("全部评教"), self.commandBar)
         self.judgeAllAction.triggered.connect(self.onJudgeAllButtonClicked)
@@ -103,8 +112,18 @@ class AutoJudgeInterface(ScrollArea):
         self.thread_.submitSuccess.connect(self.onSubmitSuccess)
         self.thread_.editSuccess.connect(self.onEditSuccess)
         self.thread_.started.connect(self.onThreadStarted)
+        self.thread_.finished.connect(self.unlockAllCards)
+
+        self.gradateThread = GraduateJudgeThread(accounts.current, choice=GraduateJudgeChoice.GET_COURSES)
+        self.gradateThread.started.connect(self.onGradateThreadStarted)
+        self.gradateThread.error.connect(self.onThreadError)
+        self.gradateThread.questionnaires.connect(self.onGetQuestionnaireFinish)
+        self.gradateThread.questionnaireData.connect(self._onGetGraduateQuestionnaireData)
+        self.gradateThread.finished.connect(self.unlockAllCards)
+        self.gradateThread.submitSuccess.connect(self.onGraduateSubmitSuccess)
 
         self.processWidget = None
+        self.graduateProcessWidget = None
 
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
@@ -148,6 +167,9 @@ class AutoJudgeInterface(ScrollArea):
         self.setWidget(self.view)
         self.setWidgetResizable(True)
 
+        # 初始化本科生/研究生不同的内容
+        self.onCurrentAccountChanged()
+
     @pyqtSlot()
     def onThreadStarted(self):
         # 在使用前初始化进度条组件，否则会出现奇怪的问题
@@ -159,8 +181,33 @@ class AutoJudgeInterface(ScrollArea):
         self.processWidget.setVisible(True)
 
     @pyqtSlot()
+    def onGradateThreadStarted(self):
+        # 在使用前初始化进度条组件，否则会出现奇怪的问题
+        if self.graduateProcessWidget is None:
+            self.graduateProcessWidget = ProcessWidget(self.gradateThread, stoppable=True, hide_on_end=True)
+            # 将组件插入在 Commandbar 后面，Frame 前面
+            self.vBoxLayout.insertWidget(1, self.graduateProcessWidget, alignment=Qt.AlignTop | Qt.AlignHCenter)
+
+        self.graduateProcessWidget.setVisible(True)
+
+    @pyqtSlot()
     def onViewEhallTriggered(self):
-        QDesktopServices.openUrl(QUrl("https://ehall.xjtu.edu.cn/"))
+        if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
+            QDesktopServices.openUrl(QUrl("http://gste.xjtu.edu.cn/"))
+        else:
+            QDesktopServices.openUrl(QUrl("https://ehall.xjtu.edu.cn/"))
+
+    def lockAllCards(self):
+        for card in self.questionnaireWidgets:
+            card.submitButton.setEnabled(False)
+        for card in self.finishedQuestionnaireWidgets:
+            card.submitButton.setEnabled(False)
+
+    def unlockAllCards(self):
+        for card in self.questionnaireWidgets:
+            card.submitButton.setEnabled(True)
+        for card in self.finishedQuestionnaireWidgets:
+            card.submitButton.setEnabled(True)
 
     def switchTo(self, item):
         if item == self.startFrame:
@@ -173,8 +220,29 @@ class AutoJudgeInterface(ScrollArea):
             self.questionnaireFrame.setVisible(True)
         self.currentFrame = item
 
-    def addQuestionnaire(self, questionnaire: Questionnaire, finished=False):
-        widget = JudgeCard(questionnaire, self, finished, self.questionnaireFrame)
+    @pyqtSlot(object, bool)
+    def _onJudgeButtonClicked(self, questionnaire, finished):
+        if accounts.current is not None:
+            if accounts.current.type == accounts.current.UNDERGRADUATE:
+                dev_interface = JudgeOptionMessageBox(questionnaire, self.thread_, finished, self)
+                dev_interface.exec()
+            else:
+                # 研究生问卷需要获得问卷详细信息
+                self.gradateThread.questionnaire = questionnaire
+                self.gradateThread.choice = GraduateJudgeChoice.GET_DATA
+                self.lockAllCards()
+                self.gradateThread.start()
+                self.graduateProcessWidget.setVisible(True)
+
+    def addQuestionnaire(self, questionnaire: Union[Questionnaire, GraduateQuestionnaire], finished=False):
+        if accounts.current.type == accounts.current.UNDERGRADUATE:
+            title = f"{questionnaire.KCM} {questionnaire.BPJS}"
+            description = f"{questionnaire.WJMC}"
+        else:
+            title = f"{questionnaire.KCMC} {questionnaire.JSXM}"
+            description = f"{questionnaire.TERMNAME} {questionnaire.BJMC}"
+        widget = JudgeCard(questionnaire, title, description, self, finished, self.questionnaireFrame)
+        widget.judgeButtonClicked.connect(self._onJudgeButtonClicked)
         if not finished:
             self.questionnaireWidgets.append(widget)
         else:
@@ -183,6 +251,22 @@ class AutoJudgeInterface(ScrollArea):
                 widget.setVisible(False)
 
         self.questionnaireFrameLayout.addWidget(widget)
+
+    @pyqtSlot(GraduateQuestionnaireData)
+    def _onGetGraduateQuestionnaireData(self, questionnaire: GraduateQuestionnaireData):
+        origin = self.gradateThread.questionnaire
+        dev_interface = GraduateJudgeOptionMessageBox(origin.KCMC + " " + origin.JSXM, questionnaire, self)
+        if dev_interface.exec():
+            if self.gradateThread.questionnaire is None:
+                self.onThreadError("", self.tr("内部错误：未找到正在评教的问卷"))
+            else:
+                # 进行评教
+                self.gradateThread.choice = GraduateJudgeChoice.JUDGE
+                self.gradateThread.questionnaire_data = questionnaire
+                self.gradateThread.score = dev_interface.interface.currentLevel()
+                self.gradateThread.answer_dict = dev_interface.interface.textsByQuestionId()
+                self.gradateThread.start()
+                self.graduateProcessWidget.setVisible(True)
 
     def clearWidgets(self):
         for widget in self.questionnaireWidgets:
@@ -217,11 +301,27 @@ class AutoJudgeInterface(ScrollArea):
     @pyqtSlot()
     def onStartButtonClicked(self):
         self.clearWidgets()
-        if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
-            self.onThreadError("", self.tr("抱歉，研究生账号暂时不支持自动评教"))
+        if accounts.current is None:
+            self.onThreadError(self.tr("未登录"), self.tr("请先添加一个账号"))
             return
-        self.thread_.choice = JudgeChoice.GET_COURSES
-        self.thread_.start()
+
+        if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
+            # 研究生评教系统是需要 WebVPN 的。如果没有登录的话，询问用户想要怎么登录。
+            if not self.gradateThread.session.has_login:
+                w = MessageBox(self.tr("开始评教"), self.tr("您想使用什么方式登录评教系统？"),
+                               self)
+                w.yesButton.setText(self.tr("WebVPN 登录"))
+                w.cancelButton.setText(self.tr("直接登录"))
+                if w.exec():
+                    self.gradateThread.session.login_method = self.gradateThread.session.LoginMethod.WEBVPN
+                else:
+                    self.gradateThread.session.login_method = self.gradateThread.session.LoginMethod.NORMAL
+
+            self.gradateThread.choice = GraduateJudgeChoice.GET_COURSES
+            self.gradateThread.start()
+        else:
+            self.thread_.choice = JudgeChoice.GET_COURSES
+            self.thread_.start()
 
     @pyqtSlot(bool)
     def onShowFinishedQuestionnairesTriggered(self, isChecked):
@@ -246,6 +346,11 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot()
     def onJudgeAllButtonClicked(self):
+        if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
+            # 研究生暂时不支持
+            self.onThreadError("", self.tr("抱歉，由于问卷题目可能不同，研究生暂时不支持一键评教"))
+            return
+
         # 先检查是否有待评教的课程
         if len(self.questionnaireWidgets) == 0:
             if self.currentFrame == self.questionnaireFrame:
@@ -273,6 +378,21 @@ class AutoJudgeInterface(ScrollArea):
         for questionnaire in finished_questionnaires:
             self.addQuestionnaire(questionnaire, True)
         self.switchTo(self.questionnaireFrame)
+
+    @pyqtSlot()
+    def onGraduateSubmitSuccess(self):
+        questionnaire = self.gradateThread.questionnaire
+        if self.window().isActiveWindow():
+            InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCMC} {questionnaire.JSXM} 评教成功"),
+                            duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        else:
+            InfoBar.success(self.tr("问卷提交成功"), self.tr(f"{questionnaire.KCMC} {questionnaire.JSXM} 评教成功"),
+                            duration=-1, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)
+        for one in self.questionnaireWidgets:
+            if one.questionnaire == questionnaire:
+                self.setQuestionnaireFinished(one)
+                one.setVisible(self.showAllAction.isChecked())
+                break
 
     @pyqtSlot()
     def onSubmitSuccess(self):

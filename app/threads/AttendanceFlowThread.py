@@ -33,7 +33,7 @@ class AttendanceFlowThread(ProcessThread):
     @property
     def session(self) -> AttendanceSession:
         """
-        获取当前账户用于访问 ehall 的 session
+        获取当前账户用于访问考勤系统的 session
         """
         return self.account.session_manager.get_session("attendance")
 

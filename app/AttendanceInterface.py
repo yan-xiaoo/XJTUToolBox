@@ -357,8 +357,8 @@ class AttendanceFlowWidget(QFrame):
         self.tableWidget.setHorizontalHeaderItem(2, QTableWidgetItem(self.tr("是否有效")))
         self.tableWidget.setColumnWidth(0, 200)
         self.tableWidget.setColumnWidth(1, 120)
-        self.tableWidget.setColumnWidth(2, 70)
-        self.tableWidget.setMinimumSize(430, 250)
+        self.tableWidget.setColumnWidth(2, 100)
+        self.tableWidget.setMinimumSize(460, 250)
         self.tableWidget.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         # self.tableWidget.setMinimumSize(550, 250)
