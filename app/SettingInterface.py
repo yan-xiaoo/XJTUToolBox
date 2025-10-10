@@ -202,8 +202,17 @@ class SettingInterface(ScrollArea):
             self.personalGroup,
             default_color=QColor("#ff5d74a2")
         )
+        self.languageCard = ComboBoxSettingCard(
+            cfg.language,
+            FIF.LANGUAGE,
+            self.tr('语言'),
+            self.tr('选择应用的语言'),
+            texts=['简体中文', 'English', self.tr('跟随系统设置')],
+            parent=self.personalGroup
+        )
         self.personalGroup.addSettingCard(self.themeCard)
         self.personalGroup.addSettingCard(self.themeColorCard)
+        self.personalGroup.addSettingCard(self.languageCard)
 
         # 关于组
         self.aboutGroup = SettingCardGroup(self.tr("关于"), self.view)
@@ -296,6 +305,7 @@ class SettingInterface(ScrollArea):
                                                                                   cfg.AttendanceLoginMethod(
                                                                                       self.loginMethodCard.comboBox.currentIndex())))
         cfg.traySetting.valueChanged.connect(self._onTraySettingChanged)
+        cfg.language.valueChanged.connect(self._onLanguageChanged)
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
         self.clearCard.clicked.connect(self._onClearAccountsClicked)
@@ -323,6 +333,10 @@ class SettingInterface(ScrollArea):
         if cfg.traySetting.value != TraySetting.MINIMIZE and cfg.noticeAutoSearch.value:
             cfg.noticeAutoSearch.value = False
             self.noticeCard.enableButton.setChecked(False)
+
+    @pyqtSlot()
+    def _onLanguageChanged(self):
+        InfoBar.success(self.tr("修改语言成功"), self.tr("重启后生效"), duration=3000, parent=self)
 
     @pyqtSlot(bool)
     def _onAutoStartClicked(self, checked: bool):

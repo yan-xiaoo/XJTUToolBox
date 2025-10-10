@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 
+from PyQt5.QtCore import QLocale
 from packaging.version import parse
 from qfluentwidgets import QConfig, qconfig, OptionsConfigItem, OptionsValidator, ConfigSerializer, Theme, \
     EnumSerializer, ConfigValidator, ConfigItem
@@ -128,6 +129,24 @@ class UserAgentSerializer(ConfigSerializer):
         return generate_user_agent()
 
 
+class Language(Enum):
+    """ Language enumeration """
+
+    CHINESE_SIMPLIFIED = QLocale(QLocale.Chinese, QLocale.China)
+    ENGLISH = QLocale(QLocale.English)
+    AUTO = QLocale()
+
+
+class LanguageSerializer(ConfigSerializer):
+    """ Language serializer """
+
+    def serialize(self, language):
+        return language.value.name() if language != Language.AUTO else "Auto"
+
+    def deserialize(self, value: str):
+        return Language(QLocale(value)) if value != "Auto" else Language.AUTO
+
+
 class AttendanceLoginMethod(Enum):
     # 不设置，每次询问
     NONE = 0
@@ -190,6 +209,8 @@ class Config(QConfig):
                                    BooleanSerializer())
     loginId = ConfigItem("Settings", "login_id", old_fp_visitor_id(), VisitorIdValidator(), VisitorIdSerializer())
     userAgent = ConfigItem("Settings", "user_agent", generate_user_agent(), UserAgentValidator(), UserAgentSerializer())
+    language = OptionsConfigItem(
+        "Settings", "language", Language.AUTO, OptionsValidator(Language), LanguageSerializer(), restart=True)
 
     def __init__(self):
         super().__init__()

@@ -2,7 +2,7 @@ import contextlib
 import sys
 import os
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTranslator
 from PyQt5.QtWidgets import QApplication
 
 # 矫正工作目录
@@ -20,6 +20,11 @@ QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+
+    translator = QTranslator()
+    translator.load(cfg.get(cfg.language).value, "XJTUToolBox", ".", "assets/i18n")
+    app.installTranslator(translator)
+
     window = MainWindow()
     try:
         app.exec_()
