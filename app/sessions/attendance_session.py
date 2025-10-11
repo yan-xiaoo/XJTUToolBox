@@ -20,6 +20,9 @@ class AttendanceSession(CommonLoginSession):
         self.login_method = None
 
     def login(self, username, password, is_postgraduate=False):
+        # 清除可能已有的登录信息
+        # 否则，登录系统会有问题
+        self.cookies.clear()
         login_util = AttendanceNewLogin(self, is_postgraduate=is_postgraduate, visitor_id=str(cfg.loginId.value))
         login_util.login_or_raise(username, password)
 
@@ -32,6 +35,7 @@ class AttendanceSession(CommonLoginSession):
         # 目前 WebVPN 访问分为两个步骤
         # 1. 登录 WebVPN 自身，此时采用不经过 WebVPN 中介的接口
         # 2. 登录 WebVPN 之后，再登录一次目标网站。此时采用经过 WebVPN 中介的接口
+        self.cookies.clear()
         login_util = NewLogin(WEBVPN_LOGIN_URL, self, visitor_id=str(cfg.loginId.value))
         login_util.login_or_raise(username, password)
 
