@@ -42,6 +42,48 @@ class ScheduleService:
             elif current_version > DATABASE_VERSION:
                 downgrade(current_version, DATABASE_VERSION)
 
+    @staticmethod
+    def parse_weeks_string(weeks_str: str) -> List[int]:
+        """
+        解析研究生课表中的周数字符串，支持如下形式：
+        - "第1-4，6-16周"
+        - "第1-12周"
+        - 逗号（, 或 ，）/分号/顿号/空白分隔的多个片段，单个数字或区间，均可解析
+        :param weeks_str: 原始周数字符串
+        :return: 升序且去重后的周数列表
+        """
+        if not weeks_str:
+            return []
+        s = str(weeks_str).strip()
+        # 去掉固定的前后缀
+        s = s.replace('第', '').replace('周', '')
+        # 统一分隔符为逗号
+        for sep in ('，', '、', ';', '；', ' '):
+            s = s.replace(sep, ',')
+        parts = [p for p in s.split(',') if p]
+        weeks = set()
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            if '-' in p:
+                try:
+                    start_str, end_str = p.split('-', 1)
+                    start = int(start_str)
+                    end = int(end_str)
+                    if start > end:
+                        start, end = end, start
+                    weeks.update(range(start, end + 1))
+                except ValueError:
+                    # 非法片段，忽略
+                    continue
+            else:
+                try:
+                    weeks.add(int(p))
+                except ValueError:
+                    continue
+        return sorted(weeks)
+
     def clearNonManualCourses(self, term_number: str = None):
         """
         清除所有非手动添加的课程
@@ -403,8 +445,8 @@ class ScheduleService:
         day = course_json["day_of_week"]
         start_time = int(course_json["period_start"])
         end_time = int(course_json["period_end"])
-        start_week, end_week = course_json["weeks"].strip("第周").split("-")
-        weeks = list(range(int(start_week), int(end_week) + 1))
+        # weeks 字段可能是 "第1-4，6-16周" 或 "第1-12周"
+        weeks = self.parse_weeks_string(course_json.get("weeks", ""))
         result = CourseInstance(course=None,
                                 name=course_json["name"],
                                 day_of_week=day,
@@ -459,9 +501,8 @@ class ScheduleService:
         day = course_json["day_of_week"]
         start_time = int(course_json["period_start"])
         end_time = int(course_json["period_end"])
-        # weeks 字段写的是 第1-16周 之类的内容，需要去掉“第”和“周”再拆分
-        start_week, end_week = course_json["weeks"].strip("第周").split("-")
-        for week in range(int(start_week), int(end_week) + 1):
+        # weeks 字段写的是诸如 "第1-4，6-16周" 或 "第1-12周" 等内容
+        for week in self.parse_weeks_string(course_json.get("weeks", "")):
             result.append(
                 CourseInstance(course=None,
                                name=course_json["name"],
@@ -549,7 +590,6 @@ class ScheduleService:
         添加课程表的内容
         :param course_group: 课程的 json 字典，其中 week_numbers 字段表示课程的所有周数
         :param merge_with_existing: 如果已存在名称相同的课程，将当前课程视为此课程的实例，而不新建课程
-        :param add_exam: 是否尝试添加考试安排新信息
         """
         # 创建课程表的内容
         if merge_with_existing:
