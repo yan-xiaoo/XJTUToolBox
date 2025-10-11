@@ -402,7 +402,23 @@ if accounts.exists() and not accounts.is_encrypted():
             os.remove(DEFAULT_ACCOUNT_PATH)
         except OSError:
             pass
-
+    
+    # Windows 下，删除账户的 schedule.db 会出现问题
+    # 因此，我们改为在启动时清理账户文件夹
+    if accounts.accounts and os.name == "nt":
+        for dir in os.listdir(os.path.join(DATA_DIRECTORY, "data")):
+            # 如果文件夹名称不存在于账户 uuid 中
+            if os.path.isdir(os.path.join(DATA_DIRECTORY, "data", dir)) and dir not in [one.uuid for one in accounts]:
+                # 如果存在一个 schedule.db 或者账户为空，则删掉。
+                if os.path.exists(os.path.join(DATA_DIRECTORY, "data", dir, "schedule.db")) or not os.listdir(os.path.join(DATA_DIRECTORY, "data", dir)):
+                    try:
+                       os.remove(os.path.join(DATA_DIRECTORY, "data", dir, "schedule.db"))
+                    except OSError:
+                       pass
+                    try:
+                        os.rmdir(os.path.join(DATA_DIRECTORY, "data", dir))
+                    except OSError:
+                        pass
 
 if __name__ == '__main__':
     am = AccountManager()
