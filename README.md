@@ -86,3 +86,11 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 - [XJTU-GS-TeachingEvaluation（研究生评教实现参考）](https://github.com/WilliamZ1008/XJTU-GS-TeachingEvaluation)
 
 此外，感谢 Cloudflare 和 GitHub 提供的各项免费服务，让我们无需支付昂贵的 CDN 费用即可缓存安装包、更新信息等必要数据。
+
+## Contributors
+
+<a href="https://github.com/yan-xiaoo/XJTUToolBox/graphs/contributors">
+
+  <img src="https://contrib.rocks/image?repo=yan-xiaoo/XJTUToolBox" />
+
+</a>
