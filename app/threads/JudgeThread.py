@@ -39,7 +39,7 @@ class JudgeThread(ProcessThread):
         self.template = None
         self.score: int = 100
         self.msgAll: str = ""    # 自定义评语
-        self.scoreAll: QuestionnaireTemplate.Type = None
+        self.scoreAll: Optional[QuestionnaireTemplate.Score] = None
 
     @property
     def session(self) -> EhallSession:
@@ -164,17 +164,17 @@ class JudgeThread(ProcessThread):
                     QuestionnaireTemplate.Type.PHYSICAL: "体育课"
                 }
 
-                questionnaireType = None
+                questionnaire_type = None
                 for item in type_dict:
                     if type_dict[item] in questionnaire.WJMC:
-                        questionnaireType = item
+                        questionnaire_type = item
                         break
-                if questionnaireType is None:
+                if questionnaire_type is None:
                     # 默认理论课
-                    questionnaireType = QuestionnaireTemplate.Type.THEORY
+                    questionnaire_type = QuestionnaireTemplate.Type.THEORY
 
                 template = QuestionnaireTemplate.from_file(
-                    questionnaireType,
+                    questionnaire_type,
                     self.scoreAll
                 )
 
@@ -183,7 +183,7 @@ class JudgeThread(ProcessThread):
                         one_data.ZGDA = self.msgAll if self.msgAll else self.tr("无")
 
                 for one_data in data:
-                    template.complete(one_data, options, True, default_score=self.score, default_subjective=self.msgAll)
+                    template.complete(one_data, options, True, default_score=QuestionnaireTemplate.score_to_int(self.scoreAll), default_subjective=self.msgAll)
                 self.progressChanged.emit(progress_base + 60)
                 
                 result, msg = self.judge_.submitQuestionnaire(questionnaire, data)
@@ -198,11 +198,13 @@ class JudgeThread(ProcessThread):
                 
             except Exception as e:
                 self.messageChanged.emit(self.tr(f"第{i+1}/{total_count}门课程评教异常: {questionnaire.KCM}"))
-                logger.error(f"评教异常: {str(e)}")
+                logger.error(f"评教异常: {questionnaire.KCM} {str(e)}")
                 
             self.progressChanged.emit(progress_base + 90)
-        
-        self.messageChanged.emit(self.tr(f"所有评教完成，成功{success_count}/{total_count}门"))
+
+        if success_count != total_count:
+            self.error.emit("", self.tr(f"所有评教完成，成功{success_count}/{total_count}门"))
+
         self.progressChanged.emit(100)
         return success_count > 0
 

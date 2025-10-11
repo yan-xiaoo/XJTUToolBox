@@ -22,6 +22,8 @@ class GraduateJudgeChoice(Enum):
     GET_DATA = 1
     # 评教
     JUDGE = 2
+    # 全部评教
+    JUDGE_ALL = 3
 
 
 class GraduateJudgeThread(ProcessThread):
@@ -31,19 +33,22 @@ class GraduateJudgeThread(ProcessThread):
     questionnaireData = pyqtSignal(GraduateQuestionnaireData)
     submitSuccess = pyqtSignal()
     editSuccess = pyqtSignal()
+    allSubmitSuccess = pyqtSignal()
 
     def __init__(self, account: Account, choice: GraduateJudgeChoice, parent=None):
         super().__init__(parent)
         self.account = account
         self.choice = choice
-        # 待评教问卷，在 JudgeChoice 为 GET_DATA 之后的内容时需要设置
+        # 待评教问卷，在 JudgeChoice 为 GET_DATA 和 JUDGE 时需要设置
         self.questionnaire: Optional[GraduateQuestionnaire] = None
-        # 待评教问卷的数据（答案），在 JudgeChoice 为 JUDGE 之后的内容时需要设置
+        # 待评教问卷的数据（答案），在 JudgeChoice 为 JUDGE 时需要设置
         self.questionnaire_data: Optional[GraduateQuestionnaireData] = None
         # 问卷的选择题等级（3:优，2:良，1:合格，0:不合格）。由于系统要求，选项不能全优，选择 3 时会将随机一个题目填写为良。
         self.score: int = 3
         # 问卷的主观题答案，字典，题目 ID->回答
         self.answer_dict: Optional[Dict[str, str]] = None
+        # 单个通用主观题答案
+        self.single_answer: str = "无"
 
     def set_login_method(self, method: GSTESession.LoginMethod):
         """
@@ -161,81 +166,106 @@ class GraduateJudgeThread(ProcessThread):
                     self.canceled.emit()
                     return
 
-                # 开始填写基本信息
-                self.questionnaire_data.set_answer_by_name("课程名称", self.questionnaire.KCMC)
-                self.questionnaire_data.set_answer_by_name("上课教师", self.questionnaire.JSXM)
-                if basic_info["课程教材"] and basic_info["课程教材"][0]["教程名称"] != "无指定书籍":
-                    book_name: str = basic_info["课程教材"][0]["教程名称"]
-                    if "自编讲义" in book_name:
-                        # 1: 自编讲义的 ID
-                        self.questionnaire_data.set_answer_by_name("教材情况", "1")
-                    else:
-                        # 2: 有教材选项的 ID
-                        self.questionnaire_data.set_answer_by_name("教材情况", "2")
-                    self.questionnaire_data.set_answer_by_name("教材名称", book_name)
-                    # 用教材名称判断教材的语言（
-                    self.questionnaire_data.set_answer_by_name("教材使用语言", "英文" if book_name.isascii() else "中文")
-                else:
-                    # 0: 无教材或讲义的 ID
-                    self.questionnaire_data.set_answer_by_name("教材情况", "0")
-                    # 很不幸的是，你还是得填教材名称和语言，不然过不了检测
-                    self.questionnaire_data.set_answer_by_name("教材名称", "无")
-                    self.questionnaire_data.set_answer_by_name("教材使用语言", "无教材")
-
-                language = basic_info["授课语言"].strip("授课")
-                if language == "全中文":
-                    language = "中文"
-                if language not in ("全英文", "中英文", "中文"):
-                    language = "其他"
-                self.questionnaire_data.set_answer_by_name("授课语言", language)
-                # 填写课程类型信息（学位课或者选修课）
                 self.progressChanged.emit(70)
                 self.messageChanged.emit(self.tr("正在获得课程类型信息..."))
                 score_util = GraduateScore(self.gmis_session)
-                info = score_util.all_course_info()
-
-                if not self.can_run:
-                    self.canceled.emit()
-                    return
-
-                for lesson in info:
+                all_courses = score_util.all_course_info()
+                for lesson in all_courses:
                     if lesson["courseName"] == self.questionnaire.KCMC:
                         if lesson["type"] == "学位课程":
-                            self.questionnaire_data.set_answer_by_name("选修情况", "学位课")
+                            is_main_course = True
                         else:
-                            self.questionnaire_data.set_answer_by_name("选修情况", "选修课")
+                            is_main_course = False
                         break
                 else:
-                    # 没找到课程，可能是新课，默认选修课
-                    self.questionnaire_data.set_answer_by_name("选修情况", "选修课")
-                # 填写所有选择题和填空题
-                for question in self.questionnaire_data.questions:
-                    # 防止覆盖上面填的
-                    if question.view == "radio" and self.questionnaire_data.answers.get(question.id) is None:
-                        self.questionnaire_data.set_answer_by_id(question.id, value=("不合格", "合格", "良好", "优秀")[min(self.score, 3)])
-                    # 填空题处理
-                    if question.view == "textarea":
-                        if question.id in self.answer_dict:
-                            self.questionnaire_data.set_answer_by_id(question.id, self.answer_dict[question.id] or "无")
-                        elif question.name in self.answer_dict:
-                            self.questionnaire_data.set_answer_by_id(question.id, self.answer_dict[question.name] or "无")
-                        else:
-                            # 如果真的找不到填空题答案，用“无”填。
-                            self.questionnaire_data.set_answer_by_id(question.id, "无")
-
-                # 系统要求不能全是良好
-                if self.score >= 3:
-                    for question in self.questionnaire_data.questions:
-                        # 把第一个选项中包含”优秀“的选择题答案改成”良好“
-                        if question.view == "radio" and question.options and question.options[0].get("value") == "优秀":
-                            self.questionnaire_data.set_answer_by_id(question.id, "良好")
-                            break
+                    # 没有信息默认为选修课
+                    is_main_course = False
+                # 填写问卷
+                util.completeQuestionnaire(self.questionnaire, self.questionnaire_data, basic_info, self.score, self.answer_dict, is_main_course)
 
                 self.progressChanged.emit(90)
                 self.messageChanged.emit(self.tr("正在提交问卷..."))
                 util.submitQuestionnaire(self.questionnaire, self.questionnaire_data)
                 self.submitSuccess.emit()
                 self.hasFinished.emit()
+            elif self.choice == GraduateJudgeChoice.JUDGE_ALL:
+                # 评教全部课程
+                # 先获得公用内容：登录 GMIS 和获得课程类型信息
+                self.progressChanged.emit(5)
+                if not self.gmis_session.has_login:
+                    self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
+                    self.gmis_session.login(self.account.username, self.account.password)
+                gmis_util = GraduateLessonDetail(self.gmis_session)
+
+                if not self.can_run:
+                    self.canceled.emit()
+                    return
+
+                self.progressChanged.emit(10)
+                self.messageChanged.emit(self.tr("正在获得全部课程类型信息..."))
+                score_util = GraduateScore(self.gmis_session)
+                all_courses = score_util.all_course_info()
+
+                if not self.can_run:
+                    self.canceled.emit()
+                    return
+
+                # 获得所有未完成问卷评教
+                self.progressChanged.emit(15)
+                self.messageChanged.emit(self.tr("正在获取全部问卷信息..."))
+                all_questionnaires = util.getQuestionnaires()
+                all_questionnaires = [one for one in all_questionnaires if one.ASSESSMENT == "allow"]
+
+                step = 0
+                for questionnaire in all_questionnaires:
+                    step += 1
+                    # 计算当前进度
+                    self.progressChanged.emit(15 + int(85 * step / (len(all_questionnaires) * 3)))
+                    # 获得问卷内容
+                    self.messageChanged.emit(self.tr("正在获得 ") + questionnaire.KCMC + "-" + questionnaire.JSXM + self.tr(" 问卷的内容..."))
+                    data = util.getQuestionnaireData(questionnaire=questionnaire)
+
+                    if not self.can_run:
+                        self.canceled.emit()
+                        return
+
+                    step += 1
+                    # 获得课程基本信息
+                    self.progressChanged.emit(15 + int(85 * step / (len(all_questionnaires) * 3)))
+                    self.messageChanged.emit(self.tr("正在获得 ") + questionnaire.KCMC + self.tr(" 课程的基本信息..."))
+                    basic_info = gmis_util.lesson_detail(questionnaire.KCBH)
+
+                    if not self.can_run:
+                        self.canceled.emit()
+                        return
+
+                    # 判断是否为学位课程
+                    for lesson in all_courses:
+                        if lesson["courseName"] == questionnaire.KCMC:
+                            if lesson["type"] == "学位课程":
+                                is_main_course = True
+                            else:
+                                is_main_course = False
+                            break
+                    else:
+                        is_main_course = False
+
+                    step += 1
+                    # 评教
+                    # 先设置所有主观题为同一内容
+                    data.set_all_textarea(self.single_answer)
+                    # 再完成问卷
+                    util.completeQuestionnaire(questionnaire, data, basic_info, self.score, self.answer_dict, is_main_course)
+                    self.progressChanged.emit(15 + int(85 * step / (len(all_questionnaires) * 3)))
+                    self.messageChanged.emit(self.tr("正在提交 ") + questionnaire.KCMC + "-" + questionnaire.JSXM + self.tr(" 问卷..."))
+                    util.submitQuestionnaire(questionnaire, data)
+
+                    if not self.can_run:
+                        self.canceled.emit()
+                        return
+
+                self.allSubmitSuccess.emit()
+
             else:
                 raise ValueError(self.tr("未知选项"))
         except ServerError as e:

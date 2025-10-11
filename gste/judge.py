@@ -285,6 +285,14 @@ class GraduateQuestionnaireData:
             else:
                 self.answers[q.id] = value
 
+    def set_all_textarea(self, value: str) -> None:
+        """
+        设置所有主观题目（类型为 textarea）的答案为指定内容
+        """
+        for q in self.questions:
+            if q.view == "textarea":
+                self.answers[q.id] = value
+
     def set_many(self, *, by_id: Optional[Dict[str, Any]] = None, by_name: Optional[Dict[str, Any]] = None, allow_multiple: bool = False) -> None:
         by_id = by_id or {}
         by_name = by_name or {}
@@ -441,6 +449,81 @@ class GraduateAutoJudge:
         response = self._get("http://gste.xjtu.edu.cn/app/student/genForm.do", params=params)
         data = response.text
         return GraduateQuestionnaireData.from_html(data)
+
+    @staticmethod
+    def completeQuestionnaire(questionnaire: GraduateQuestionnaire, questionnaire_data: GraduateQuestionnaireData, basic_info: Dict, score: int, answers: Dict[str, str], is_main_course=False):
+        """
+        快速填写某张问卷的所有题目。使用 score 填写所有选项类题目，使用 answers 填写文本类题目，通过 basic_info 填写课程教材、类型等基本信息。
+        不会重新填写任何已经有答案的题目。
+        :param questionnaire: 通过 getQuestionnaires() 获得的问卷
+        :param questionnaire_data: 通过 getQuestionnaireData() 获得的问卷题目。填写的答案会存放在此结构中。
+        :param basic_info: 课程教材、类型等基本信息，通过 gmis.lesson_detail.py 中的 GraduateLessonDetail.lesson_detail 获得
+        :param score: 评价等级，分为 3-0 ，对应“优”，“良”，“合格”，“不合格"。对于选项不是四者之一的选择题，会填写为最佳选项。如果输入等级为“优”，会自动将第一道选择题评价改为“良”来保证系统“不允许全优”的要求。
+        :param answers: 各个文本题目的评论，字典形式存储。格式应当为题目名称/ID->内容。如果部分文本题目没有在此参数中出现对应答案，则该题目填写内容为“无”。
+        :param is_main_course: 该课程是否为学位课程。不是学位课程的话，默认为选修课程。可以通过 gmis.score.py 中 GraduateScore 的 all_course_info 方法获得所有课程信息，判断其 type 字段是否为“学位课程”。
+        """
+        # 限制分数为 0-3
+        score = min(score, 3)
+        score = max(score, 0)
+        # 开始填写基本信息
+        questionnaire_data.set_answer_by_name("课程名称", questionnaire.KCMC)
+        questionnaire_data.set_answer_by_name("上课教师", questionnaire.JSXM)
+        # 一些神奇的特殊判定
+        # 网站上在课程没教材时显示的是“无指定书籍”，而不是“无”，所以这里要特殊处理
+        # 同理，在有讲义无教材时显示为”自编讲义“
+        if basic_info["课程教材"] and basic_info["课程教材"][0]["教程名称"] != "无指定书籍":
+            book_name: str = basic_info["课程教材"][0]["教程名称"]
+            if "自编讲义" in book_name:
+                # 1: 自编讲义的 ID
+                questionnaire_data.set_answer_by_name("教材情况", "1")
+            else:
+                # 2: 有教材选项的 ID
+                questionnaire_data.set_answer_by_name("教材情况", "2")
+            questionnaire_data.set_answer_by_name("教材名称", book_name)
+            # 用教材名称判断教材的语言（
+            questionnaire_data.set_answer_by_name("教材使用语言", "英文" if book_name.isascii() else "中文")
+        else:
+            # 0: 无教材或讲义的 ID
+            questionnaire_data.set_answer_by_name("教材情况", "0")
+            # 很不幸的是，就算没教材，你还是得填教材名称和语言，不然过不了检查
+            questionnaire_data.set_answer_by_name("教材名称", "无")
+            questionnaire_data.set_answer_by_name("教材使用语言", "无教材")
+
+        # 从基本信息中提取授课语言
+        language = basic_info["授课语言"].strip("授课")
+        if language == "全中文":
+            language = "中文"
+        if language not in ("全英文", "中英文", "中文"):
+            language = "其他"
+        questionnaire_data.set_answer_by_name("授课语言", language)
+        # 填写课程类型信息（学位课或者选修课）
+        if is_main_course:
+            questionnaire_data.set_answer_by_name("选修情况", "学位课")
+        else:
+            questionnaire_data.set_answer_by_name("选修情况", "选修课")
+        # 填写所有选择题和填空题
+        for question in questionnaire_data.questions:
+            # 防止覆盖上面填写过的内容
+            if question.view == "radio" and questionnaire_data.answers.get(question.id) is None:
+                questionnaire_data.set_answer_by_id(question.id,
+                                                         value=("不合格", "合格", "良好", "优秀")[score])
+            # 填空题处理
+            if question.view == "textarea" and questionnaire_data.answers.get(question.id) is None:
+                if question.id in answers:
+                    questionnaire_data.set_answer_by_id(question.id, answers[question.id] or "无")
+                elif question.name in answers:
+                    questionnaire_data.set_answer_by_id(question.id, answers[question.name] or "无")
+                else:
+                    # 如果真的找不到填空题答案，用“无”填。
+                    questionnaire_data.set_answer_by_id(question.id, "无")
+
+        # 系统要求不能全是"良好"
+        if score == 3:
+            for question in questionnaire_data.questions:
+                # 把第一个选项中包含”优秀“的选择题答案改成”良好“
+                if question.view == "radio" and question.options and question.options[0].get("value") == "优秀":
+                    questionnaire_data.set_answer_by_id(question.id, "良好")
+                    break
 
     def submitQuestionnaire(self, questionnaire: GraduateQuestionnaire, questionnaire_data: GraduateQuestionnaireData):
         """

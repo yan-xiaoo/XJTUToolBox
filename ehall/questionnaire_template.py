@@ -72,8 +72,9 @@ class QuestionnaireTemplate:
     def append(self, data: QuestionnaireTemplateData):
         self.data.append(data)
 
-    def score_to_int(self, score: Score) -> int:
-        return {self.Score.HUNDRED: 100, self.Score.EIGHTY: 80, self.Score.SIXTY: 60, self.Score.FORTY: 40}[score]
+    @classmethod
+    def score_to_int(cls, score: Score) -> int:
+        return {cls.Score.HUNDRED: 100, cls.Score.EIGHTY: 80, cls.Score.SIXTY: 60, cls.Score.FORTY: 40}[score]
 
     def json(self):
         return {

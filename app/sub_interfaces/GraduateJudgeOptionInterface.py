@@ -30,6 +30,7 @@ class _CollapsibleTextSection(QWidget):
         self.headerLayout.setSpacing(8)
 
         self.titleLabel = BodyLabel(title, self)
+        self.titleLabel.setMaximumWidth(max_width)
         # 长标题自动换行，避免拉伸对话框
         try:
             self.titleLabel.setWordWrap(True)
@@ -217,6 +218,19 @@ class GraduateJudgeOptionInterface(ScrollArea):
 
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+
+        # 设置空白背景
+        self.setObjectName("GraduateJudgeOptionInterface")
+        self.view.setObjectName("view")
+        self.setStyleSheet("""
+        GraduateJudgeOptionInterface, #view{
+            background-color: transparent;
+        }
+        QScrollArea {
+            border: none;
+            background-color: transparent;
+        }
+        """)
 
         self.load()
 

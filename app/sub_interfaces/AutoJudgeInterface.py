@@ -5,7 +5,7 @@ from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFrame
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ScrollArea, PrimaryPushButton, \
     InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, TitleLabel, MessageBox
-from ehall import Questionnaire
+from ehall import Questionnaire, QuestionnaireTemplate
 from gste.judge import GraduateQuestionnaire, GraduateQuestionnaireData
 from .GraduateJudgeOptionInterface import GraduateJudgeOptionMessageBox
 from .JudgeOptionInterface import JudgeOptionMessageBox
@@ -121,6 +121,7 @@ class AutoJudgeInterface(ScrollArea):
         self.gradateThread.questionnaireData.connect(self._onGetGraduateQuestionnaireData)
         self.gradateThread.finished.connect(self.unlockAllCards)
         self.gradateThread.submitSuccess.connect(self.onGraduateSubmitSuccess)
+        self.gradateThread.allSubmitSuccess.connect(self.onStartButtonClicked)
 
         self.processWidget = None
         self.graduateProcessWidget = None
@@ -346,11 +347,6 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot()
     def onJudgeAllButtonClicked(self):
-        if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
-            # 研究生暂时不支持
-            self.onThreadError("", self.tr("抱歉，由于问卷题目可能不同，研究生暂时不支持一键评教"))
-            return
-
         # 先检查是否有待评教的课程
         if len(self.questionnaireWidgets) == 0:
             if self.currentFrame == self.questionnaireFrame:
@@ -363,7 +359,22 @@ class AutoJudgeInterface(ScrollArea):
             return
 
         dev_interface = JudgeAllOptionMessageBox(self.thread_, self)
-        dev_interface.exec()
+        if dev_interface.exec():
+            score = dev_interface.getScore()
+            text = dev_interface.getText()
+            if accounts.current is not None:
+                if accounts.current.type == accounts.current.POSTGRADUATE:
+                    self.gradateThread.score = score
+                    self.gradateThread.single_answer = text
+                    self.gradateThread.choice = GraduateJudgeChoice.JUDGE_ALL
+                    self.gradateThread.start()
+                else:
+                    self.thread_.msgAll = text
+                    self.thread_.scoreAll = score
+                    self.thread_.choice = JudgeChoice.JUDGE_ALL
+                    self.thread_.start()
+            else:
+                self.onThreadError(self.tr("未登录"), self.tr("请先添加一个账号"))
 
     @pyqtSlot(list, list)
     def onGetQuestionnaireFinish(self, questionnaires: list, finished_questionnaires: list):
