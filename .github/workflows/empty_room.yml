@@ -2,8 +2,8 @@ name: Upload Empty Room JSON to R2
 
 on:
   schedule:
-    # 每天 16:00 UTC 等于北京时间次日 00:00 (UTC+8)
-    - cron: '0 16 * * *'
+    # 每天 22:00 UTC 等于北京时间次日 06:00 (UTC+8)
+    - cron: '0 22 * * *'
   workflow_dispatch: {}
 
 jobs:
