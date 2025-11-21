@@ -2,8 +2,9 @@ name: Upload Empty Room JSON to R2
 
 on:
   schedule:
-    # 每天 22:00 UTC 等于北京时间次日 06:00 (UTC+8)
-    - cron: '0 22 * * *'
+    # 每天 00:17 UTC 等于北京时间次日 08:17 (UTC+8)
+    # 既然设置 0 点和 6 点都不行，我找个有零有整的时间总可以了吧…
+    - cron: '17 0 * * *'
   workflow_dispatch: {}
 
 jobs:
