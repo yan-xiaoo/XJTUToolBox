@@ -9,6 +9,7 @@ test.py
 config
 build
 dist
+.python-version
 
 docs/.vitepress/dist
 docs/.vitepress/cache

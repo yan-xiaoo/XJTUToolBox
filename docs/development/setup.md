@@ -1,163 +1,110 @@
 # XJTUToolBox 开发环境搭建指南
 
-> 欢迎参与 XJTUToolBox 的开发！本指南将帮助您快速搭建一个可用的开发环境。
+> 欢迎参与 XJTUToolBox 的开发！本指南将帮助您快速搭建开发环境。
 
 ## 1. 前置准备
 
-在开始之前，请确保您的电脑已经安装了必要的工具。
+在开始之前,请确保您的系统已安装以下必要工具。
 
 ### 安装 Git
 
-如果您尚未安装 Git，请从 [git-scm.com](https://git-scm.com/downloads) 下载并安装。
+若您尚未安装 Git,请访问 [git-scm.com](https://git-scm.com/downloads) 下载并安装。
 
 ### 安装 Python
 
-请确保您安装了 **Python 3.12 或更高版本**。您可以从 [Python 官网](https://www.python.org/downloads/) 下载。
+本项目需要 **Python 3.10 或更高版本**。本项目的依赖管理工具 uv 会自动选择或安装一个合适的 Python 版本，您无需手动安装 Python。
 
 ### 克隆仓库
 
-使用 `git` 命令将项目代码克隆到您的本地电脑。
+使用以下命令将项目克隆到本地:
 
 ```bash
 git clone https://github.com/yan-xiaoo/XJTUToolBox.git
 ```
 
-::: tip 贡献代码？
-如果您希望参与项目贡献，建议先 Fork 本仓库到您自己的 GitHub 账户下，然后克隆您自己账户下的仓库。这样可以方便地提交 Pull Request。
+::: tip 参与贡献？
+若您希望为项目贡献代码,建议先 Fork 本仓库到您的 GitHub 账户,然后克隆 Fork 后的仓库。这样便于后续提交 Pull Request。
 :::
 
 ## 2. 环境搭建与依赖安装
 
-接下来，我们将创建虚拟环境并为不同操作系统安装依赖。
+本项目使用 uv 管理依赖。uv 是一个极速、现代化的 Python 包管理器,能够快速解析并安装大型项目的依赖。
 
-### Windows 或 GNU/Linux
+首先,请参考以下文档安装 uv:
 
-1.  **创建并激活虚拟环境**
+[uv 安装指南](https://docs.astral.sh/uv/getting-started/installation/)([社区中文指南](https://uv.doczh.com/getting-started/installation/))
 
-    在项目根目录下打开终端（Windows 用户建议使用 PowerShell），运行以下命令创建虚拟环境：
+安装完成后,在项目根目录下运行以下命令,即可一键创建虚拟环境并安装所有依赖:
 
-    ```bash
-    python3 -m venv .venv
-    ```
+```bash
+uv sync
+```
 
-    然后激活它：
+### macOS 上的额外操作
 
-    ```powershell
-    # Windows (PowerShell)
-    .venv\Scripts\Activate.ps1
-    ```
+**安装 `pyobjus`(用于消息通知)**
 
-    ```bash
-    # GNU/Linux
-    source .venv/bin/activate
-    ```
+`pyobjus` 库为 macOS 提供消息通知功能。若不安装此库,程序将无法在 macOS 上发送通知,但其他功能不受影响。
 
-2.  **安装依赖**
+由于 `pyobjus` 的一个关键修复尚未发布到 PyPI,需要从源码编译安装:
 
-    激活虚拟环境后，运行以下命令安装项目所需的库：
+::: tip 为什么不集成到 uv?
+uv 会在所有平台下尝试解析 `pyobjus` 依赖,即使只有 macOS 需要。然而 `pyobjus` 源代码中包含 "aux" 等在 Windows 上不被允许的目录名称,因此若将其添加到 `pyproject.toml` 中,会导致 uv 在 Windows 平台下报错。
+:::
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+# 1. 克隆 pyobjus 仓库
+git clone https://github.com/kivy/pyobjus.git
 
-### macOS
+# 2. 进入目录并编译安装
+cd pyobjus
+make build_ext
+python setup.py install
+```
 
-1.  **创建并激活虚拟环境**
-
-    在项目根目录下打开终端，运行以下命令：
-
-    ```bash
-    python3 -m venv .venv
-    source .venv/bin/activate
-    ```
-
-2.  **安装通用依赖**
-
-    macOS 用户需要使用特定的依赖文件：
-
-    ```bash
-    pip install -r requirements_osx.txt
-    ```
-
-3.  **安装 `pyobjus`（用于消息通知）**
-
-    由于 `pyobjus` 的一个关键修复尚未发布到 PyPI，我们需要从源码编译安装它。
-
-    ```bash
-    # 1. 克隆 pyobjus 仓库
-    git clone https://github.com/kivy/pyobjus.git
-    
-    # 2. 安装 Cython 编译工具
-    pip install Cython==3.0.12
-    
-    # 3. 进入目录并编译安装
-    cd pyobjus
-    make build_ext
-    python setup.py install
-    ```
-
-    ::: warning 缺少开发工具？
-    如果在 `make` 步骤中看到 `zsh: command not found: make` 错误，说明您的 macOS 缺少必要的开发工具。请先在终端执行 `xcode-select --install` 命令来安装它们。
-    :::
+::: warning 缺少开发工具?
+若在执行 `make` 时遇到 `zsh: command not found: make` 错误,说明您的系统缺少 C++ 编译器等开发工具。请先在终端执行 `xcode-select --install` 安装 Xcode 命令行工具。
+:::
 
 ## 3. 运行程序
 
-完成以上所有步骤后，确保您的虚拟环境处于激活状态，然后运行主程序：
+完成以上步骤后,即可运行主程序:
+
+```bash
+uv run app.py
+```
+
+或者在虚拟环境已激活的情况下,直接运行:
 
 ```bash
 python app.py
 ```
 
-## 4. 日常开发/运行
+## 4. 打包程序
 
-每次开始工作时，请记得先进入项目目录，并激活虚拟环境。
+若需要将程序打包为独立的可执行文件,可以使用 `PyInstaller`。具体步骤如下：
 
-- **Windows (PowerShell):**
+1.  安装开发依赖
 
-  ```powershell
-  .venv\Scripts\Activate.ps1
-  python app.py
-  ```
-
-- **macOS 或 GNU/Linux:**
-
-  ```bash
-  source .venv/bin/activate
-  python app.py
-  ```
-
-## 5. 打包程序
-
-如果您想将程序打包为独立的可执行文件，可以使用 `PyInstaller`。具体方法如下：
-
-1.  **安装 PyInstaller 和 Pillow**
+    PyInstaller 和 Pillow 已设置为项目的开发依赖,通过以下命令安装：
 
     ```bash
-    pip install pyinstaller pillow
+    uv sync --dev
     ```
     
-2. 打包程序：
+2. 执行打包
     
-    - Windows 用户：
-      生成主程序：
-      ```bash
-      pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" --hidden-import plyer.platforms.win.notification app.py
-      ```
-      生成 XJTUToolBox Updater（自动更新程序）：
-      ```bash
-      pyinstaller -F --distpath ./dist/XJTUToolbox -n "XJTUToolbox Updater" --icon "assets/icons/updater_icon.ico" updater.py -y
-      ```
+    不同系统的打包逻辑已集成在单个 Python 文件中,只需运行：
+    
+    ```bash
+    uv run build.py
+    ```
+      
+完成后,您将获得与 [GitHub Releases](https://github.com/yan-xiaoo/XJTUToolBox/releases) 页面上一致的可执行文件。
 
-    - macOS 用户：
-    
-      ```bash
-      pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" --hidden-import plyer.platforms.macosx.notification app.py
-      ```
-      
-    - GNU/Linux 发行版用户：
-    
-      ```bash
-      pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" --hidden-import plyer.platforms.linux.notification app.py
-      ```
-      
-按照上述步骤，您就能得到和 [GitHub Releases](https://github.com/yan-xiaoo/XJTUToolBox/releases) 页面上一致的可执行文件。
+
+## 关于本网站的开发
+
+本网站基于 `vitepress` 构建,源代码位于 GitHub 仓库的 `docs` 目录下。
+
+仓库根目录下的 `package.json` 与 `package-lock.json` 文件仅用于管理前端网站的依赖。若您只需开发 XJTUToolBox 程序本身,可以忽略这两个文件。

@@ -32,7 +32,8 @@ dependencies = [
     "pytz~=2025.2",
     "cryptography~=45.0.5",
     "pyjwt~=2.10.1",
-    "keyring~=25.6.0"
+    "keyring~=25.6.0",
+    "Cython~=3.2.1; sys_platform == 'darwin'"
 ]
 
 [tool.uv]
