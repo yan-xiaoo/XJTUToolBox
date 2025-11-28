@@ -6,8 +6,8 @@ import enum
 import json
 import re
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_v1_5
 from lxml import html
 from typing import Tuple, Optional
 
@@ -439,13 +439,11 @@ class NewLogin:
             public_key = self.rsa_public_key
 
         # 加载公钥
-        public_key_obj = serialization.load_pem_public_key(public_key.encode())
+        public_key_obj = RSA.import_key(public_key.encode())
+        cipher = PKCS1_v1_5.new(public_key_obj)
 
         # RSA 加密
-        encrypted_password = public_key_obj.encrypt(
-            password.encode(),
-            padding.PKCS1v15()
-        )
+        encrypted_password = cipher.encrypt(password.encode())
 
         # 转换为 base64 编码
         encrypted_password_base64 = base64.b64encode(encrypted_password).decode()
