@@ -155,7 +155,9 @@ export default withMermaid(defineConfig({
         text: '用户手册',
         items: [
           { text: '快速开始', link: '/tutorial/quick-start' },
-          { text: '常见问题', link: '/tutorial/faq' }
+          { text: '常见问题', link: '/tutorial/faq' },
+          { text: '登录与账户管理', link: '/tutorial/account' },
+          { text: '课表与考勤', link: '/tutorial/schedule' }
         ]
       },
       {
