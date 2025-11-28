@@ -26,37 +26,20 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install dependencies(Windows)
-        if: runner.os == 'Windows'
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pillow pyinstaller
-      - name: Install dependencies(macOS)
-        if: runner.os == 'macOS'
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements_osx.txt pillow pyinstaller
-      - name: Create Executable(Windows)
-        if: runner.os == 'Windows'
-        run: |
-          pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" --hidden-import plyer.platforms.win.notification app.py
+      - name: Install UV
+        uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
       - name: Install pyobjus(macOS)
         if: runner.os == 'macOS'
         run: |
-          pip install Cython==3.0.12
           git clone https://github.com/kivy/pyobjus.git
           cd pyobjus
           make build_ext
           pip install .
           cd ..
-      - name: Create Executable(macOS)
-        if: runner.os == 'macOS'
-        run: |
-          pyinstaller --windowed --name XJTUToolbox --collect-datas=fake_useragent --icon "assets/icons/main_icon.ico" --add-data "assets:assets" --add-data "ehall/templates:ehall/templates" --hidden-import plyer.platforms.macosx.notification app.py
-      - name: Create Updater(Windows)
-        if: runner.os == 'Windows'
-        run: |
-          pyinstaller -F --distpath ./dist/XJTUToolbox -n "XJTUToolbox Updater" --icon "assets/icons/updater_icon.ico" updater.py -y
+      - name: Build Application
+        run: uv run build.py
       - name: Archive(windows)
         if: runner.os == 'Windows'
         run: |
