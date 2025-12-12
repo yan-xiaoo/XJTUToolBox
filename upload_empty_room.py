@@ -38,6 +38,42 @@ PASSWORD = ""
 FP_VISITOR_ID = ""
 
 
+class RetryEmptyRoom(EmptyRoom):
+    """
+    一个封装 EmptyRoom 的子类，对于其中的每个方法，在遇到网络错误时都会尝试重试数次，全部失败后才会抛出异常。
+    """
+    def __init__(self, session: requests.Session, retry_times: int = 3, retry_delay: float = 2.0):
+        super().__init__(session)
+
+        self.retry_times = retry_times
+        self.retry_delay = retry_delay
+
+        self.getBuildingCode = self.patcher(self.getBuildingCode, retry_times, retry_delay)
+        self.getCampusCode = self.patcher(self.getCampusCode, retry_times, retry_delay)
+        self.getEmptyRoom = self.patcher(self.getEmptyRoom, retry_times, retry_delay)
+        self.getEmptyRoomInDay = self.patcher(self.getEmptyRoomInDay, retry_times, retry_delay)
+
+    
+    @staticmethod
+    def patcher(func, retry_times: int, retry_delay: float):
+        """
+        一个装饰器，用于给函数添加重试机制
+        """
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for _ in range(retry_times):
+                try:
+                    return func(*args, **kwargs)
+                except (requests.RequestException, json.JSONDecodeError) as e:
+                    print("请求出现异常，正在重试...", e)
+                    last_exception = e
+                    time.sleep(retry_delay)
+            # 如果出现了 retry_times 次数更多的异常，那么就抛出最后一次异常
+            if last_exception is not None:
+                raise last_exception
+        return wrapper
+
+
 def _env(name: str, default: str | None = None, required: bool = True) -> str:
     """读取环境变量；在 GitHub Actions 中，secrets 会通过 `env` 注入到进程环境。
 
@@ -146,7 +182,7 @@ def get_empty_room_info(session: requests.Session, date: datetime.date, sleep_ti
     :param sleep_time: 每次请求后等待的时间，单位为秒
     :return: 空闲教室的信息，字典格式
     """
-    util = EmptyRoom(session)
+    util = RetryEmptyRoom(session)
     logger.info("正在获取校区代码...")
     campus_codes = util.getCampusCode()
     logger.info("正在获取教学楼代码...")
