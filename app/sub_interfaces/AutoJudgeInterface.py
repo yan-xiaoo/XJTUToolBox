@@ -289,6 +289,7 @@ class AutoJudgeInterface(ScrollArea):
     @pyqtSlot()
     def onCurrentAccountChanged(self):
         self.thread_.account = accounts.current
+        self.gradateThread.account = accounts.current
         self.clearWidgets()
         self.switchTo(self.startFrame)
 
