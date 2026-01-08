@@ -6,6 +6,10 @@ on:
     tags:
       - "v*.*.*"
 
+env:
+  # Ensures Python uses UTF-8 encoding by default
+  PYTHONUTF8: 1
+
 permissions:
   contents: write
 
