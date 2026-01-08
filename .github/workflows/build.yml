@@ -33,6 +33,7 @@ jobs:
       - name: Install pyobjus(macOS)
         if: runner.os == 'macOS'
         run: |
+          source .venv/bin/activate
           git clone https://github.com/kivy/pyobjus.git
           cd pyobjus
           make build_ext

@@ -487,10 +487,13 @@ class NoticeInterface(ScrollArea):
             one = self.notices[index]
             if not self.noticeManager.satisfy_filter(one):
                 self.notices.pop(index)
-                one_widget = self.noticeWidgets[index]
-                self.noticeFrameLayout.removeWidget(one_widget)
-                self.noticeWidgets.remove(one_widget)
-                one_widget.deleteLater()
+                try:
+                    one_widget = self.noticeWidgets[index]
+                    self.noticeFrameLayout.removeWidget(one_widget)
+                    self.noticeWidgets.remove(one_widget)
+                    one_widget.deleteLater()
+                except IndexError:
+                    pass
                 index -= 1
             index += 1
 

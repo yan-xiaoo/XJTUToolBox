@@ -3868,6 +3868,7 @@ dependencies = [
     { name = "pyqt5-qt5", version = "5.15.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
     { name = "pytz" },
     { name = "requests" },
+    { name = "setuptools", marker = "sys_platform == 'darwin'" },
     { name = "tqdm" },
 ]
 
@@ -3901,6 +3902,7 @@ requires-dist = [
     { name = "pyqt5-qt5", marker = "sys_platform == 'win32'", specifier = ">=5.15,<=5.15.2" },
     { name = "pytz", specifier = "~=2025.2" },
     { name = "requests", specifier = "~=2.32.0" },
+    { name = "setuptools", marker = "sys_platform == 'darwin'", specifier = ">=80.9.0" },
     { name = "tqdm", specifier = "~=4.67.1" },
 ]
 
