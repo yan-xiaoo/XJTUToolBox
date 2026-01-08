@@ -4,10 +4,9 @@ import datetime
 import urllib.parse
 from typing import List
 
-import requests
 from lxml import etree
 
-from notification.crawlers.crawler import Crawler
+from notification.crawlers.crawler import Crawler, pass_challenge_for_website
 from ..notification import Notification
 from ..source import Source
 
@@ -31,9 +30,10 @@ class SE(Crawler):
         """
         notifications = []
         url = self.url
+        session = pass_challenge_for_website(url, challenge_url="https://se.xjtu.edu.cn/dynamic_challenge")
 
         for i in range(self.pages):
-            response = requests.get(url)
+            response = session.get(url)
             response.raise_for_status()
             html = response.content.decode("utf-8")
 

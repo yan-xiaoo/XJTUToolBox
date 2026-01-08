@@ -4,10 +4,9 @@ import datetime
 import urllib.parse
 from typing import List
 
-import requests
 from lxml import etree
 
-from notification.crawlers.crawler import Crawler
+from notification.crawlers.crawler import Crawler, pass_challenge_for_website
 from ..notification import Notification
 from ..source import Source
 
@@ -31,9 +30,11 @@ class JWC(Crawler):
         """
         url = self.url
         notifications = []
+        session = pass_challenge_for_website(url, "https://dean.xjtu.edu.cn/dynamic_challenge")
 
         for i in range(self.pages):
-            response = requests.get(url)
+            response = session.get(url)
+
             response.raise_for_status()
             # 不知道为啥这里必须指定解码方式为 utf-8。看来网站返回响应的编码方式是乱的
             html = response.content.decode("utf-8")
