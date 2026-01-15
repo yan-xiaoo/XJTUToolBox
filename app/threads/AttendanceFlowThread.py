@@ -52,7 +52,7 @@ class AttendanceFlowThread(ProcessThread):
     def search(self, session):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在查询考勤流水..."))
-        lookup_wrapper = Attendance(session, use_webvpn=self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+        lookup_wrapper = Attendance(session, use_webvpn=self.session.login_method == AttendanceSession.LoginMethod.WEBVPN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
         while True:
             try:
                 result = lookup_wrapper.getFlowRecordWithPage(self.page, self.size)

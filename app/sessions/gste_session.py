@@ -20,8 +20,7 @@ class GSTESession(CommonLoginSession):
         super().__init__(time)
         self.login_method = None
 
-    def login(self, username, password):
-        self.cookies.clear()
+    def _login(self, username, password, *args, **kwargs):
         login_util = NewLogin(GSTE_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
         login_util.login_or_raise(username, password)
 
@@ -46,4 +45,4 @@ class GSTESession(CommonLoginSession):
         self.reset_timeout()
         self.has_login = True
 
-    reLogin = login
+    _re_login = _login

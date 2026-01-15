@@ -8,11 +8,11 @@ class GMISSession(CommonLoginSession):
     """
     ehall.xjtu.edu.cn 登录用的 Session
     """
-    def login(self, username, password):
+    def _login(self, username, password, *args, **kwargs):
         login_util = NewLogin(GMIS_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
         login_util.login_or_raise(username, password, account_type=NewLogin.POSTGRADUATE)
 
         self.reset_timeout()
         self.has_login = True
 
-    reLogin = login
+    re_login = _login

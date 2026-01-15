@@ -50,16 +50,32 @@ class CommonLoginSession(requests.Session, metaclass=ABCMeta):
 
         self._has_login = value
 
-    @abstractmethod
-    def login(self, username, password):
+    def login(self, username, password, *args, **kwargs):
         """
         登录。此方法应当被重载，实现登录的操作。
         """
+        # 必须清除目前已有的 cookies，避免登录状态混乱
+        self.cookies.clear()
+        self._login(username, password, *args, **kwargs)
 
     @abstractmethod
-    def reLogin(self, username, password):
+    def _login(self, username, password, *args, **kwargs):
+        """
+        登录。此方法应当被重载，以便实际实现登录的操作。
+        """
+
+    def re_login(self, username, password, *args, **kwargs):
         """
         重新登录。此方法应当被重载，实现重新登录的操作。
+        """
+        # 必须清除目前已有的 cookies，避免登录状态混乱
+        self.cookies.clear()
+        self._re_login(username, password, *args, **kwargs)
+
+    @abstractmethod
+    def _re_login(self, username, password, *args, **kwargs):
+        """
+        重新登录。此方法应当被重载，以便实际实现重新登录的操作。
         """
 
     def request(self, method, url, *args, **kwargs):

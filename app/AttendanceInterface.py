@@ -136,7 +136,7 @@ class AttendanceFlowWidget(QFrame):
         :return: 用户选择是否要重新登录
         """
         if self.thread_.session.has_login:
-            if self.thread_.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN:
+            if self.thread_.session.login_method == self.thread_.session.LoginMethod.WEBVPN:
                 w = MessageBox(self.tr("确认重新登录"),
                                self.tr("你已经通过 WebVPN 登录考勤系统，是否要清除登录信息并重新登录？"),
                                self.parent().parent())

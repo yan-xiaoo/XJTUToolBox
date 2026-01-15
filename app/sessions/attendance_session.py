@@ -19,10 +19,8 @@ class AttendanceSession(CommonLoginSession):
         super().__init__(time)
         self.login_method = None
 
-    def login(self, username, password, is_postgraduate=False):
-        # 清除可能已有的登录信息
-        # 否则，登录系统会有问题
-        self.cookies.clear()
+    def _login(self, username, password, *args, **kwargs):
+        is_postgraduate = kwargs.get("is_postgraduate", False)
         login_util = AttendanceNewLogin(self, is_postgraduate=is_postgraduate, visitor_id=str(cfg.loginId.value))
         login_util.login_or_raise(username, password)
 
@@ -47,4 +45,4 @@ class AttendanceSession(CommonLoginSession):
         self.reset_timeout()
         self.has_login = True
 
-    reLogin = login
+    _re_login = _login
