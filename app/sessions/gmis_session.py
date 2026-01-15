@@ -15,4 +15,4 @@ class GMISSession(CommonLoginSession):
         self.reset_timeout()
         self.has_login = True
 
-    re_login = _login
+    _re_login = _login
