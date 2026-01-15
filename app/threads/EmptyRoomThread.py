@@ -38,30 +38,14 @@ class EmptyRoomThread(ProcessThread):
         """
         使当前账户的 session 登录 ehall
         """
-        self.setIndeterminate.emit(False)
-        self.progressChanged.emit(0)
+        self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录 EHALL..."))
-        self.progressChanged.emit(10)
-        # 防止重复登录
-        self.session.cookies.clear()
-        login = NewLogin(EHALL_LOGIN_URL, session=self.session, visitor_id=str(cfg.loginId.value))
-        self.messageChanged.emit(self.tr("正在验证身份..."))
-        self.progressChanged.emit(33)
+        self.session.login(accounts.current.username, accounts.current.password)
         if not self.can_run:
             return False
-        login.login_or_raise(accounts.current.username, accounts.current.password)
-        if not self.can_run:
-            return False
-        self.progressChanged.emit(66)
-        self.messageChanged.emit(self.tr("正在完成登录..."))
-        self.progressChanged.emit(88)
-
-        self.session.has_login = True
-        if not self.can_run:
-            return False
-
         # 进入课表页面
         self.util = EmptyRoom(self.session)
+        self.setIndeterminate.emit(False)
         self.progressChanged.emit(90)
 
         return True

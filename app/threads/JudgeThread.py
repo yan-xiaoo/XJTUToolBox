@@ -49,29 +49,15 @@ class JudgeThread(ProcessThread):
         return self.account.session_manager.get_session("ehall")
 
     def login(self) -> bool:
-        self.setIndeterminate.emit(False)
+        self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录 EHALL..."))
-        self.progressChanged.emit(10)
-        # 防止重复登录
-        self.session.cookies.clear()
-        login = NewLogin(EHALL_LOGIN_URL, session=self.session, visitor_id=str(cfg.loginId.value))
-        self.messageChanged.emit(self.tr("正在验证身份..."))
-        self.progressChanged.emit(33)
-        if not self.can_run:
-            return False
-        login.login_or_raise(self.account.username, self.account.password)
-        if not self.can_run:
-            return False
-        self.progressChanged.emit(66)
-        self.messageChanged.emit(self.tr("正在完成登录..."))
-        self.progressChanged.emit(88)
-
+        self.session.login(self.account.username, self.account.password)
         self.session.has_login = True
 
         # 进入评教区域
         self.messageChanged.emit(self.tr("正在进入评教系统..."))
         self.judge_ = AutoJudge(self.session)
-        self.progressChanged.emit(100)
+        self.setIndeterminate.emit(False)
 
         return True
 

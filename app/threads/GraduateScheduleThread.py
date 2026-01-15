@@ -39,29 +39,16 @@ class GraduateScheduleThread(ProcessThread):
         """
         使当前账户的 session 登录研究生管理信息系统
         """
-        self.setIndeterminate.emit(False)
-        self.progressChanged.emit(0)
+        self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
-        self.progressChanged.emit(10)
-        # 防止重复登录
-        self.session.cookies.clear()
-        login = NewLogin(GMIS_LOGIN_URL, session=self.session, visitor_id=str(cfg.loginId.value))
-        self.messageChanged.emit(self.tr("正在验证身份..."))
-        self.progressChanged.emit(33)
-        if not self.can_run:
-            return False
-        login.login_or_raise(accounts.current.username, accounts.current.password, account_type=NewLogin.POSTGRADUATE)
-        if not self.can_run:
-            return False
-        self.progressChanged.emit(88)
-
+        self.session.login(accounts.current.username, accounts.current.password)
         self.session.has_login = True
         if not self.can_run:
             return False
 
         # 进入课表页面
         self.util = GraduateSchedule(self.session)
-        self.progressChanged.emit(100)
+        self.setIndeterminate.emit(False)
 
         return True
 
