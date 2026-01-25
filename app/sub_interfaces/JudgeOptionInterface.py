@@ -8,7 +8,7 @@ from qfluentwidgets import ScrollArea, MessageBoxBase, SubtitleLabel, ToolTipFil
 from app.threads.JudgeThread import JudgeChoice
 from app.threads.ProcessWidget import ProcessThread
 from app.utils import StyleSheet, accounts, AccountDataManager
-from ehall import Questionnaire, QuestionnaireTemplate
+from jwxt import Questionnaire, QuestionnaireTemplate
 
 
 class _CustomFlyoutView(FlyoutViewBase):

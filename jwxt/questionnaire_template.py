@@ -134,7 +134,7 @@ class QuestionnaireTemplate:
         :raises FileNotFoundError: 未找到对应的问卷模版文件
         :return: 问卷模版对象
         """
-        with open(os.path.join("ehall", "templates", f"{cls.__type_map[type_]}-{cls.__score_map[score]}.json"), "r", encoding="utf-8") as f:
+        with open(os.path.join("jwxt", "templates", f"{cls.__type_map[type_]}-{cls.__score_map[score]}.json"), "r", encoding="utf-8") as f:
             return cls.from_json(json.load(f))
 
 

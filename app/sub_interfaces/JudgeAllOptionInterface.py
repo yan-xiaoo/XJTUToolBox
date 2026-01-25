@@ -1,14 +1,11 @@
-from collections.abc import Callable
-
-from PyQt5.QtCore import pyqtSlot, Qt, QObject, pyqtSignal
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from PyQt5.QtCore import pyqtSlot, Qt, pyqtSignal
+from PyQt5.QtWidgets import QWidget, QVBoxLayout
 from qfluentwidgets import ScrollArea, MessageBoxBase, SubtitleLabel, ToolTipFilter, ComboBox, ToolTipPosition, \
-    PlainTextEdit, FlyoutViewBase, BodyLabel, PrimaryPushButton, Flyout, CaptionLabel, PushButton
+    PlainTextEdit, CaptionLabel
 
-from app.threads.JudgeThread import JudgeChoice
 from app.threads.ProcessWidget import ProcessThread
-from app.utils import StyleSheet, accounts, AccountDataManager
-from ehall import Questionnaire, QuestionnaireTemplate
+from app.utils import StyleSheet, accounts
+from jwxt import QuestionnaireTemplate
 
 
 class JudgeAllOptionInterface(ScrollArea):

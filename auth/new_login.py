@@ -11,7 +11,7 @@ from Crypto.Cipher import PKCS1_v1_5
 from lxml import html
 from typing import Tuple, Optional
 
-from .constant import EHALL_LOGIN_URL
+from . import JWXT_LOGIN_URL
 from .util import get_session, ServerError, generate_fp_visitor_id, getVPNUrl
 
 
@@ -543,7 +543,7 @@ def console_login():
     """
     此函数是登录系统使用的示例函数，通过 input 从标准输入接收所有可能需要的用户响应（比如验证码、手机验证码、账户选择）。
     """
-    login_instance = NewLogin(EHALL_LOGIN_URL)
+    login_instance = NewLogin(JWXT_LOGIN_URL)
     state, info = login_instance.login("your_username", "your_password")
 
     session = None

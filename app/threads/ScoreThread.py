@@ -1,12 +1,11 @@
 import requests
 from PyQt5.QtCore import pyqtSignal
 
-from auth.new_login import NewLogin
-from ehall.score import Score
-from ..sessions.ehall_session import EhallSession
+from jwxt.score import Score
+from ..sessions.jwxt_session import JWXTSession
 from ..threads.ProcessWidget import ProcessThread
 from ..utils import accounts, logger, cfg
-from auth import EHALL_LOGIN_URL, ServerError
+from auth import ServerError
 
 
 class ScoreThread(ProcessThread):
@@ -28,18 +27,18 @@ class ScoreThread(ProcessThread):
         self.util = None
 
     @property
-    def session(self) -> EhallSession:
+    def session(self) -> JWXTSession:
         """
-        获取当前账户用于访问 ehall 的 session
+        获取当前账户用于访问教务系统的 session
         """
-        return accounts.current.session_manager.get_session("ehall")
+        return accounts.current.session_manager.get_session("jwxt")
 
     def login(self):
         """
-        使当前账户的 session 登录 ehall
+        使当前账户的 session 登录教务系统
         """
         self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在登录 EHALL..."))
+        self.messageChanged.emit(self.tr("正在登录教务系统..."))
         self.session.login(accounts.current.username, accounts.current.password)
         self.session.has_login = True
         if not self.can_run:
@@ -71,7 +70,6 @@ class ScoreThread(ProcessThread):
             if self.session.has_login:
                 self.util = Score(self.session)
             else:
-                # 手动登录。虽然 EhallSession 有自动登录功能，但是为了显示进度条，还是一步一步手动登录。
                 result = self.login()
                 if not result:
                     self.canceled.emit()

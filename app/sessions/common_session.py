@@ -10,9 +10,7 @@ class CommonLoginSession(requests.Session, metaclass=ABCMeta):
     """
     需要登录的所有网站的 Session 基类，具有登录/重新登录的接口。
     由于会出现无限递归，此类自身不支持自动重新登录，需要外界检查 has_timeout 接口并手动调用登录。
-    在本程序的其他模块，为了在登录时给用户进度提示，统一采用如下方法：
-    - 第一次获得 session 时，检查其是否已经登录，如果未登录，则更改进度提示并手动调用 login 方法。
-    - 之后运行时，不再检查是否已经登录，依靠本类的功能实现重新登录。
+    在本程序的其他模块，统一使用 session 提供的方法登录，没有具体的进度提示。
     """
     def __init__(self, timeout=15*60):
         """

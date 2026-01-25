@@ -11,8 +11,9 @@ import boto3
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from auth.new_login import NewLogin, EHALL_LOGIN_URL
-from ehall.empty_room import EmptyRoom, CAMPUS_BUILDING_DICT
+from auth.new_login import NewLogin
+from auth.constant import JWXT_LOGIN_URL
+from jwxt.empty_room import EmptyRoom, CAMPUS_BUILDING_DICT
 
 # 此文件需要 Amazon AWS 的 Python 库才能执行。此运行依赖不包含在 requirements.txt 中，因为绝大部分情况下不需要执行此文件。
 # 安装方式：
@@ -170,7 +171,7 @@ def login(username: str, password: str, fp_visitor_id: str) -> Any:
     """
     登录 Ehall 并且获得一个 Session
     """
-    util = NewLogin(EHALL_LOGIN_URL, visitor_id=fp_visitor_id)
+    util = NewLogin(JWXT_LOGIN_URL, visitor_id=fp_visitor_id)
     return util.login_or_raise(username, password, account_type=NewLogin.AccountType.UNDERGRADUATE)
 
 

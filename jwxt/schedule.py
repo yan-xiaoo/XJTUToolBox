@@ -2,19 +2,14 @@ from datetime import datetime
 
 import requests
 
-from .util import EhallUtil
-
 
 class Schedule:
-    """封装与 Ehall 上的课表系统相关的操作"""
+    """封装教务系统上的课表相关的操作"""
     def __init__(self, session: requests.Session):
         """
         创建一个课表访问对象。此类封装了一系列课表相关的请求接口。
         """
         self.session = session
-
-        self._util = EhallUtil(session)
-        self._util.useApp("4770397878132218")
 
         # 缓存的当前学年学期代码
         self._termString = None
@@ -32,7 +27,7 @@ class Schedule:
         """
         获取当前的学年学期代码，一定会发起请求
         """
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/dqxnxq.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/dqxnxq.do",
                                      headers={
                                          'Accept': 'application/json, text/javascript, */*; q=0.01'
                                      })
@@ -50,7 +45,7 @@ class Schedule:
             timestamp = self._termString
 
         response = self.session.post(
-            'https://ehall.xjtu.edu.cn/jwapp/sys/studentWdksapApp/modules/wdksap/wdksap.do',
+            'https://jwxt.xjtu.edu.cn/jwapp/sys/studentWdksapApp/modules/wdksap/wdksap.do',
             data={
                 "XNXQDM": timestamp,
                 "*order": "-KSRQ,-KSSJMS"
@@ -69,7 +64,7 @@ class Schedule:
                 self._termString = self.getCurrentTerm()
             timestamp = self._termString
 
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wdkb/modules/xskcb/xskcb.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wdkb/modules/xskcb/xskcb.do",
                                      data={
                                          "XNXQDM": timestamp
                                      })
@@ -88,7 +83,7 @@ class Schedule:
             timestamp = self._termString
 
         response = self.session.post(
-            'https://ehall.xjtu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/cxjcs.do',
+            'https://jwxt.xjtu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/cxjcs.do',
             data={
                 'XN': timestamp.split('-')[0] + '-' + timestamp.split('-')[1],
                 'XQ': timestamp.split('-')[2]

@@ -2,8 +2,8 @@
 # 直接使用 requests 对这些地址发起 get 请求即可跳转到统一身份认证登录页面。
 # 这些网址可以用在 Login 类构造函数的那个 "url" 参数中。
 
-# ehall 教务系统登录地址
-EHALL_LOGIN_URL = "https://ehall.xjtu.edu.cn/login?service=https://ehall.xjtu.edu.cn/new/index.html?browser=no"
+# 新教务系统的登录地址
+JWXT_LOGIN_URL = "https://jwxt.xjtu.edu.cn/jwapp/sys/homeapp/index.do"
 # webvpn 登录地址
 WEBVPN_LOGIN_URL = "https://webvpn.xjtu.edu.cn/login?cas_login=true"
 # 思源学堂登录地址

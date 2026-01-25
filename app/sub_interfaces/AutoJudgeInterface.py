@@ -5,7 +5,7 @@ from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFrame
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ScrollArea, PrimaryPushButton, \
     InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, TitleLabel, MessageBox
-from ehall import Questionnaire, QuestionnaireTemplate
+from jwxt import Questionnaire, QuestionnaireTemplate
 from gste.judge import GraduateQuestionnaire, GraduateQuestionnaireData
 from .GraduateJudgeOptionInterface import GraduateJudgeOptionMessageBox
 from .JudgeOptionInterface import JudgeOptionMessageBox
