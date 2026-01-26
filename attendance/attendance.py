@@ -3,13 +3,11 @@ import datetime
 import math
 import time
 from enum import Enum
-import warnings
 
 import requests
 
-from auth import Login, ATTENDANCE_URL, ServerError, WebVPNLogin, ATTENDANCE_WEBVPN_URL, get_session, getVPNUrl, \
-    get_timestamp, WEBVPN_LOGIN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL
-from auth.new_login import NewLogin, extract_alert_message, NewWebVPNLogin
+from auth import ATTENDANCE_URL, ATTENDANCE_WEBVPN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL, ServerError, getVPNUrl
+from auth.new_login import NewLogin, NewWebVPNLogin
 from schedule import Schedule, WeekSchedule, Lesson
 
 
@@ -95,31 +93,6 @@ class AttendanceWaterRecord:
         return {"sBh": self.sbh, "termString": self.term_string, "startTime": self.start_time, "endTime": self.end_time, "week": self.week, "location": self.location, "teacher": self.teacher, "status": self.status.value, "date": self.date.strftime("%Y-%m-%d")}
 
 
-class AttendanceLogin(Login):
-    """
-    考勤系统在登录后的每一个请求的头部都需要添加一个特殊的 header: "Synjones-Auth"
-    此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
-    请注意：必须使用 post_login 方法才能添加此 header
-    """
-    def __init__(self, session: requests.Session = None):
-        warnings.warn("此类已被弃用，因为旧的登录系统已失效", DeprecationWarning)
-        super().__init__(ATTENDANCE_URL, session)
-
-    def post_login(self) -> requests.Session:
-        """
-        登录并添加 token 到 session 头部
-        :raise ServerError，如果服务器返回错误信息
-        :return: session 对象，其实就是 requests.Session 对象
-        """
-        self.getUserIdentity()
-        url = self.getRedirectUrl()
-        response = self._get(url, allow_redirects=False)
-        token = response.headers["Location"].split("token=")[1].split('&')[0]
-        self.session.headers.update({"Synjones-Auth": "bearer " + token})
-        self._get(response.headers["Location"])
-        return self.session
-
-
 class AttendanceNewLogin(NewLogin):
     """
         考勤系统在登录后的每一个请求的头部都需要添加一个特殊的 header: "Synjones-Auth"
@@ -137,44 +110,6 @@ class AttendanceNewLogin(NewLogin):
         except IndexError:
             raise ServerError(500, "登录失败：服务器出现错误。")
         self.session.headers.update({"Synjones-Auth": "bearer " + token})
-
-
-class AttendanceWebVPNLogin(WebVPNLogin):
-    """
-    此类用于在挂 webvpn 的情况下进行登录考勤系统。
-    请注意，一般来说你需要先登录 WebVPN ，再利用 WebVPN 登录考勤系统，
-    即先用 WebVPNLogin 登录生成一个 session，再把 session 传入 AttendanceWebVPNLogin 里登录到考勤系统，然后才能使用。
-    考勤系统在登录后的每一个请求的头部都需要添加一个特殊的 header: "Synjones-Auth"
-    此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
-    请注意：必须使用 post_login 方法才能添加此 header
-    """
-
-    def __init__(self, session: requests.Session = None):
-        warnings.warn("此类已被弃用，因为旧的登录系统已失效", DeprecationWarning)
-        if session is None:
-            session = get_session()
-
-        self.session = session
-        self.session.get(getVPNUrl(ATTENDANCE_WEBVPN_URL))
-        self.session.get(WEBVPN_LOGIN_URL)
-
-        # 如果按照正确的方式调用接口的话，这些成员变量会被用来跨方法传递某些请求需要的数据。
-        self.memberId = None
-        self.userType = None
-        self.personNo = None
-
-    def post_login(self) -> requests.Session:
-        """
-        登录并添加 token 到 session 头部
-        :raise ServerError，如果服务器返回错误信息
-        :return: session 对象，其实就是 requests.Session 对象
-        """
-        self.getUserIdentity()
-        url = self.getRedirectUrl()
-        response = self._get(url)
-        token = response.url.split("token=")[1].split('&')[0]
-        self.session.headers.update({"Synjones-Auth": "bearer " + token})
-        return self.session
 
 
 class AttendanceNewWebVPNLogin(NewWebVPNLogin):
@@ -197,58 +132,6 @@ class AttendanceNewWebVPNLogin(NewWebVPNLogin):
         return self.session
 
 
-def attendance_fast_login(username: str, password: str, captcha="", session=None):
-    """
-    快速登录考勤系统。此函数仅仅是为了方便的封装。
-    此函数会尝试直接登录，发现需要验证码时，把验证码下载到当前目录下的 captcha.png 文件中，并且用 input 函数等待输入验证码。
-
-    :param username: 用户名
-    :param password: 密码
-    :param captcha: 验证码。此参数不一定需要传入；需要验证码时，会使用 input 让用户输入。
-    :param session: 自定义的 Session 对象。默认利用 get_session 函数生成一个修改了 UA 的空 Session。
-    :return: 登录成功后的 Session 对象
-    """
-    warnings.warn("此方法已被弃用，因为旧的登录系统已失效", DeprecationWarning)
-    login = AttendanceLogin(session)
-    if login.isShowJCaptchaCode(username):
-        # 需要验证码，让用户输入
-        if captcha == "":
-            login.saveJCaptchaCode("captcha.png")
-            print("您需要输入验证码。请打开运行程序目录下的 captcha.png 文件，并输入验证码。")
-            captcha = input("请输入验证码：")
-        login.login(username, password, captcha)
-    else:
-        login.login(username, password)
-
-    return login.post_login()
-
-
-def attendance_fast_webvpn_login(username: str, password: str, captcha="", session=None):
-    """
-    快速登录考勤系统。此函数仅仅是为了方便的封装。
-    此函数会尝试直接登录，发现需要验证码时，把验证码下载到当前目录下的 captcha.png 文件中，并且用 input 函数等待输入验证码。
-
-    :param username: 用户名
-    :param password: 密码
-    :param captcha: 验证码。此参数不一定需要传入；需要验证码时，会使用 input 让用户输入。
-    :param session: 自定义的 Session 对象。默认利用 get_session 函数生成一个修改了 UA 的空 Session。
-    :return: 登录成功后的 Session 对象
-    """
-    warnings.warn("此方法已被弃用，因为旧的登录系统已失效", DeprecationWarning)
-    login = AttendanceWebVPNLogin(session)
-    if login.isShowJCaptchaCode(username):
-        # 需要验证码，让用户输入
-        if captcha == "":
-            login.saveJCaptchaCode("captcha.png")
-            print("您需要输入验证码。请打开运行程序目录下的 captcha.png 文件，并输入验证码。")
-            captcha = input("请输入验证码：")
-        login.login(username, password, captcha)
-    else:
-        login.login(username, password)
-
-    return login.post_login()
-
-
 def _getNowTime():
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
@@ -260,8 +143,8 @@ def _getNowDay():
 class Attendance:
     """
     此类封装了一系列考勤系统接口，可以用来查询考勤信息等。
-    请注意：考勤系统对同一个 session 的连接存在时间限制。因此，不要持久性的存储此类的对象；每次使用时通过 AttendanceLogin 或
-    attendance_fast_login 重新得到一个登录的 session，然后重新创建此对象。
+    请注意：考勤系统对同一个 session 的连接存在时间限制。因此，不要持久性的存储此类的对象；每次使用时通过 AttendanceNewLogin 或
+    AttendanceNewWebVPNLogin 重新得到一个登录的 session，然后重新创建此对象。
     """
     def __init__(self, session: requests.Session, use_webvpn=False, is_postgraduate=False):
         """

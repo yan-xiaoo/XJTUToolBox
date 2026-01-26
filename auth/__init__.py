@@ -3,5 +3,5 @@
 # 功能包含：登录、WebVPN 登录、WebVPN 网址与正常网址互转
 
 from .util import get_timestamp, getVPNUrl, getOrdinaryUrl, getPlaintext, getCiphertext, get_session, ServerError, generate_fp_visitor_id
-from .login import Login, fast_login, PUBLIC_KEY, webvpn_fast_login, WebVPNLogin, _fast_login, check_password
+from .new_login import LoginState, NewLogin, NewWebVPNLogin, extract_account_choices, extract_alert_message, extract_execution_value, extract_mfa_enabled
 from .constant import *
