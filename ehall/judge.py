@@ -62,13 +62,6 @@ class QuestionnaireData:
     # 分值
     FZ: str = None
 
-    def edit_json(self, wid: str):
-        """
-        返回用于请求重新编辑某问卷的 json 信息
-        :param wid: 某个诡异的 ID，可以传入选项对象的任何一个 WID。
-        :return:
-        """
-
     def getMaxScore(self) -> int:
         if self.TXDM != "03":
             raise ValueError("此题目不是分值题")

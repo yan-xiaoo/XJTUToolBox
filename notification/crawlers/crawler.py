@@ -1,5 +1,4 @@
 # 所有爬虫类的基类
-import pickle
 import platform
 import random
 import re

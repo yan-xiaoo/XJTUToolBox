@@ -134,7 +134,6 @@ class NewLogin:
     - 如果返回 FAIL，则登录失败，附带错误信息。
     通过不断调用 login 方法，直到返回 SUCCESS 或 FAIL，登录流程结束。
     此类不会自动处理验证码、MFA 验证和账户选择等步骤，而是将这些步骤交给调用者处理。
-    对于具体调用示例，可以查看下方的 console_login 函数。
     """
     class AccountType(enum.Enum):
         UNDERGRADUATE = 0
@@ -286,7 +285,6 @@ class NewLogin:
                  - (LoginState.SUCCESS, session): 登录成功，附带 Session 对象。
                  - (LoginState.FAIL, message): 登录失败，附带错误信息。
                  - (LoginState.REQUIRE_ACCOUNT_CHOICE, choices): 需要选择账户，附带账户选项列表。
-        对于具体调用示例，可以查看下方的 console_login 函数。
         :raises RuntimeError: 如果已经登录过一次，则抛出此异常。请重新创建 NewLogin 对象以登录其他账号。
         """
         # 如果需要选择账户，则执行账户选择逻辑
@@ -537,44 +535,3 @@ class NewWebVPNLogin(NewLogin):
         else:
             encrypted = url
         return self.session.post(encrypted, **kwargs)
-
-
-def console_login():
-    """
-    此函数是登录系统使用的示例函数，通过 input 从标准输入接收所有可能需要的用户响应（比如验证码、手机验证码、账户选择）。
-    """
-    login_instance = NewLogin(EHALL_LOGIN_URL)
-    state, info = login_instance.login("your_username", "your_password")
-
-    session = None
-
-    # login 对象是一个状态机。只需要一直调用 login 方法，根据其返回的类型/值处理不同情况即可。
-    while True:
-        if state == LoginState.SUCCESS:
-            print("登录成功！")
-            session = info
-            break
-        elif state == LoginState.FAIL:
-            print(f"登录失败: {info}")
-            break
-        elif state == LoginState.REQUIRE_CAPTCHA:
-            # (弹出验证码窗口，让用户输入)
-            captcha = input("请输入验证码: ")
-            # 再次调用 login，传入验证码
-            state, info = login_instance.login(jcaptcha=captcha)
-        elif state == LoginState.REQUIRE_MFA:
-            mfa_context: NewLogin.MFAContext = info
-            phone = mfa_context.send_verify_code()
-            # (提示用户)
-            code = input(f"验证码已发送至 {phone}，请输入: ")
-            mfa_context.verify_phone_code(code)
-            # 继续登录流程
-            state, info = login_instance.login()
-        elif state == LoginState.REQUIRE_ACCOUNT_CHOICE:
-            choices = info
-            # (让用户从 choices 中选择一个)
-            print("检测到本科生/研究生身份，请选择一个登录：")
-            selected_index = int(input("请输入选项编号: 0:本科生；1:研究生"))
-            
-            # 再次调用 login，传入选择的身份 label
-            state, info = login_instance.login(account_type=login_instance.UNDERGRADUATE if selected_index == 0 else login_instance.POSTGRADUATE)

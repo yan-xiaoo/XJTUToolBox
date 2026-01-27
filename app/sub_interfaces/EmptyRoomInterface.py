@@ -1,6 +1,5 @@
 import datetime
 import json
-from math import acosh
 
 from PyQt5.QtCore import pyqtSlot, QDate, Qt, QStandardPaths, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QTableWidgetItem, \

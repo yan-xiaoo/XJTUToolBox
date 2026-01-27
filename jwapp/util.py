@@ -1,28 +1,6 @@
 import datetime
 
-import requests
-from auth import Login, JWAPP_URL, ServerError
-from auth.new_login import NewLogin, extract_alert_message
-
-
-class JwappLogin(Login):
-    """移动教务系统的登录类。此系统和考勤系统类似，都需要在登录后，从 header 中添加一个 token"""
-
-    def __init__(self, session=None):
-        super().__init__(JWAPP_URL, session=session)
-
-    def post_login(self) -> requests.Session:
-        """
-        登录并添加 token 到 session 头部
-        :raise ServerError，如果服务器返回错误信息
-        :return: session 对象，其实就是 requests.Session 对象
-        """
-        self.getUserIdentity()
-        url = self.getRedirectUrl()
-        response = self._get(url)
-        token = response.url.split("token=")[1].split('&')[0]
-        self.session.headers.update({"Authorization": token})
-        return self.session
+from auth import JWAPP_URL, NewLogin, ServerError
 
 
 class JwappNewLogin(NewLogin):
@@ -39,31 +17,6 @@ class JwappNewLogin(NewLogin):
         self.session.headers.update({"Authorization": token})
 
         return self.session
-
-
-def jwapp_fast_login(username: str, password: str, captcha="", session=None):
-    """
-    快速登录移动教务系统。此函数仅仅是为了方便的封装。
-    此函数会尝试直接登录，发现需要验证码时，把验证码下载到当前目录下的 captcha.png 文件中，并且用 input 函数等待输入验证码。
-
-    :param username: 用户名
-    :param password: 密码
-    :param captcha: 验证码。此参数不一定需要传入；需要验证码时，会使用 input 让用户输入。
-    :param session: 自定义的 Session 对象。默认利用 get_session 函数生成一个修改了 UA 的空 Session。
-    :return: 登录成功后的 Session 对象
-    """
-    login = JwappLogin(session)
-    if login.isShowJCaptchaCode(username):
-        # 需要验证码，让用户输入
-        if captcha == "":
-            login.saveJCaptchaCode("captcha.png")
-            print("您需要输入验证码。请打开运行程序目录下的 captcha.png 文件，并输入验证码。")
-            captcha = input("请输入验证码：")
-        login.login(username, password, captcha)
-    else:
-        login.login(username, password)
-
-    return login.post_login()
 
 
 class JwappUtil:
