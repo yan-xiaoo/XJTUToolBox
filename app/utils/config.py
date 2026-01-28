@@ -165,10 +165,11 @@ class Config(QConfig):
                                          False, OptionsValidator([True, False]), BooleanSerializer())
     ignoreLateCourse = OptionsConfigItem("Settings", "ignore_late_course",
                                          True, OptionsValidator([True, False]), BooleanSerializer())
+    # 是否通过请求成绩单，尝试绕过评教限制，查询学期成绩
+    useScoreReport = OptionsConfigItem("Settings", "use_score_report",
+                                       False, OptionsValidator([True, False]), BooleanSerializer())
     autoRetryAttendance = OptionsConfigItem("Settings", "auto_retry_attendance",
                                             True, OptionsValidator([True, False]), BooleanSerializer())
-    openExternalBrowser = OptionsConfigItem("Settings", "open_external_browser",
-                                       False, OptionsValidator([True, False]), BooleanSerializer())
     traySetting = OptionsConfigItem("Settings", "tray_setting",
                                     TraySetting.UNKNOWN,
                                     OptionsValidator([TraySetting.UNKNOWN, TraySetting.QUIT, TraySetting.MINIMIZE]),

@@ -4,10 +4,10 @@ import json
 from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QTableWidgetItem
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, PrimaryPushButton, TableWidget, ToolTipFilter, \
-    ToolTipPosition, InfoBar, InfoBarPosition, TransparentPushButton
+    ToolTipPosition, InfoBar, InfoBarPosition, TransparentPushButton, CaptionLabel
 
 from app.components.MultiSelectionComboBox import MultiSelectionComboBox
-from app.sub_interfaces.ScoreDetailDialog import ScoreDetailDialog
+from app.sub_interfaces.ScoreDetailDialog import ScoreDetailDialog, EmptyScoreDetailDialog
 from app.threads.GraduateScoreThread import GraduateScoreThread
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScoreThread import ScoreThread
@@ -95,6 +95,11 @@ class ScoreInterface(ScrollArea):
 
         self.scoreTable.itemSelectionChanged.connect(self.onSelectScore)
 
+        self.hintText = CaptionLabel(self.tr("单击选中几行课程，即可查看选中课程的均分信息"), self.view)
+        self.hintText.setToolTip(self.tr("单击这条提示可以关闭它"))
+        self.hintText.installEventFilter(ToolTipFilter(self.hintText))
+        self.hintText.mouseReleaseEvent = lambda e: self.hintText.setVisible(False)
+
         self.scoreButton.clicked.connect(self.onScoreButtonClicked)
 
         self.viewLayout.addWidget(self.commandFrame)
@@ -102,6 +107,8 @@ class ScoreInterface(ScrollArea):
         self.viewLayout.addWidget(self.graduateProcessWidget)
         self.viewLayout.addWidget(self.statisticTable)
         self.viewLayout.addWidget(self.scoreTable, stretch=1)
+        self.viewLayout.addSpacing(5)
+        self.viewLayout.addWidget(self.hintText, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         StyleSheet.SCORE_INTERFACE.apply(self)
         self.setWidget(self.view)
@@ -318,7 +325,7 @@ class ScoreInterface(ScrollArea):
     def onReceiveScore(self, scores: list, is_postgraduate=False, show_success_message=True):
         # 研究生无法区分缓考信息
         if cfg.ignoreLateCourse.value and not is_postgraduate:
-            scores = [score for score in scores if score["passFlag"] or score["specificReason"] != "缓考"]
+            scores = [score for score in scores if "passFlag" not in score or score["passFlag"] or score["specificReason"] != "缓考"]
 
         self.scores = scores
         self.scoreTable.clearSelection()
@@ -331,14 +338,25 @@ class ScoreInterface(ScrollArea):
                 self.scoreTable.setItem(i, 3, QTableWidgetItem(str(score["gpa"])))
                 self.scoreTable.setItem(i, 4, QTableWidgetItem(str(score["score"])))
         else:
+            # 在更新了“通过成绩单查询成绩绕过评教”功能后，这里可能有两种成绩格式
+            # 一种是完整的格式
+            # 一种只有 courseName（课程名）, coursePoint（学分）和 score（成绩），其他都没有
             for i, score in enumerate(scores):
                 self.scoreTable.setItem(i, 0, QTableWidgetItem(score["courseName"]))
                 self.scoreTable.setItem(i, 1, QTableWidgetItem(str(score["coursePoint"])))
-                self.scoreTable.setItem(i, 2, QTableWidgetItem(str(score["gpa"])))
+                # 如上所述，有的课程没有 gpa（强行从成绩单提取的成绩），因此需要判断
+                if score["gpa"]:
+                    self.scoreTable.setItem(i, 2, QTableWidgetItem(str(score["gpa"])))
+                else:
+                    self.scoreTable.setItem(i, 2, QTableWidgetItem(self.tr("无法获得")))
                 self.scoreTable.setItem(i, 3, QTableWidgetItem(str(score["score"])))
                 self.scoreTable.setItem(i, 4, QTableWidgetItem(""))
                 button = TransparentPushButton(self.tr("详情"), self.view)
-                button.clicked.connect(lambda _, s=score: self.showDetailDialog(s))
+                # 如果没有 itemList 这个字段，说明没有详情可看，展示一个空的详情对话框并解释原因
+                if "itemList" not in score:
+                    button.clicked.connect(lambda _: self.showEmptyDetailDialog())
+                else:
+                    button.clicked.connect(lambda _, s=score: self.showDetailDialog(s))
                 self.scoreTable.setCellWidget(i, 4, button)
                 self.scoreTable.item(i, 4).setFlags(Qt.ItemIsEditable)
 
@@ -349,6 +367,10 @@ class ScoreInterface(ScrollArea):
 
     def showDetailDialog(self, score):
         dialog = ScoreDetailDialog(score, parent=self)
+        dialog.exec()
+
+    def showEmptyDetailDialog(self):
+        dialog = EmptyScoreDetailDialog(parent=self)
         dialog.exec()
 
     @pyqtSlot()
@@ -362,6 +384,10 @@ class ScoreInterface(ScrollArea):
     @pyqtSlot()
     def onSelectScore(self):
         if not self.scores:
+            # 如果没有成绩，则清空统计表后返回
+            self.statisticTable.setItem(0, 0, QTableWidgetItem(""))
+            self.statisticTable.setItem(0, 1, QTableWidgetItem(""))
+            self.statisticTable.setItem(0, 2, QTableWidgetItem(""))
             return
 
         selected_rows = [index.row() for index in self.scoreTable.selectionModel().selectedRows()]
@@ -379,9 +405,37 @@ class ScoreInterface(ScrollArea):
         # 0 学分课程无法计算绩点和平均分，直接返回
         if total_credit == 0:
             return
-        gpa = sum([score["gpa"] * score["coursePoint"] for score in scores]) / total_credit
-        average = sum([score["score"] * score["coursePoint"] for score in scores]) / total_credit
+        gpa_sum_list = []
+        # 有的课程没有 gpa（强行从成绩单提取的成绩），因此需要判断
+        # 我们忽略这些没有 gpa 的课程
+        # 没有 gpa 的课程都是实验课程（成绩单只有 A/A+ 这样的符号）
+        # 我们为它们的均分计算也做适配
+        score_sum_list = []
+        inaccurate_warning = False
+        inaccurate_count = 0
+        for score in scores:
+            if score["gpa"] is not None:
+                gpa_sum_list.append(score["gpa"] * score["coursePoint"])
+            else:
+                inaccurate_warning = True
+                inaccurate_count += 1
+                continue
+            # 忽略成绩不是数字的课程
+            if isinstance(score["score"], int) or isinstance(score["score"], float):
+                score_sum_list.append(score["score"] * score["coursePoint"])
+            else:
+                inaccurate_warning = True
+                inaccurate_count += 1
+                continue
+
+        gpa = sum(gpa_sum_list) / (total_credit - inaccurate_count)
+        average = sum(score_sum_list) / (total_credit - inaccurate_count)
 
         self.statisticTable.setItem(0, 0, QTableWidgetItem(str(total_credit)))
-        self.statisticTable.setItem(0, 1, QTableWidgetItem(str(round(gpa, 3))))
-        self.statisticTable.setItem(0, 2, QTableWidgetItem(str(round(average, 3))))
+        # 如果存在无法计算均分/gpa 的课程，则提示不精确
+        if not inaccurate_warning:
+            self.statisticTable.setItem(0, 1, QTableWidgetItem(str(round(gpa, 3))))
+            self.statisticTable.setItem(0, 2, QTableWidgetItem(str(round(average, 3))))
+        else:
+            self.statisticTable.setItem(0, 1, QTableWidgetItem(f"{round(gpa, 3)}（不精确）"))
+            self.statisticTable.setItem(0, 2, QTableWidgetItem(f"{round(average, 3)}（不精确）"))

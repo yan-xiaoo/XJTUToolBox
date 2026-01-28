@@ -47,3 +47,27 @@ class ScoreDetailDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.scoreLabel, 0, alignment=Qt.AlignHCenter)
         self.viewLayout.addStretch(1)
         self.viewLayout.addWidget(self.detailTable, 5, alignment=Qt.AlignHCenter)
+
+
+class EmptyScoreDetailDialog(MessageBoxBase):
+    """
+    展示无成绩详情的对话框
+    """
+    def __init__(self, parent=None):
+        """
+        初始化对话框
+        :param parent: 父窗口
+        """
+        super().__init__(parent)
+
+        self.buttonGroup.setVisible(False)
+        self.setClosableOnMaskClicked(True)
+
+        self.titleLabel = SubtitleLabel(self.tr("无成绩详情"), self)
+
+        self.messageLabel = BodyLabel(self.tr("该课程的成绩是绕过评教，直接从成绩单获得的，因此暂无成绩详情信息。"), self)
+
+        self.viewLayout.addWidget(self.titleLabel, 0, alignment=Qt.AlignHCenter)
+        self.viewLayout.addStretch(1)
+        self.viewLayout.addWidget(self.messageLabel, 0, alignment=Qt.AlignHCenter)
+        self.viewLayout.addStretch(1)

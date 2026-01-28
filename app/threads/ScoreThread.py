@@ -1,3 +1,5 @@
+from typing import Optional
+
 import requests
 from PyQt5.QtCore import pyqtSignal
 
@@ -24,7 +26,7 @@ class ScoreThread(ProcessThread):
         """
         super().__init__(parent)
         self.term_number = term_number
-        self.util = None
+        self.util: Optional[Score] = None
 
     @property
     def session(self) -> JWXTSession:
@@ -79,6 +81,23 @@ class ScoreThread(ProcessThread):
             if not self.can_run:
                 return
             result = self.util.grade(self.term_number, jwapp_format=True)
+            # 如果选择了“通过成绩单绕过评教限制”，那么使用成绩单方式获取成绩，并且合并+去重
+            if cfg.useScoreReport.value:
+                all_course_names = [one["courseName"] for one in result]
+                self.messageChanged.emit("正在通过成绩单获取更多成绩...")
+                self.progressChanged.emit(80)
+                if not self.can_run:
+                    return
+                try:
+                    reported_result = self.util.reported_grade(student_id=accounts.current.username, term=self.term_number)
+                except ValueError:
+                    # 成绩单网页解析失败。我们给出一个更明显的错误提示
+                    raise ServerError(103, self.tr("成绩单页面解析失败，无法在未评教情况下获得成绩。请考虑前往 GitHub 提交 issue。"))
+                for course in reported_result:
+                    if course["courseName"] not in all_course_names:
+                        print("Appending", course["courseName"])
+                        result.append(course)
+
             self.progressChanged.emit(100)
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)

@@ -181,7 +181,11 @@ class SettingInterface(ScrollArea):
         self.scoreGroup = SettingCardGroup(self.tr("成绩查询"), self.view)
         self.ignoreLateCard = CustomSwitchSettingCard(FIF.ERASE_TOOL, self.tr("忽略缓考课程"), self.tr("查询成绩时忽略缓考课程"),
                                                       cfg.ignoreLateCourse, self.scoreGroup)
+        self.useReportCard = CustomSwitchSettingCard(FIF.VIEW, self.tr("未评教时查询成绩"), self.tr("查询成绩时，尝试通过请求成绩单绕过评教限制。"
+                                                                                                 "可能导致查询时间增加"),
+                                                    cfg.useScoreReport, self.scoreGroup)
         self.scoreGroup.addSettingCard(self.ignoreLateCard)
+        self.scoreGroup.addSettingCard(self.useReportCard)
 
         # 通知查询组
         self.noticeGroup = SettingCardGroup(self.tr("通知查询"), self.view)
