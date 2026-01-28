@@ -3,13 +3,12 @@ from typing import Optional
 import requests
 from PyQt5.QtCore import pyqtSignal
 
-from auth.new_login import NewLogin
 from .ProcessWidget import ProcessThread
-from ..sessions.ehall_session import EhallSession
-from ..utils import Account, logger, cfg, accounts
+from ..sessions.jwxt_session import JWXTSession
+from ..utils import Account, logger, accounts
 
-from ehall import AutoJudge, QuestionnaireTemplate
-from auth import EHALL_LOGIN_URL, ServerError
+from jwxt import AutoJudge, QuestionnaireTemplate
+from auth import ServerError
 from enum import Enum
 
 
@@ -42,15 +41,15 @@ class JudgeThread(ProcessThread):
         self.scoreAll: Optional[QuestionnaireTemplate.Score] = None
 
     @property
-    def session(self) -> EhallSession:
+    def session(self) -> JWXTSession:
         """
-        获取当前账户用于访问 ehall 的 session
+        获取当前账户用于访问教务系统的 session
         """
-        return self.account.session_manager.get_session("ehall")
+        return self.account.session_manager.get_session("jwxt")
 
     def login(self) -> bool:
         self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在登录 EHALL..."))
+        self.messageChanged.emit(self.tr("正在登录教务系统..."))
         self.session.login(self.account.username, self.account.password)
         self.session.has_login = True
 

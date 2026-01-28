@@ -11,7 +11,7 @@ from Crypto.Cipher import PKCS1_v1_5
 from lxml import html
 from typing import Tuple, Optional
 
-from .constant import EHALL_LOGIN_URL
+from . import JWXT_LOGIN_URL
 from .util import get_session, ServerError, generate_fp_visitor_id, getVPNUrl
 
 

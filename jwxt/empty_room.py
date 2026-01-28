@@ -1,7 +1,5 @@
 import requests
 
-from .util import EhallUtil
-
 
 CAMPUS_BUILDING_DICT = {
     "兴庆校区": [
@@ -24,7 +22,7 @@ CAMPUS_BUILDING_DICT = {
 
 class EmptyRoom:
     """
-    封装 Ehall 上空闲教室查询的相关接口
+    封装教务系统中上空闲教室查询的相关接口
     """
     def __init__(self, session: requests.Session):
         """
@@ -32,18 +30,15 @@ class EmptyRoom:
         """
         self.session = session
 
-        self._util = EhallUtil(session)
-        self._util.useApp("4768402106681759")
-
     def getCampusCode(self):
         """
         获得校区名称->代码的对应关系
         :return: dict，键为校区名称，值为对应的代码
         """
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/code/83a986fc-e677-400e-99a4-c7bb39c2ca35.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/code/83a986fc-e677-400e-99a4-c7bb39c2ca35.do",
                                      headers={
                                          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                                         "Referer": "https://ehall.xjtu.edu.cn/jwapp/sys/kxjas/*default/index.do"
+                                         "Referer": "https://jwxt.xjtu.edu.cn/jwapp/sys/kxjas/*default/index.do"
                                      })
         data = response.json()
         diction = {}
@@ -56,10 +51,10 @@ class EmptyRoom:
         获得教学楼名称->代码的对应关系
         :return: dict，键为教学楼名称，值为对应的代码
         """
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/code/551fbcc3-cf07-4566-af1e-fc7ce272ddc1.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/code/551fbcc3-cf07-4566-af1e-fc7ce272ddc1.do",
                                      headers={
                                          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                                         "Referer": "https://ehall.xjtu.edu.cn/jwapp/sys/kxjas/*default/index.do"
+                                         "Referer": "https://jwxt.xjtu.edu.cn/jwapp/sys/kxjas/*default/index.do"
                                      })
         data = response.json()
         diction = {}
@@ -80,7 +75,7 @@ class EmptyRoom:
         其中 capacity 表示教室的座位数，exam_capacity 表示考试时的座位数
         """
         response = self.session.post(
-            "https://ehall.xjtu.edu.cn/jwapp/sys/kxjas/modules/kxjscx/cxkxjs.do",
+            "https://jwxt.xjtu.edu.cn/jwapp/sys/kxjas/modules/kxjscx/cxkxjs.do",
             data={
                 "XXXQDM": campusCode,
                 "JXLDM": buildingCode,
@@ -97,6 +92,10 @@ class EmptyRoom:
             # 所有没有“类型”参数的教室都是接口想象出来的
             # 天知道这些教室为什么存在于系统里
             if one["JASLXDM"] is None:
+                continue
+            # 2026 年寒假时系统里多了一些测试教室；这些教室具有类型参数，但名称里含有“测试”二字
+            # 过滤掉这些教室
+            if "测试专用" in one["JASMC"]:
                 continue
             result.append({
                 "name": one["JASMC"],

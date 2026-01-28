@@ -4,12 +4,9 @@ import requests
 import json
 
 
-from .util import EhallUtil
-
-
-# 从 Ehall 查询课程成绩
+# 从教务系统查询课程成绩
 # 课程成绩为 json 形式，包含两种格式：
-# Ehall 原始格式：太长了不写在这，可以用开发者工具看 https://ehall.xjtu.edu.cn/jwapp/sys/cjcx/modules/cjcx/xscjcx.do
+# 教务系统原始格式：太长了不写在这，可以用开发者工具看 https://jwxt.xjtu.edu.cn/jwapp/sys/cjcx/modules/cjcx/xscjcx.do
 # 接口的返回值，格式很差，字段名全部为拼音声母全拼
 # Jwapp 格式（移动教务）：字段较为清晰，实例如下：
 # {
@@ -47,9 +44,9 @@ from .util import EhallUtil
 #       "statusCode": 0
 #    }
 # }
-# 局限：Ehall 相关的接口（包含本类）中无法返回 replaceFlag（课程是否是置换的）字段，因为 Ehall 接口中没有这个字段。该字段将始终为 False。
-# 此外，Ehall 无法返回除期中、期末、平时成绩以外其他类型成绩的百分比，因此这些百分比字段将始终为 0。因此，请注意所有 "itemPercent" 字段的和并不一定为 1。
-# 如果只有一个百分比缺失，那么利用所有成绩的百分比之和为 1 的特性，补全缺失的百分比。但我们不保证总能进行补全。
+# 局限：教务系统（jwxt)相关的接口（包含本类）中无法返回 replaceFlag（课程是否是置换的）字段，因为教务系统接口中没有这个字段。该字段将始终为 False。
+# 此外，教务系统无法返回除期中、期末、平时成绩以外其他类型成绩的百分比，因此这些百分比字段将始终为 0。因此，请注意所有 "itemPercent" 字段的和并不一定为 1。
+# 如果只有一个百分比缺失，那么代码会利用所有成绩的百分比之和为 1 的特性，补全缺失的百分比。但我们不保证总能进行补全。
 # 本类的接口可以返回两种格式中的任何一种。为了你的身心健康，我们建议你使用 Jwapp 格式。
 class Score:
     """
@@ -61,9 +58,6 @@ class Score:
         每当 session 发生变化时，应当重新创建此对象，而非设置 session 属性。
         """
         self.session = session
-
-        self._util = EhallUtil(session)
-        self._util.useApp("4768574631264620")
 
     def grade(self, term: Union[List[str], str] = None, jwapp_format=True) -> List:
         """
@@ -96,7 +90,7 @@ class Score:
             terms[0]["linkOpt"] = "and"
             query_setting.append(terms)
 
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/cjcx/modules/cjcx/xscjcx.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/cjcx/modules/cjcx/xscjcx.do",
                                      data={
                                          "pageSize": 1000,
                                          "pageNumber": 1,

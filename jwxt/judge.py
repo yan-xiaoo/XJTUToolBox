@@ -1,13 +1,12 @@
 import json
 
 from requests import Session
-from .util import EhallUtil
 from collections import namedtuple
-from typing import List
+from typing import List, Tuple
 from dataclasses import dataclass
 
 # 存储评教问卷的相关信息
-# Ehall 起的变量名都是鬼才看得懂的拼音首字母大写。因为我没法看懂所有字段，因此保留这些字段名不变，并在我能理解的字段上加注释。
+# 教务系统中起的变量名都是鬼才看得懂的拼音首字母大写。因为我没法看懂所有字段，因此保留这些字段名不变，并在我能理解的字段上加注释。
 Questionnaire = namedtuple("Questionnaire", ["BPJS", "BPR", "DBRS", "JSSJ", "JXBID", "KCH", "KCM",
                                              "KSSJ", "PCDM", "PGLXDM", "PGNR", "WJDM", "WJMC", "XNXQDM"])
 
@@ -200,27 +199,19 @@ class QuestionnaireOptionData:
 
 
 class AutoJudge:
-    # 评教模块在 Ehall 中的 ID
-    JudgeAppId = "5856333445645704"
-
-    # Ehall 里面请求的变量名起得太差劲了…全都是拼音首字母大写，鬼才知道是什么意思啊
+    # 教务系统里面请求的变量名起得太差劲了…全都是拼音首字母大写，鬼才知道是什么意思啊
     # 这帮开发人员自己过几年估计都看不懂了吧
 
     def __init__(self, session: Session):
         """创建一个自动评教对象。此类封装了一系列评教相关的请求接口。"""
         self.session = session
-        self._util = EhallUtil(self.session)
-
-        roles = self._util.getRoles(self.JudgeAppId)
-        # 访问链接以获得请求评教系统接口的权限
-        self.session.get(roles[0]["targetUrl"])
 
         # 缓存的当前学期表示
         self._termString = None
 
     def getCurrentTerm(self):
         """获得当前学期的字符串表示形式，比如 2020-2021-1"""
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/xspj/cxxtcs.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/xspj/cxxtcs.do",
                                      headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
                                      data={
                                          "setting": '[{"name":"CSDM","value":"PJGLPJSJ","builder":"equal","linkOpt":"AND'
@@ -238,7 +229,7 @@ class AutoJudge:
                 self._termString = self.getCurrentTerm()
             timestamp = self._termString
 
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/xspj/cxdwpj.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/xspj/cxdwpj.do",
                                      data={"PGLXDM": "05",  # 根据网页的注释，这个参数设为 "01" 是期末评教，"05" 是过程评教
                                            # 下方的参数全部为固定值
                                            "SFPG": 1 if finished else 0,
@@ -264,7 +255,7 @@ class AutoJudge:
                 self._termString = self.getCurrentTerm()
             timestamp = self._termString
 
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/xspj/cxdwpj.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/xspj/cxdwpj.do",
                                      data={"PGLXDM": "01",  # 根据网页的注释，这个参数设为 "01" 是期末评教，"05" 是过程评教
                                            # 下方的参数全部为固定值
                                            "SFPG": 1 if finished else 0,
@@ -311,7 +302,7 @@ class AutoJudge:
 
     def questionnaireData(self, questionnaire: Questionnaire, username: str) -> List[QuestionnaireData]:
         """获得某个问卷的题目信息"""
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/wj/cxwjzb.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/wj/cxwjzb.do",
                                      data={"WJDM": questionnaire.WJDM, "JXBID": questionnaire.JXBID},
                                      headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"})
         result = response.json()
@@ -321,25 +312,6 @@ class AutoJudge:
                               questionnaire.PCDM, one["TXDM"], questionnaire.JXBID, "", one["ZBMC"], DADM=one["DADM"], SFBT=one["SFBT"],
                               FZ=one["FZ"]) for
             one in data]
-        """
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/wj/cxxspjjg.do",
-                                     data={"WJDM": questionnaire.WJDM, "CPR": username,
-                                           "BPR": questionnaire.BPR, "PGNR": questionnaire.PGNR,
-                                           "querySetting": json.dumps([
-                                               {"name": "BPR", "value": questionnaire.BPR, "linkOpt": "AND",
-                                                "builder": "equal"},
-                                               {"name": "CPR", "value": username, "linkOpt": "AND", "builder": "equal"},
-                                               {"name": "PGNR", "value": questionnaire.PGNR, "linkOpt": "AND",
-                                                "builder": "equal"},
-                                               {"name": "WJDM", "value": questionnaire.WJDM, "linkOpt": "AND",
-                                                "builder": "equal"},
-                                               {"name": "PCDM", "value": questionnaire.PCDM, "linkOpt": "AND",
-                                                "builder": "equal"},
-                                           ])},
-                                     headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"})
-        result = response.json()
-        data = result["datas"]["cxxspjjg"]["rows"]
-        """
 
         return questionnaire_data
 
@@ -350,7 +322,7 @@ class AutoJudge:
         :param finished: 是否查询已经完成的评教（True），还是未完成的（False）
         :return 返回格式如下：
         """
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/wj/cxxswjzbxq.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wspjyyapp/modules/wj/cxxswjzbxq.do",
                                      data={"WJDM": questionnaire.WJDM, "CPR": username,
                                            "PCDM": questionnaire.PCDM, "SFPG": 1 if finished else 0,
                                            "BPR": questionnaire.BPR, "PGNR": questionnaire.PGNR,
@@ -381,9 +353,9 @@ class AutoJudge:
                 result_json[one_data["ZBDM"]].append(one_data_obj)
         return result_json
 
-    def submitQuestionnaire(self, questionnaire: Questionnaire, data: List[QuestionnaireData]) -> [bool, str]:
+    def submitQuestionnaire(self, questionnaire: Questionnaire, data: List[QuestionnaireData]) -> Tuple[bool, str]:
         """提交一份已经完成的问卷"""
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/WspjwjController/addXsPgysjg.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wspjyyapp/WspjwjController/addXsPgysjg.do",
                                      data={"requestParamStr": json.dumps(
                                              {"WJDM": questionnaire.WJDM, "PCDM": questionnaire.PCDM, "PGLY": "1",
                                               "SFTJ": "1",
@@ -393,14 +365,14 @@ class AutoJudge:
         data = response.json()
         return data["code"] == '0' and data["datas"].get("code", "-1") == '0', data["datas"]["msg"]
 
-    def editQuestionnaire(self, questionnaire: Questionnaire, username: str) -> [bool, str]:
+    def editQuestionnaire(self, questionnaire: Questionnaire, username: str) -> Tuple[bool, str]:
         """
         要求重新编辑一份已经完成的问卷。执行此函数后，问卷将会可以被编辑（就像未完成的问卷一样）
         :param questionnaire: 问卷对象
         :param username: 学号
         :returns 是否成功，原因
         """
-        response = self.session.post("https://ehall.xjtu.edu.cn/jwapp/sys/wspjyyapp/WspjwjController/updateCprZt.do",
+        response = self.session.post("https://jwxt.xjtu.edu.cn/jwapp/sys/wspjyyapp/WspjwjController/updateCprZt.do",
                                      data={"requestParamStr": json.dumps(
                                          {"WJDM": questionnaire.WJDM, "PCDM": questionnaire.PCDM,
                                           "CPRXX": json.dumps([{

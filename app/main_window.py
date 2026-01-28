@@ -21,7 +21,7 @@ from .AttendanceInterface import AttendanceInterface
 from .ToolBoxInterface import ToolBoxInterface
 from .TrayInterface import TrayInterface
 from .sessions.attendance_session import AttendanceSession
-from .sessions.ehall_session import EhallSession
+from .sessions.jwxt_session import JWXTSession
 from .sessions.gmis_session import GMISSession
 from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
@@ -41,7 +41,7 @@ def registerSession():
     注册各个子网站需要使用的 Session 类
     """
     # ehall：ehall.xjtu.edu.cn 所用的 session
-    SessionManager.global_register(EhallSession, "ehall")
+    SessionManager.global_register(JWXTSession, "jwxt")
     SessionManager.global_register(AttendanceSession, "attendance")
     SessionManager.global_register(JwappSession, "jwapp")
     SessionManager.global_register(GMISSession, "gmis")

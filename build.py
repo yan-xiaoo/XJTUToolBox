@@ -18,7 +18,7 @@ def main():
         '--collect-datas=fake_useragent',           # 收集 fake_useragent 数据
         '--icon=assets/icons/main_icon.ico',        # 图标
         f'--add-data=assets{path_sep}assets',       # 添加资源文件夹
-        f'--add-data=ehall/templates{path_sep}ehall/templates', # 添加模板文件夹
+        f'--add-data=jwxt/templates{path_sep}jwxt/templates', # 添加模板文件夹
         '--noconfirm',                              # 覆盖输出目录不询问
         '--clean',                                  # 清理缓存
     ]

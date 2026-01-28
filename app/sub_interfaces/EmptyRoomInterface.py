@@ -5,7 +5,7 @@ from PyQt5.QtCore import pyqtSlot, QDate, Qt, QStandardPaths, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QTableWidgetItem, \
     QFileDialog
 from PyQt5.QtGui import QFont, QPixmap
-from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, ComboBox, CalendarPicker, PrimaryPushButton, \
+from qfluentwidgets import ScrollArea, TitleLabel, ComboBox, CalendarPicker, PrimaryPushButton, \
     TableWidget, InfoBar, InfoBarPosition, PushButton, FluentStyleSheet, Theme, isDarkTheme, MessageBox
 
 from ..components.MultiSelectionComboBox import MultiSelectionComboBox
@@ -13,7 +13,7 @@ from ..threads.CFEmptyRoomThread import CFEmptyRoomThread
 from ..threads.EmptyRoomThread import EmptyRoomThread
 from ..threads.ProcessWidget import ProcessWidget
 from ..utils import StyleSheet, DataManager, cfg, accounts
-from ehall.empty_room import CAMPUS_BUILDING_DICT
+from jwxt.empty_room import CAMPUS_BUILDING_DICT
 
 
 class CellWidget(QWidget):
