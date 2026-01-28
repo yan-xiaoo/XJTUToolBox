@@ -9,9 +9,8 @@ import re
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from lxml import html
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 
-from . import JWXT_LOGIN_URL
 from .util import get_session, ServerError, generate_fp_visitor_id, getVPNUrl
 
 
@@ -230,7 +229,7 @@ class NewLogin:
         # 保存 checkForBothAccounts 方法可能获得的响应
         self._choose_account_response = None
         # 两步验证上下文
-        self.mfa_context: NewLogin.MFAContext | None = None
+        self.mfa_context: Optional[NewLogin.MFAContext] = None
         # 登录凭据
         self._username = None
         self._password = None
@@ -265,7 +264,8 @@ class NewLogin:
             f.close()
 
     def login(self, username: Optional[str] = None, password: Optional[str] = None, jcaptcha: str = "",
-              account_type: AccountType = POSTGRADUATE, trust_agent=True) -> Tuple[LoginState, MFAContext | object | None]:
+              account_type: AccountType = POSTGRADUATE, trust_agent=True) -> Tuple[LoginState, Union[
+        MFAContext, object, None]]:
         """
         请求登录。
         此方法为登录流程的“驱动器”，会根据当前状态执行相应的操作。
