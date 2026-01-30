@@ -1,5 +1,6 @@
 import requests
 
+from jwxt.util import JWXTUtil
 
 CAMPUS_BUILDING_DICT = {
     "兴庆校区": [
@@ -29,6 +30,10 @@ class EmptyRoom:
         创建一个空闲教室查询对象。此类封装了一系列空闲教室相关的请求接口。
         """
         self.session = session
+
+        # 空闲教室只在“学生”身份下可用，在“移动应用学生”身份下不可用，因此切换身份
+        self._utils = JWXTUtil(session)
+        self._utils.setRoleToStudent()
 
     def getCampusCode(self):
         """
