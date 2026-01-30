@@ -7,14 +7,14 @@ from .migrate_data import LOG_DIRECTORY
 
 def get_logger(name, path):
     log = logging.getLogger(name)
-    log.setLevel(logging.WARNING)
+    log.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s: %(message)s")
     ch = logging.StreamHandler()
     ch.setLevel(logging.WARNING)
     ch.setFormatter(formatter)
     file = logging.FileHandler(path)
     file.setFormatter(formatter)
-    file.setLevel(logging.WARNING)
+    file.setLevel(logging.INFO)
     log.addHandler(ch)
     log.addHandler(file)
     return log

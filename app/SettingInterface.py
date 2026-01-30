@@ -1,12 +1,13 @@
 import os
 import sys
+import shlex
 
 import keyring
 import keyring.errors
 from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
-    InfoBadge
+    InfoBadge, LineEdit, SwitchButton, IndicatorPosition, BodyLabel, HyperlinkLabel
 from qfluentwidgets import FluentIcon as FIF
 from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtGui import QColor, QDesktopServices
@@ -48,6 +49,137 @@ class ScoreSearchCard(ScheduledNoticeCard):
                          content="自动查询当前账户成绩并推送",
                          dialog_parent=interface,
                          parent=parent)
+
+        self._interface = interface
+
+        # ===== 自定义命令 Hook UI =====
+        self.hookEnableLabel = BodyLabel(self.tr("查询后执行自定义命令"), self)
+        self.hookEnableButton = SwitchButton(self.tr("关"), self, IndicatorPosition.RIGHT)
+        self.hookEnableButton.setOnText(self.tr("开"))
+
+        self.hookProgramLabel = BodyLabel(self.tr("命令路径"), self)
+        self.hookProgramEdit = LineEdit(self)
+        self.hookProgramEdit.setPlaceholderText(self.tr("可执行文件路径"))
+        self.hookProgramEdit.setClearButtonEnabled(True)
+
+        self.hookArgsLabel = BodyLabel(self.tr("命令参数"), self)
+        self.hookArgsEdit = LineEdit(self)
+        self.hookArgsEdit.setMinimumWidth(500)
+        self.hookArgsEdit.setPlaceholderText(self.tr("参数（空格分隔，可用引号），支持 ${payload} ${event} ${timestamp} ${nickname}"))
+        self.hookArgsEdit.setClearButtonEnabled(True)
+
+        self.hookTimeoutLabel = BodyLabel(self.tr("超时（秒）"), self)
+        self.hookTimeoutEdit = LineEdit(self)
+        self.hookTimeoutEdit.setPlaceholderText(self.tr("例如：15"))
+        self.hookTimeoutEdit.setClearButtonEnabled(True)
+
+        self.hookIncludeAllLabel = BodyLabel(self.tr("传出完整成绩"), self)
+        self.hookIncludeAllButton = SwitchButton(self.tr("关"), self, IndicatorPosition.RIGHT)
+        self.hookIncludeAllButton.setOnText(self.tr("开"))
+
+        self.hookDocLabel = BodyLabel(self.tr("文档"), self)
+        self.hookDocLink = HyperlinkLabel(QUrl("https://docs.xjtutoolbox.com/tutorial/scheduled-event.html"), self.tr("查看自定义命令文档"), self)
+
+        # 添加到卡片（位于“立刻推送”行之后）
+        self.add(self.hookEnableLabel, self.hookEnableButton)
+        self.add(self.hookProgramLabel, self.hookProgramEdit)
+        self.add(self.hookArgsLabel, self.hookArgsEdit)
+        self.add(self.hookTimeoutLabel, self.hookTimeoutEdit)
+        self.add(self.hookIncludeAllLabel, self.hookIncludeAllButton)
+
+        # 在 UI 栏目下方添加文档链接
+        self.add(self.hookDocLabel, self.hookDocLink)
+
+        # 初始值
+        self.hookEnableButton.setChecked(cfg.scoreHookEnable.value)
+        self.hookProgramEdit.setText(cfg.scoreHookProgram.value)
+        self.hookArgsEdit.setText(self._format_args(cfg.scoreHookArgs.value))
+        self.hookTimeoutEdit.setText(str(cfg.scoreHookTimeoutSec.value))
+        self.hookIncludeAllButton.setChecked(cfg.scoreHookIncludeFullScores.value)
+
+        self._refreshHookControlsEnabled()
+
+        # 配置项 -> UI
+        cfg.scoreHookEnable.valueChanged.connect(lambda _: self.hookEnableButton.setChecked(cfg.scoreHookEnable.value))
+        cfg.scoreHookProgram.valueChanged.connect(lambda _: self.hookProgramEdit.setText(cfg.scoreHookProgram.value))
+        cfg.scoreHookArgs.valueChanged.connect(lambda _: self.hookArgsEdit.setText(self._format_args(cfg.scoreHookArgs.value)))
+        cfg.scoreHookTimeoutSec.valueChanged.connect(lambda _: self.hookTimeoutEdit.setText(str(cfg.scoreHookTimeoutSec.value)))
+        cfg.scoreHookIncludeFullScores.valueChanged.connect(lambda _: self.hookIncludeAllButton.setChecked(cfg.scoreHookIncludeFullScores.value))
+
+        # UI -> 配置项
+        self.hookEnableButton.checkedChanged.connect(self._onHookEnableChanged)
+        self.hookProgramEdit.editingFinished.connect(self._onHookProgramEdited)
+        self.hookArgsEdit.editingFinished.connect(self._onHookArgsEdited)
+        self.hookTimeoutEdit.editingFinished.connect(lambda: self._onHookIntEdited(self.hookTimeoutEdit, cfg.scoreHookTimeoutSec, 1, 600))
+        self.hookIncludeAllButton.checkedChanged.connect(self._onHookIncludeAllChanged)
+
+    @staticmethod
+    def _format_args(args: list) -> str:
+        try:
+            return shlex.join(args)
+        except Exception:
+            return " ".join(args) if isinstance(args, list) else ""
+
+    def _refreshHookControlsEnabled(self):
+        """
+        根据整个自定义命令功能是否启用，刷新其他控件的可用状态
+        """
+        enabled = bool(cfg.scoreHookEnable.value)
+        self.hookProgramEdit.setEnabled(enabled)
+        self.hookArgsEdit.setEnabled(enabled)
+        self.hookTimeoutEdit.setEnabled(enabled)
+        self.hookIncludeAllButton.setEnabled(enabled)
+
+    @pyqtSlot(bool)
+    def _onHookEnableChanged(self, checked: bool):
+        """
+        修改自定义命令功能启用状态时触发
+        """
+        cfg.scoreHookEnable.value = checked
+        self._refreshHookControlsEnabled()
+
+    @pyqtSlot(bool)
+    def _onHookIncludeAllChanged(self, checked: bool):
+        """
+        修改是否包含所有成绩时触发
+        """
+        cfg.scoreHookIncludeFullScores.value = checked
+
+    @pyqtSlot()
+    def _onHookProgramEdited(self):
+        cfg.scoreHookProgram.value = self.hookProgramEdit.text().strip()
+
+    @pyqtSlot()
+    def _onHookArgsEdited(self):
+        text = self.hookArgsEdit.text().strip()
+        if not text:
+            cfg.scoreHookArgs.value = []
+            return
+        try:
+            cfg.scoreHookArgs.value = shlex.split(text)
+        except ValueError as e:
+            InfoBar.error(self.tr("参数格式错误"), str(e), parent=self._interface)
+            # 恢复为当前配置值
+            self.hookArgsEdit.setText(self._format_args(cfg.scoreHookArgs.value))
+
+    def _onHookIntEdited(self, edit: LineEdit, item, minimum: int, maximum: int):
+        text = edit.text().strip()
+        if not text:
+            # 为空时恢复当前值
+            edit.setText(str(item.value))
+            return
+        try:
+            value = int(text)
+        except ValueError:
+            InfoBar.error(self.tr("数值格式错误"), self.tr("请输入整数"), parent=self._interface)
+            edit.setText(str(item.value))
+            return
+
+        if value < minimum or value > maximum:
+            InfoBar.error(self.tr("数值范围错误"), self.tr(f"请输入 {minimum} - {maximum} 之间的整数"), parent=self._interface)
+            edit.setText(str(item.value))
+            return
+        item.value = value
 
 
 class SettingInterface(ScrollArea):

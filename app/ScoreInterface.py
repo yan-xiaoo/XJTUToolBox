@@ -1,8 +1,13 @@
 import datetime
 import json
+import hashlib
+import os
+import subprocess
+import threading
+import time
 from typing import List
 
-from PyQt5.QtCore import pyqtSlot, Qt
+from PyQt5.QtCore import pyqtSlot, Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QTableWidgetItem
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, PrimaryPushButton, TableWidget, ToolTipFilter, \
      InfoBar, InfoBarPosition, TransparentPushButton, CaptionLabel, MessageBox
@@ -12,12 +17,14 @@ from app.sub_interfaces.ScoreDetailDialog import ScoreDetailDialog, EmptyScoreDe
 from app.threads.GraduateScoreThread import GraduateScoreThread
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScoreThread import ScoreThread
-from app.utils import StyleSheet, cfg, AccountDataManager, accounts, logger
+from app.utils import StyleSheet, cfg, AccountDataManager, accounts, logger, DATA_DIRECTORY
 from app.utils.notification import notify
 
 
 class ScoreInterface(ScrollArea):
     """成绩查询界面"""
+    _hook_error_message = pyqtSignal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -115,6 +122,8 @@ class ScoreInterface(ScrollArea):
         self.viewLayout.addWidget(self.scoreTable, stretch=1)
         self.viewLayout.addSpacing(5)
         self.viewLayout.addWidget(self.hintText, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        self._hook_error_message.connect(self._maybe_show_error_message)
 
         StyleSheet.SCORE_INTERFACE.apply(self)
         self.setWidget(self.view)
@@ -373,6 +382,197 @@ class ScoreInterface(ScrollArea):
                 w.exec()
             self._background_search_running = False
 
+    def _load_score_hook_state(self) -> dict:
+        """读取按账户保存的 Hook 状态（用于限流/去重）。"""
+        if accounts.current is None:
+            return {}
+        cache = AccountDataManager(accounts.current)
+        try:
+            return cache.read_json("score_hook_state.json")
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _save_score_hook_state(self, state: dict):
+        if accounts.current is None:
+            return
+        cache = AccountDataManager(accounts.current)
+        try:
+            cache.write_json("score_hook_state.json", state, allow_overwrite=True)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.datetime.now().astimezone().isoformat()
+
+    @staticmethod
+    def _fingerprint(event: str, nickname: str, new_names: list[str]) -> str:
+        payload = {
+            "event": event,
+            "nickname": nickname or "",
+            "new_names": sorted(new_names or [])
+        }
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
+
+    def _should_run_hook(self, event: str, nickname: str, new_names: list[str]) -> tuple[bool, dict]:
+        """返回 (是否执行, 更新后的state)。"""
+        state = self._load_score_hook_state()
+        now_ts = time.time()
+
+        if event == "score.force":
+            last_ts = float(state.get("last_force_ts", 0) or 0)
+            cooldown = int(cfg.scoreHookCooldownForceSec.value or 0)
+            if cooldown > 0 and now_ts - last_ts < cooldown:
+                return False, state
+            state["last_force_ts"] = now_ts
+            return True, state
+
+        if event == "score.new":
+            fp = self._fingerprint(event, nickname, new_names)
+            last_fp = state.get("last_new_fp")
+            last_ts = float(state.get("last_new_ts", 0) or 0)
+            cooldown = int(cfg.scoreHookCooldownNewSec.value or 0)
+            if last_fp == fp and cooldown > 0 and now_ts - last_ts < cooldown:
+                return False, state
+            state["last_new_fp"] = fp
+            state["last_new_ts"] = now_ts
+            return True, state
+
+        return False, state
+
+    def _write_hook_payload(self, payload: dict, fingerprint: str | None = None) -> str:
+        hooks_dir = os.path.join(DATA_DIRECTORY, "hooks", "score")
+        os.makedirs(hooks_dir, exist_ok=True)
+
+        ts = int(time.time())
+        suffix = (fingerprint or "")[:8]
+        filename = f"score_hook_{ts}_{suffix}.json" if suffix else f"score_hook_{ts}.json"
+        path = os.path.join(hooks_dir, filename)
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return path
+
+    @staticmethod
+    def _render_arg(template: str, variables: dict) -> str:
+        if not isinstance(template, str):
+            template = str(template)
+        for k, v in variables.items():
+            template = template.replace(f"${{{k}}}", str(v))
+        return template
+
+    def _run_hook_async(self, argv: list[str], payload_path: str):
+        def worker():
+            timeout = int(cfg.scoreHookTimeoutSec.value or 300)
+            try:
+                completed = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    shell=False
+                )
+                if completed.stdout:
+                    logger.info(f"scoreHook stdout: {completed.stdout.strip()}")
+                if completed.stderr:
+                    logger.warning(f"scoreHook stderr: {completed.stderr.strip()}")
+                    self._hook_error_message.emit(completed.stderr.strip())
+                if completed.returncode != 0:
+                    logger.warning(f"scoreHook exited with code {completed.returncode}")
+            except FileNotFoundError:
+                logger.error("scoreHook failed: program not found")
+                self._hook_error_message.emit(self.tr("找不到指定的外部程序，请检查配置的程序路径是否正确。"))
+            except subprocess.TimeoutExpired:
+                logger.warning(f"scoreHook timeout after {timeout}s")
+                self._hook_error_message.emit(self.tr("外部程序执行超时，请检查程序是否能够在规定时间内完成。"))
+            except Exception as e:
+                logger.exception(f"scoreHook failed: {e}")
+                self._hook_error_message.emit(self.tr("执行外部程序时发生错误：\n") + str(e))
+            finally:
+                if not cfg.scoreHookKeepPayloadFiles.value:
+                    try:
+                        os.remove(payload_path)
+                    except OSError:
+                        pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @pyqtSlot(str)
+    def _maybe_show_error_message(self, message: str):
+        if self.window().isVisible() and self.window().isActiveWindow():
+            box = MessageBox(self.tr("外部程序执行失败"), message, self.window())
+            box.yesButton.hide()
+            box.cancelButton.setText(self.tr("好的"))
+            box.exec()
+        else:
+            self.error(self.tr("成绩钩子执行失败"), message)
+
+    def _maybe_run_score_hook(self, *, event: str, score_list: list, new_names: list[str]):
+        """
+        根据配置和限流状态，决定是否执行外部命令
+        传递给外部命令的字段包括：
+        - event: 事件类型，"score.new" 或 "score.force"
+        - timestamp: 事件发生的时间，ISO 8601 格式
+        - account: 包含当前账户的 nickname 字段
+        - new_names: 新公布成绩的课程名称列表（仅当 event 为 "score.new" 时包含）
+        - new_scores: 新公布成绩的成绩列表（仅当 event 为 "score.new" 时包含）
+        - all_scores: 所有成绩列表（仅当配置项 scoreHookIncludeFullScores 启用时包含）
+        这些字段会被写入一个 JSON 文件，并将该文件的路径通过命令行参数传递给外部命令
+        """
+        if not cfg.scoreHookEnable.value:
+            return
+
+        program = (cfg.scoreHookProgram.value or "").strip()
+        if not program:
+            logger.warning("scoreHook enabled but program is empty")
+            return
+
+        nickname = ""
+        if accounts.current is not None:
+            nickname = getattr(accounts.current, "nickname", "") or ""
+
+        should_run, new_state = self._should_run_hook(event, nickname, new_names)
+        if not should_run:
+            return
+
+        # 先保存 state，避免短时间内重复触发
+        self._save_score_hook_state(new_state)
+
+        timestamp = self._now_iso()
+        fp = None
+        if event == "score.new":
+            fp = self._fingerprint(event, nickname, new_names)
+
+        new_scores = []
+        if event == "score.new" and new_names:
+            new_name_set = set(new_names)
+            new_scores = [s for s in score_list if isinstance(s, dict) and s.get("courseName") in new_name_set]
+
+        payload = {
+            "event": event,
+            "timestamp": timestamp,
+            "account": {"nickname": nickname},
+            "new_names": new_names or [],
+            "new_scores": new_scores,
+        }
+        if cfg.scoreHookIncludeFullScores.value:
+            payload["all_scores"] = score_list
+
+        payload_path = self._write_hook_payload(payload, fingerprint=fp)
+
+        variables = {
+            "payload": payload_path,
+            "event": event,
+            "timestamp": timestamp,
+            "nickname": nickname,
+            "new_count": len(new_names or []),
+        }
+
+        args = cfg.scoreHookArgs.value or []
+        argv = [program] + [self._render_arg(a, variables) for a in args]
+        self._run_hook_async(argv, payload_path)
+
     @staticmethod
     def formatClassName(names: List[str]) -> str:
         if len(names) == 1:
@@ -410,6 +610,12 @@ class ScoreInterface(ScrollArea):
                 box.exec()
             else:
                 self.error(self.tr("无法推送通知"), str(e))
+
+        # 无论是否成功推送通知，都尝试触发外部命令（按限流策略决定是否真正执行）
+        if new_score:
+            self._maybe_run_score_hook(event="score.new", score_list=score_list, new_names=new_names)
+        elif self._force_push:
+            self._maybe_run_score_hook(event="score.force", score_list=score_list, new_names=[])
 
         # 断开连接，避免影响手动查询成绩时的信号处理
         if is_postgraduate:

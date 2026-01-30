@@ -128,6 +128,103 @@ class UserAgentSerializer(ConfigSerializer):
         return generate_user_agent()
 
 
+class StringValidator(ConfigValidator):
+    def validate(self, value):
+        return isinstance(value, str)
+
+    def correct(self, value):
+        if value is None:
+            return ""
+        return str(value)
+
+
+class StringSerializer(ConfigSerializer):
+    def serialize(self, value):
+        if value is None:
+            return ""
+        return str(value)
+
+    def deserialize(self, value):
+        if value is None:
+            return ""
+        return str(value)
+
+
+class IntValidator(ConfigValidator):
+    def __init__(self, default: int = 0, minimum: int | None = None, maximum: int | None = None):
+        super().__init__()
+        self.default = default
+        self.minimum = minimum
+        self.maximum = maximum
+
+    def validate(self, value):
+        if not isinstance(value, int):
+            return False
+        if self.minimum is not None and value < self.minimum:
+            return False
+        if self.maximum is not None and value > self.maximum:
+            return False
+        return True
+
+    def correct(self, value):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return self.default
+
+        if self.minimum is not None:
+            value = max(self.minimum, value)
+        if self.maximum is not None:
+            value = min(self.maximum, value)
+        return value
+
+
+class IntSerializer(ConfigSerializer):
+    def serialize(self, value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    def deserialize(self, value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+
+class StrListValidator(ConfigValidator):
+    def validate(self, value):
+        return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+    def correct(self, value):
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        return []
+
+
+class StrListSerializer(ConfigSerializer):
+    """Serialize list[str] as JSON string for compatibility with existing config style."""
+
+    def serialize(self, value):
+        if isinstance(value, list):
+            return json.dumps([str(v) for v in value], ensure_ascii=False)
+        return "[]"
+
+    def deserialize(self, value):
+        if isinstance(value, list):
+            # 兼容：若 qconfig 直接给出 list
+            return [str(v) for v in value]
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return [str(v) for v in parsed]
+            except json.JSONDecodeError:
+                return []
+        return []
+
+
 class AttendanceLoginMethod(Enum):
     # 不设置，每次询问
     NONE = 0
@@ -188,6 +285,46 @@ class Config(QConfig):
     lastScoreSearchTime = OptionsConfigItem("Settings", "last_score_search_time",
                                             datetime.datetime(1970, 1, 1), DateTimeValidator(),
                                             DateTimeSerializer())
+
+    # 成绩定时查询：自定义命令 Hook
+    scoreHookEnable = OptionsConfigItem(
+        "Settings", "score_hook_enable",
+        False, OptionsValidator([True, False]), BooleanSerializer()
+    )
+    scoreHookProgram = ConfigItem(
+        "Settings", "score_hook_program",
+        "", StringValidator(), StringSerializer()
+    )
+    # argv 参数列表（存储为 list[str]）
+    scoreHookArgs = ConfigItem(
+        "Settings", "score_hook_args",
+        ["--payload", "${payload}"], StrListValidator(), StrListSerializer()
+    )
+    # 子程序最长执行时间
+    scoreHookTimeoutSec = ConfigItem(
+        "Settings", "score_hook_timeout_sec",
+        15, IntValidator(default=15, minimum=1, maximum=600), IntSerializer()
+    )
+    # 两次允许执行的最短间隔时间
+    scoreHookCooldownNewSec = ConfigItem(
+        "Settings", "score_hook_cooldown_new_sec",
+        300, IntValidator(default=300, minimum=0, maximum=86400), IntSerializer()
+    )
+    # 在点击“立刻推送”（强制执行）时，允许的最短间隔时间，防止误触
+    scoreHookCooldownForceSec = ConfigItem(
+        "Settings", "score_hook_cooldown_force_sec",
+        3, IntValidator(default=3, minimum=0, maximum=3600), IntSerializer()
+    )
+    # 是否在 payload 中包含完整成绩信息（否则只包含变动的成绩）
+    scoreHookIncludeFullScores = OptionsConfigItem(
+        "Settings", "score_hook_include_full_scores",
+        False, OptionsValidator([True, False]), BooleanSerializer()
+    )
+    # 是否保留 payload 文件，便于调试
+    scoreHookKeepPayloadFiles = OptionsConfigItem(
+        "Settings", "score_hook_keep_payload_files",
+        False, OptionsValidator([True, False]), BooleanSerializer()
+    )
 
     autoStart = OptionsConfigItem("Settings", "auto_start",
                                   False, OptionsValidator([True, False]), BooleanSerializer())

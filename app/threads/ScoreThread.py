@@ -83,7 +83,6 @@ class ScoreThread(ProcessThread):
                 return
 
             # 如果是空的，则使用当前学期
-            hook = (self.term_number == [])
             if self.term_number == []:
                 schedule = Schedule(self.session)
                 self.term_number = [schedule.termString]
@@ -104,13 +103,6 @@ class ScoreThread(ProcessThread):
                 for course in reported_result:
                     if course["courseName"] not in all_course_names:
                         result.append(course)
-            if hook:
-                result.append({
-                    "courseName": "表达与交流",
-                    "coursePoint": 2.5,
-                    "score": 95,
-                    "gpa": 4.3
-                })
 
             self.progressChanged.emit(100)
         except ServerError as e:
