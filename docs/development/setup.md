@@ -40,32 +40,6 @@ git clone https://github.com/yan-xiaoo/XJTUToolBox.git
 uv sync
 ```
 
-### macOS 上的额外操作
-
-**安装 `pyobjus`(用于消息通知)**
-
-`pyobjus` 库为 macOS 提供消息通知功能。若不安装此库,程序将无法在 macOS 上发送通知,但其他功能不受影响。
-
-由于 `pyobjus` 的一个关键修复尚未发布到 PyPI,需要从源码编译安装:
-
-::: tip 为什么不集成到 uv?
-uv 会在所有平台下尝试解析 `pyobjus` 依赖,即使只有 macOS 需要。然而 `pyobjus` 源代码中包含 "aux" 等在 Windows 上不被允许的目录名称,因此若将其添加到 `pyproject.toml` 中,会导致 uv 在 Windows 平台下报错。
-:::
-
-```bash
-# 1. 克隆 pyobjus 仓库
-git clone https://github.com/kivy/pyobjus.git
-
-# 2. 进入目录并编译安装
-cd pyobjus
-make build_ext
-python setup.py install
-```
-
-::: warning 缺少开发工具?
-若在执行 `make` 时遇到 `zsh: command not found: make` 错误,说明您的系统缺少 C++ 编译器等开发工具。请先在终端执行 `xcode-select --install` 安装 Xcode 命令行工具。
-:::
-
 ## 3. 运行程序
 
 完成以上步骤后,即可运行主程序:

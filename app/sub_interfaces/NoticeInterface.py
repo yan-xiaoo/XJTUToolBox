@@ -9,12 +9,12 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QActionGroup
 from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton, \
     TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType, InfoBarPosition, InfoBar, CaptionLabel, \
     MessageBox
-from plyer import notification
 
 from ..components.NoticeCard import NoticeCard
 from ..threads.NoticeThread import NoticeThread
 from ..threads.ProcessWidget import ProcessWidget
 from ..utils import StyleSheet, cfg
+from ..utils.notification import notify
 from ..utils.cache import cacheManager, dataManager
 from notification import NotificationManager, Notification
 
@@ -396,39 +396,19 @@ class NoticeInterface(ScrollArea):
             sources.add(notice.source.value)
         try:
             if count > 0:
-                notification.notify(title=self.tr("西安交通大学网站有新的通知"), message=f"{self.tr('来自')} {', '.join(sources)} {self.tr('的')} {count} {self.tr('条新通知')}")
+                notify(title=self.tr("西安交通大学网站有新的通知"), message=f"{self.tr('来自')} {', '.join(sources)} {self.tr('的')} {count} {self.tr('条新通知')}")
             elif self._forcePush:
                 # 如果没有新通知，但是还是要推送通知
-                notification.notify(title="没有新的通知", message="现在的通知已经是最新的")
+                notify(title="没有新的通知", message="现在的通知已经是最新的")
         except NotImplementedError as e:
-            if platform.system() == "Darwin":
-                if getattr(sys, "frozen", False):
-                    # 打包版本不该有问题
-                    if self.main_window.isVisible():
-                        box = MessageBox(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e), self.main_window)
-                        box.yesButton.hide()
-                        box.cancelButton.setText(self.tr("好的"))
-                        box.exec()
-                    else:
-                        self.error(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e))
-                else:
-                    # macOS 源码运行时需要自己装库
-                    if self.main_window.isVisible():
-                        box = MessageBox(self.tr("推送通知失败"), self.tr("请跟随 GitHub 仓库中 README.md 的指引，安装 pyobjus 库"), self.main_window)
-                        box.yesButton.hide()
-                        box.cancelButton.setText(self.tr("好的"))
-                        box.exec()
-                    else:
-                        self.error(self.tr("推送通知失败"), self.tr("请跟随 GitHub 仓库中 README.md 的指引，安装 pyobjus 库"))
+            # 其他系统
+            if self.main_window.isVisible():
+                box = MessageBox(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e), self.main_window)
+                box.yesButton.hide()
+                box.cancelButton.setText(self.tr("好的"))
+                box.exec()
             else:
-                # 其他系统
-                if self.main_window.isVisible():
-                    box = MessageBox(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e), self.main_window)
-                    box.yesButton.hide()
-                    box.cancelButton.setText(self.tr("好的"))
-                    box.exec()
-                else:
-                    self.error(self.tr("无法推送通知"), str(e))
+                self.error(self.tr("无法推送通知"), str(e))
 
     def save_notification(self):
         """

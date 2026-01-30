@@ -1,14 +1,15 @@
 import platform
+from collections.abc import Callable
 from traceback import format_exception
 from types import TracebackType
-from typing import Type
+from typing import Type, Any, Dict
 import sys
 
 from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize, QTimer
 from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox, InfoBadgePosition, \
-    InfoBadge, SplashScreen
+    InfoBadge, SplashScreen, ConfigItem
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import NavigationItemPosition, isDarkTheme
 
@@ -40,7 +41,7 @@ def registerSession():
     """
     注册各个子网站需要使用的 Session 类
     """
-    # ehall：ehall.xjtu.edu.cn 所用的 session
+    # 教务系统：jwxt.xjtu.edu.cn 所用的 session
     SessionManager.global_register(JWXTSession, "jwxt")
     SessionManager.global_register(AttendanceSession, "attendance")
     SessionManager.global_register(JwappSession, "jwapp")
@@ -91,14 +92,13 @@ class MainWindow(MSFluentWindow):
             self.update_thread.updateSignal.connect(self.on_update_check)
             self.update_thread.updateSignal.connect(self.setting_interface.onUpdateCheck)
             self.update_thread.start()
-        # 通知定时查询
-        self.notice_timer = QTimer(self)
-        self.notice_timer.timeout.connect(self.notice_interface.onTimerSearch)
-        # 当设置了自动查询时，开始计时
-        cfg.noticeAutoSearch.valueChanged.connect(self.on_notice_search_value_changed)
-        if cfg.noticeAutoSearch.value:
-            # 60 秒检查一次时间
-            self.notice_timer.start(60 * 1000)
+
+        self.timers: Dict[ConfigItem, Callable[[], Any]] = {}
+
+        # 添加需要定期触发查询（检查）的任务
+        # 通知自动查询
+        self.addScheduledTask(cfg.noticeAutoSearch, self.notice_interface.onTimerSearch)
+        self.addScheduledTask(cfg.scoreAutoSearch, self.score_interface.onTimerSearch)
 
         accounts.currentAccountChanged.connect(self.on_avatar_update)
         self.account_interface.avatarChanged.connect(self.on_avatar_update)
@@ -122,7 +122,8 @@ class MainWindow(MSFluentWindow):
         self.judge_interface = AutoJudgeInterface(self)
         self.webvpn_convert_interface = WebVPNConvertInterface(self)
         self.notice_interface = NoticeInterface(self, self)
-        self.setting_interface.noticeCard.testButton.clicked.connect(lambda: self.notice_interface.startBackgroundSearch(force_push=True))
+        self.setting_interface.noticeCard.test_button_clicked.connect(lambda: self.notice_interface.startBackgroundSearch(force_push=True))
+        self.setting_interface.scoreCard.test_button_clicked.connect(lambda: self.score_interface.startBackgroundSearch(force_push=True))
         QApplication.processEvents()
         self.notice_setting_interface = NoticeSettingInterface(self.notice_interface.noticeManager, self.notice_interface, self)
         self.notice_setting_interface.quit.connect(self.notice_interface.onSettingQuit)
@@ -234,6 +235,23 @@ class MainWindow(MSFluentWindow):
                 self.tray_interface.hide()
                 a0.accept()
 
+    def addScheduledTask(self, config: ConfigItem, callback: Callable[[], Any]):
+        """
+        添加一个定时任务，当对应的配置项被启用时，每分钟检查一次时间，到了设定时间就执行回调函数
+
+        :raises ValueError: 如果传入的配置项已经被添加过，则抛出该异常
+        """
+        if config in self.timers:
+            raise ValueError("该配置项已经被添加过定时任务")
+
+        timer = QTimer(self)
+        timer.timeout.connect(lambda: callback() if config.value else None)
+        self.timers[config] = callback
+        # 监听配置项变化，启用或禁用定时器
+        config.valueChanged.connect(lambda _:  timer.start(60 * 1000) if config.value else timer.stop())
+        if config.value:
+            timer.start(60 * 1000)
+
     @pyqtSlot()
     def on_theme_changed(self):
         if platform.system() == "Darwin":
@@ -254,13 +272,6 @@ class MainWindow(MSFluentWindow):
     def on_setting_button_clicked(self):
         if self.setting_badge:
             self.setting_badge.close()
-
-    @pyqtSlot(object)
-    def on_notice_search_value_changed(self, _):
-        if cfg.noticeAutoSearch.value:
-            self.notice_timer.start(60 * 1000)
-        else:
-            self.notice_timer.stop()
 
     @pyqtSlot()
     def on_avatar_update(self, _=None):

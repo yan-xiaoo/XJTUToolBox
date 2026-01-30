@@ -34,15 +34,6 @@ jobs:
         uses: astral-sh/setup-uv@v5
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
-      - name: Install pyobjus(macOS)
-        if: runner.os == 'macOS'
-        run: |
-          source .venv/bin/activate
-          git clone https://github.com/kivy/pyobjus.git
-          cd pyobjus
-          make build_ext
-          pip install .
-          cd ..
       - name: Build Application
         run: uv run build.py
       - name: Archive(windows)

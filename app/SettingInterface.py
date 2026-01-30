@@ -1,15 +1,14 @@
-import datetime
 import os
 import sys
 
 import keyring
 import keyring.errors
-from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTime
+from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
-    InfoBadge, ExpandGroupSettingCard, SwitchButton, IndicatorPosition, BodyLabel, TimePicker, PushButton
+    InfoBadge
 from qfluentwidgets import FluentIcon as FIF
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QApplication
+from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtGui import QColor, QDesktopServices
 
 from .cards.copyable_switch_card import CopyablePushSettingCard
@@ -23,90 +22,32 @@ from .utils.config import cfg, TraySetting
 from .utils import accounts, LOG_DIRECTORY, DEFAULT_ACCOUNT_PATH
 from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
+from .cards.scheduled_notice_card import ScheduledNoticeCard
 from .sub_interfaces.EncryptDialog import EncryptDialog, DecryptDialog
 
 
-class NoticeSearchCard(ExpandGroupSettingCard):
+class NoticeSearchCard(ScheduledNoticeCard):
     """
     定时查询通知的设置卡片
     """
     def __init__(self, interface, parent=None):
-        super().__init__(icon=FIF.HISTORY, title="定期查询通知", parent=parent)
+        super().__init__(icon=FIF.HISTORY, title="定期查询通知", enable_config_item=cfg.noticeAutoSearch,
+                         time_config_item=cfg.noticeSearchTime,
+                         content="每天自动查询并推送新通知",
+                         dialog_parent=interface,
+                         parent=parent)
 
-        self.interface = interface
-        self.card.setTitle(self.tr("定期查询通知"))
-        self.card.setContent(self.tr("每天自动查询并推送新通知"))
-        self.enableLabel = BodyLabel(self.tr("定期查询通知"), self)
-        self.enableButton = SwitchButton(self.tr("关"), self, IndicatorPosition.RIGHT)
-        self.enableButton.setOnText(self.tr("开"))
 
-        self.timeLabel = BodyLabel(self.tr("查询时间"), self)
-        self.timePicker = TimePicker(parent=self)
-        self.timePicker.timeChanged.connect(self.onTimeChanged)
-        time_ = cfg.noticeSearchTime.value
-        self.timePicker.setTime(QTime(time_.hour, time_.minute))
-
-        self.testLabel = BodyLabel(self.tr("立刻尝试推送通知"), self)
-        self.testButton = PushButton(self.tr("立刻推送"), self)
-
-        if not cfg.noticeAutoSearch.value:
-            self.enableButton.setChecked(False)
-            self.timePicker.setEnabled(False)
-            self.testButton.setEnabled(False)
-        else:
-            self.enableButton.setChecked(True)
-            self.timePicker.setEnabled(True)
-            self.testButton.setEnabled(True)
-        # 延迟链接
-        self.enableButton.checkedChanged.connect(self.onEnableButtonClicked)
-
-        self.add(self.enableLabel, self.enableButton)
-        self.add(self.timeLabel, self.timePicker)
-        self.add(self.testLabel, self.testButton)
-
-    @pyqtSlot()
-    def onEnableButtonClicked(self):
-        if self.enableButton.isChecked():
-            if cfg.traySetting.value != TraySetting.MINIMIZE:
-                box = MessageBox(self.tr("开启定期查询"), self.tr("程序需要在后台运行以实现定时查询。\n是否允许程序常驻托盘？"),
-                                 parent=self.interface)
-                box.yesButton.setText(self.tr("确定"))
-                box.cancelButton.setText(self.tr("取消"))
-                if box.exec():
-                    cfg.traySetting.value = TraySetting.MINIMIZE
-                    self.timePicker.setEnabled(True)
-                    cfg.noticeAutoSearch.value = True
-                    self.testButton.setEnabled(True)
-                else:
-                    self.enableButton.setChecked(False)
-                    self.timePicker.setEnabled(False)
-                    cfg.noticeAutoSearch.value = False
-                    self.testButton.setEnabled(False)
-            else:
-                self.timePicker.setEnabled(True)
-                cfg.noticeAutoSearch.value = True
-                self.testButton.setEnabled(True)
-        else:
-            self.timePicker.setEnabled(False)
-            cfg.noticeAutoSearch.value = False
-            self.testButton.setEnabled(False)
-
-    @pyqtSlot(QTime)
-    def onTimeChanged(self, time: QTime):
-        """时间选择器的时间改变时触发"""
-        cfg.noticeSearchTime.value = datetime.time(hour=time.hour(), minute=time.minute())
-
-    def add(self, label, widget):
-        w = QWidget()
-
-        layout = QHBoxLayout(w)
-
-        layout.addWidget(label)
-        layout.addStretch(1)
-        layout.addWidget(widget)
-
-        # 添加组件到设置卡
-        self.addGroupWidget(w)
+class ScoreSearchCard(ScheduledNoticeCard):
+    """
+    定时查询成绩的设置卡片
+    """
+    def __init__(self, interface, parent=None):
+        super().__init__(icon=FIF.EDUCATION, title="定期查询成绩", enable_config_item=cfg.scoreAutoSearch,
+                         time_config_item=cfg.scoreSearchTime,
+                         content="自动查询当前账户成绩并推送",
+                         dialog_parent=interface,
+                         parent=parent)
 
 
 class SettingInterface(ScrollArea):
@@ -188,9 +129,11 @@ class SettingInterface(ScrollArea):
         self.scoreGroup.addSettingCard(self.useReportCard)
 
         # 通知查询组
-        self.noticeGroup = SettingCardGroup(self.tr("通知查询"), self.view)
+        self.noticeGroup = SettingCardGroup(self.tr("定时查询"), self.view)
         self.noticeCard = NoticeSearchCard(self, self.view)
+        self.scoreCard = ScoreSearchCard(self, self.view)
         self.noticeGroup.addSettingCard(self.noticeCard)
+        self.noticeGroup.addSettingCard(self.scoreCard)
 
         # 个性化组
         self.personalGroup = SettingCardGroup(self.tr("个性化"), self.view)
@@ -327,6 +270,7 @@ class SettingInterface(ScrollArea):
         if cfg.traySetting.value != TraySetting.MINIMIZE and cfg.noticeAutoSearch.value:
             cfg.noticeAutoSearch.value = False
             self.noticeCard.enableButton.setChecked(False)
+            self.scoreCard.enableButton.setChecked(False)
 
     @pyqtSlot(bool)
     def _onAutoStartClicked(self, checked: bool):

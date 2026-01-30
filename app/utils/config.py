@@ -178,6 +178,17 @@ class Config(QConfig):
                           False, OptionsValidator([True, False]), BooleanSerializer())
     noticeSearchTime = OptionsConfigItem("Settings", "notice_search_time",
                                          datetime.time(hour=18, minute=0), TimeValidator(), TimeSerializer())
+    # 是否自动查询成绩
+    scoreAutoSearch = OptionsConfigItem("Settings", "score_auto_search",
+                                        False, OptionsValidator([True, False]), BooleanSerializer())
+    # 每天自动查询成绩的时间
+    scoreSearchTime = OptionsConfigItem("Settings", "score_search_time",
+                                        datetime.time(hour=8, minute=0), TimeValidator(), TimeSerializer())
+    # 上次查询成绩的日期
+    lastScoreSearchTime = OptionsConfigItem("Settings", "last_score_search_time",
+                                            datetime.datetime(1970, 1, 1), DateTimeValidator(),
+                                            DateTimeSerializer())
+
     autoStart = OptionsConfigItem("Settings", "auto_start",
                                   False, OptionsValidator([True, False]), BooleanSerializer())
     # 这其实不是个设置项目，只是用来存储上次搜索的时间

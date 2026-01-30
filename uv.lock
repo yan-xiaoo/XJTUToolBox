@@ -3598,6 +3598,25 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjus"
+version = "1.2.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/75/f7ae38607648f9ccb363447b83480fcf0e582c42d62908bbcce05afbe754/pyobjus-1.2.4.tar.gz", hash = "sha256:4877101ff3b70b7fd2b12b2878ab23ee488018ce613f12948b58ff4c7e363388", size = 167844, upload-time = "2025-12-29T14:48:18.514Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/78/e75613faed2f1336d1a2549b5376d80c83f21f0aee6842d6cac91893c8ae/pyobjus-1.2.4-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:cf261b1388003095199a8f0267f31505573cbceef6ad3e4724be364268b16148", size = 547886, upload-time = "2025-12-29T14:48:05.968Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/9c/0328355bbe08c4a71d839c11c11f929b3c4e11f064d2f9b7480fd0d8bfc3/pyobjus-1.2.4-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:e83175b910bae4946e6464396d7a68e336b5ccfa81f7e9d1c7a46f06ec97efc5", size = 551941, upload-time = "2025-12-29T14:48:07.298Z" },
+    { url = "https://files.pythonhosted.org/packages/94/24/40bbd10854f110ba5812881553d017c276e52c477dfddf151cdac3667f81/pyobjus-1.2.4-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:f4da2314b85a57b67e1101493b94da245f03cef8465da698ff5949bec13e8d37", size = 529439, upload-time = "2025-12-29T14:48:08.741Z" },
+    { url = "https://files.pythonhosted.org/packages/50/d4/730e1767fb55db56b20561180cf3553f429b78f56f24c34064fd41a893c1/pyobjus-1.2.4-cp313-cp313-ios_13_0_arm64_iphoneos.whl", hash = "sha256:5ce6202c9d4f3ef62acc132ece498f7ae599061c8071c26623ad545cb37ea7ee", size = 279773, upload-time = "2025-12-29T14:48:09.968Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/fb/879560b837eedfabebe16d7fcf1ca96e9139535651d9a42acb14ef9351c5/pyobjus-1.2.4-cp313-cp313-ios_13_0_arm64_iphonesimulator.whl", hash = "sha256:737124a6ee884150f0d74a3193830e0cf04704334c1c41a4fc1738abec433571", size = 286164, upload-time = "2025-12-29T14:48:11.098Z" },
+    { url = "https://files.pythonhosted.org/packages/34/e2/7d49052b1fe81025dd134905b2580a291aa496d3bf8e684aaf32e6ab750e/pyobjus-1.2.4-cp313-cp313-ios_13_0_x86_64_iphonesimulator.whl", hash = "sha256:7e98cd16ff66404783d0629d28a58122c6789d6b6b54dab200aa176afa35e2e4", size = 302408, upload-time = "2025-12-29T14:48:12.249Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/51/ed32815d349a27ff9e46f814f61420e8b6147bdd9f94b22bb0b7be17efc8/pyobjus-1.2.4-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:248c70d84ab026aeaecb25703042ba3e25ec72a42e5f30ff2f2b7ec1197ac621", size = 525787, upload-time = "2025-12-29T14:48:13.339Z" },
+    { url = "https://files.pythonhosted.org/packages/00/07/7626f16162c3e9a2df6eac876d5cff2a2eb31f6a9f204a421cd9d3902909/pyobjus-1.2.4-cp314-cp314-ios_13_0_arm64_iphoneos.whl", hash = "sha256:1a23280fd78db520cafe01b4637b1aaa9ff09845fd74e37b9d5682914f838700", size = 282928, upload-time = "2025-12-29T14:48:14.457Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/7b/820b8f73057cdecff00cea5b6c84becb9f73430578f6b61fa009d1c4b777/pyobjus-1.2.4-cp314-cp314-ios_13_0_arm64_iphonesimulator.whl", hash = "sha256:369a509de7ef951284ea448654c1b8c532fe22c2a29704a0e1636aa087df3463", size = 289512, upload-time = "2025-12-29T14:48:15.325Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/7d/3c2e4f7579176c90faf22efda6840fc4f87d9486bb2e2889320fc7989241/pyobjus-1.2.4-cp314-cp314-ios_13_0_x86_64_iphonesimulator.whl", hash = "sha256:e729ecca4e37429a9b00148853e73dc36c413b415086060722fa3d7fe58ede4a", size = 303774, upload-time = "2025-12-29T14:48:16.234Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/d5/0591cb8e3441b2ecaf68db91ea9b2aad10a5376b11136b69cd3498456632/pyobjus-1.2.4-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:ef95271d1ec30d4ae61a4f6a66e6fcbf2e41e2420c3fcde5062acc6545565e3d", size = 526356, upload-time = "2025-12-29T14:48:17.155Z" },
+]
+
+[[package]]
 name = "pyqt-fluent-widgets"
 version = "1.8.7"
 source = { registry = "https://pypi.org/simple" }
@@ -3862,13 +3881,13 @@ dependencies = [
     { name = "psutil" },
     { name = "pycryptodome" },
     { name = "pyjwt" },
+    { name = "pyobjus", marker = "sys_platform == 'darwin'" },
     { name = "pyqt-fluent-widgets" },
     { name = "pyqt5" },
     { name = "pyqt5-frameless-window" },
     { name = "pyqt5-qt5", version = "5.15.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
     { name = "pytz" },
     { name = "requests" },
-    { name = "setuptools", marker = "sys_platform == 'darwin'" },
     { name = "tqdm" },
 ]
 
@@ -3895,6 +3914,7 @@ requires-dist = [
     { name = "psutil", specifier = "~=7.0.0" },
     { name = "pycryptodome", specifier = "~=3.21.0" },
     { name = "pyjwt", specifier = "~=2.10.1" },
+    { name = "pyobjus", marker = "sys_platform == 'darwin'", specifier = ">=1.2.4" },
     { name = "pyqt-fluent-widgets", specifier = "~=1.8.7" },
     { name = "pyqt5", marker = "sys_platform != 'win32'", specifier = ">=5.15.11" },
     { name = "pyqt5", marker = "sys_platform == 'win32'", specifier = ">=5.15.11" },
@@ -3902,7 +3922,6 @@ requires-dist = [
     { name = "pyqt5-qt5", marker = "sys_platform == 'win32'", specifier = ">=5.15,<=5.15.2" },
     { name = "pytz", specifier = "~=2025.2" },
     { name = "requests", specifier = "~=2.32.0" },
-    { name = "setuptools", marker = "sys_platform == 'darwin'", specifier = ">=80.9.0" },
     { name = "tqdm", specifier = "~=4.67.1" },
 ]
 

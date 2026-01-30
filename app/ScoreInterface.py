@@ -1,17 +1,19 @@
 import datetime
 import json
+from typing import List
 
 from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QTableWidgetItem
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, PrimaryPushButton, TableWidget, ToolTipFilter, \
-    ToolTipPosition, InfoBar, InfoBarPosition, TransparentPushButton, CaptionLabel
+     InfoBar, InfoBarPosition, TransparentPushButton, CaptionLabel, MessageBox
 
 from app.components.MultiSelectionComboBox import MultiSelectionComboBox
 from app.sub_interfaces.ScoreDetailDialog import ScoreDetailDialog, EmptyScoreDetailDialog
 from app.threads.GraduateScoreThread import GraduateScoreThread
 from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScoreThread import ScoreThread
-from app.utils import StyleSheet, cfg, AccountDataManager, accounts
+from app.utils import StyleSheet, cfg, AccountDataManager, accounts, logger
+from app.utils.notification import notify
 
 
 class ScoreInterface(ScrollArea):
@@ -66,6 +68,10 @@ class ScoreInterface(ScrollArea):
 
         self._onlyNotice = None
         self.scores = None
+
+        self._force_push = False
+        self._last_score = None
+        self._background_search_running = False
 
         self.statisticTable = TableWidget(self.view)
         self.statisticTable.setRowCount(1)
@@ -202,6 +208,9 @@ class ScoreInterface(ScrollArea):
 
     @staticmethod
     def guess_term_string():
+        """
+        根据当前日期，猜测当前学期的字符串
+        """
         now = datetime.datetime.now()
         year = now.year
         month = now.month
@@ -300,6 +309,8 @@ class ScoreInterface(ScrollArea):
     @pyqtSlot()
     def onScoreButtonClicked(self):
         if self.termBox.allSelected():
+            # term_number = None 代表查询所有学期
+            # term_number = [] 代表选择当前学期
             term_number = None
         else:
             term_number = [one.text for one in self.termBox.selectedItems()]
@@ -320,6 +331,95 @@ class ScoreInterface(ScrollArea):
         else:
             self.graduateScoreThread.start()
             self.graduateProcessWidget.setVisible(True)
+
+    @pyqtSlot()
+    def onTimerSearch(self):
+        """
+        定时查询成绩启用时，QTimer 超时触发此槽函数以查询成绩
+        """
+        last_time = cfg.lastScoreSearchTime.value
+        now = datetime.datetime.now()
+        scheduled_time = datetime.datetime.combine(now.date(), cfg.scoreSearchTime.value)
+        if now >= scheduled_time > last_time:
+            # 如果当前时间大于定时搜索时间，并且上次搜索时间小于当前时间
+            self.startBackgroundSearch()
+            # 更新上次搜索时间
+            cfg.lastScoreSearchTime.value = now
+
+    def startBackgroundSearch(self, force_push=False):
+        if self._background_search_running:
+            # 防止重复启动
+            return
+
+        self._force_push = force_push
+        self._last_score = self.scores
+        self._background_search_running = True
+
+        if accounts.current:
+            if accounts.current.type == accounts.current.UNDERGRADUATE:
+                # 设置查询为当前学期
+                self.scoreThread.term_number = []
+                self.scoreThread.scores.connect(self.onReceiveScheduledScore)
+                self.scoreThread.start()
+            else:
+                self.graduateScoreThread.scores.connect(self.onReceiveScheduledScore)
+                self.graduateScoreThread.start()
+        else:
+            logger.warning("定时查询成绩失败：当前未登录任何账户")
+            if self.window().isVisible() and self.window().isActiveWindow():
+                w = MessageBox(self.tr("查询成绩失败"), self.tr("当前未登录任何账户，无法自动查询成绩。\n请先添加一个账户。"), parent=self.window())
+                w.yesButton.hide()
+                w.cancelButton.setText(self.tr("好的"))
+                w.exec()
+            self._background_search_running = False
+
+    @staticmethod
+    def formatClassName(names: List[str]) -> str:
+        if len(names) == 1:
+            return f"{names[0]}"
+        elif len(names) == 2:
+            return f"{names[0]}、{names[1]}"
+        else:
+            return f"{names[0]}、{names[1]} 等 {len(names)} 门课程"
+
+    @pyqtSlot(list, bool)
+    def onReceiveScheduledScore(self, score_list, is_postgraduate=False):
+        new_score = False
+        new_names = []
+        last_class_names = [one["courseName"] for one in self._last_score] if self._last_score else []
+
+        if self._last_score is None:
+            new_score = True
+            new_names = [one["courseName"] for one in score_list]
+        else:
+            for one in score_list:
+                if one["courseName"] not in last_class_names:
+                    new_score = True
+                    new_names.append(one["courseName"])
+
+        try:
+            if new_score:
+                notify(self.tr("查询到新的课程成绩"), f"{self.formatClassName(new_names)}的成绩已经公布")
+            elif self._force_push:
+                notify(self.tr("没有新的成绩公布"), self.tr("您的成绩没有更新"))
+        except NotImplementedError as e:
+            if self.window().isVisible():
+                box = MessageBox(self.tr("推送通知失败"), self.tr("错误信息如下：") + "\n" + str(e), self.window())
+                box.yesButton.hide()
+                box.cancelButton.setText(self.tr("好的"))
+                box.exec()
+            else:
+                self.error(self.tr("无法推送通知"), str(e))
+
+        # 断开连接，避免影响手动查询成绩时的信号处理
+        if is_postgraduate:
+            self.graduateScoreThread.scores.disconnect(self.onReceiveScheduledScore)
+        else:
+            self.scoreThread.scores.disconnect(self.onReceiveScheduledScore)
+
+        self._force_push = False
+        self._last_score = None
+        self._background_search_running = False
 
     @pyqtSlot(list, bool)
     def onReceiveScore(self, scores: list, is_postgraduate=False, show_success_message=True):

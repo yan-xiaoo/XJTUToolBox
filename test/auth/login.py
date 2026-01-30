@@ -1,6 +1,6 @@
 import unittest
 
-from auth import EHALL_LOGIN_URL, WEBVPN_LOGIN_URL
+from auth import JWXT_LOGIN_URL, WEBVPN_LOGIN_URL
 from auth.new_login import NewLogin
 
 # 为了进行此测试，您需要拥有西安交通大学统一身份认证登录的账号
@@ -14,8 +14,8 @@ PASSWORD = ""
 class TestLogin(unittest.TestCase):
     @unittest.skipIf(not USERNAME or not PASSWORD, "用户名与密码未提供")
     def test_login(self):
-        """测试访问 EHALL 的连通性"""
-        login = NewLogin(EHALL_LOGIN_URL)
+        """测试访问教务系统的连通性"""
+        login = NewLogin(JWXT_LOGIN_URL)
         self.assertIsNotNone(login.login(USERNAME, PASSWORD))
 
     @unittest.skipIf(not USERNAME or not PASSWORD, "用户名与密码未提供")

@@ -33,7 +33,7 @@ dependencies = [
     "pyjwt~=2.10.1",
     "keyring~=25.6.0",
     "Cython~=3.2.1; sys_platform == 'darwin'",
-    "setuptools>=80.9.0; sys_platform == 'darwin'",
+    "pyobjus>=1.2.4; sys_platform == 'darwin'",
 ]
 
 [tool.uv]
