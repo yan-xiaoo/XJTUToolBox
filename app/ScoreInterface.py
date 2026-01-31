@@ -584,21 +584,18 @@ class ScoreInterface(ScrollArea):
 
     @pyqtSlot(list, bool)
     def onReceiveScheduledScore(self, score_list, is_postgraduate=False):
-        new_score = False
         new_names = []
         last_class_names = [one["courseName"] for one in self._last_score] if self._last_score else []
 
         if self._last_score is None:
-            new_score = True
             new_names = [one["courseName"] for one in score_list]
         else:
             for one in score_list:
                 if one["courseName"] not in last_class_names:
-                    new_score = True
                     new_names.append(one["courseName"])
 
         try:
-            if new_score:
+            if new_names:
                 notify(self.tr("查询到新的课程成绩"), f"{self.formatClassName(new_names)}的成绩已经公布")
             elif self._force_push:
                 notify(self.tr("没有新的成绩公布"), self.tr("您的成绩没有更新"))
@@ -612,7 +609,7 @@ class ScoreInterface(ScrollArea):
                 self.error(self.tr("无法推送通知"), str(e))
 
         # 无论是否成功推送通知，都尝试触发外部命令（按限流策略决定是否真正执行）
-        if new_score:
+        if new_names:
             self._maybe_run_score_hook(event="score.new", score_list=score_list, new_names=new_names)
         elif self._force_push:
             self._maybe_run_score_hook(event="score.force", score_list=score_list, new_names=[])
