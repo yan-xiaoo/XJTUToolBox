@@ -1,6 +1,6 @@
 [project]
 name = "XJTUToolBox"
-version = "1.2.1"
+version = "1.2.3"
 requires-python = ">=3.10"
 readme = "README.md"
 description = "A desktop application offering a variety of services for Xi'an Jiaotong University, including attendance check, schedule inquiry, and one-key teaching evaluation."

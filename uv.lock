@@ -3890,7 +3890,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/28/84/ca4a0d870178ad21d
 
 [[package]]
 name = "xjtutoolbox"
-version = "1.2.1"
+version = "1.2.3"
 source = { virtual = "." }
 dependencies = [
     { name = "colorama" },
