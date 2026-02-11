@@ -161,6 +161,7 @@ export default withMermaid(defineConfig({
           { text: '考勤流水', link: '/tutorial/attendance' },
           { text: '成绩查询与计算', link: '/tutorial/score' },
           { text: '一键评教', link: '/tutorial/judge'},
+          { text: '通知查询', link: '/tutorial/notice'},
           { text: '定时查询', link: '/tutorial/scheduled-event' },
         ]
       },
