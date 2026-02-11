@@ -5,11 +5,13 @@ from types import TracebackType
 from typing import Type, Any, Dict
 import sys
 
-from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize, QTimer
+from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize, QTimer, QObject, QEvent
 from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox, InfoBadgePosition, \
     InfoBadge, SplashScreen, ConfigItem
+from PyQt5.QtWidgets import QShortcut
+from PyQt5.QtGui import QKeySequence
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import NavigationItemPosition, isDarkTheme
 
@@ -47,6 +49,24 @@ def registerSession():
     SessionManager.global_register(JwappSession, "jwapp")
     SessionManager.global_register(GMISSession, "gmis")
     SessionManager.global_register(GSTESession, "gste")
+
+
+class MacReopenFilter(QObject):
+    """
+    在 MacOS 上，如果启用“最小化到托盘”功能，用户点击 Dock 图标时希望能够重新打开主界面。
+    但默认情况下 PyQt5 不会处理点击 Dock 图标的事件，因此需要一个事件过滤器来实现这个功能
+    """
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.ApplicationActivate:
+            if not self.main_window.isVisible():
+                self.main_window.show()
+                self.main_window.raise_()
+                self.main_window.activateWindow()
+        return False
 
 
 class MainWindow(MSFluentWindow):
@@ -103,6 +123,10 @@ class MainWindow(MSFluentWindow):
         accounts.currentAccountChanged.connect(self.on_avatar_update)
         self.account_interface.avatarChanged.connect(self.on_avatar_update)
         self.on_avatar_update()
+
+        # 接管 ctrl+w/command+w 事件为关闭窗口（或最小化到托盘）
+        shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
+        shortcut.activated.connect(self.close)
 
         self.splashScreen.finish()
 
@@ -215,11 +239,13 @@ class MainWindow(MSFluentWindow):
         重写关闭事件
         """
         if cfg.traySetting.value == TraySetting.MINIMIZE:
-            a0.ignore()
             self.tray_interface.show()
+            QApplication.setQuitOnLastWindowClosed(False)
+            a0.ignore()
             self.hide()
         elif cfg.traySetting.value == TraySetting.QUIT:
             self.tray_interface.hide()
+            QApplication.setQuitOnLastWindowClosed(True)
             a0.accept()
         else:
             box = MessageBox(self.tr("关闭窗口"), self.tr("您想要退出程序，还是最小化到托盘？\n稍后可以在设置-关于中修改您的选择"), parent=self)
@@ -227,12 +253,14 @@ class MainWindow(MSFluentWindow):
             box.cancelButton.setText(self.tr("退出"))
             if box.exec():
                 cfg.traySetting.value = TraySetting.MINIMIZE
-                a0.ignore()
                 self.tray_interface.show()
+                QApplication.setQuitOnLastWindowClosed(False)
+                a0.ignore()
                 self.hide()
             else:
                 cfg.traySetting.value = TraySetting.QUIT
                 self.tray_interface.hide()
+                QApplication.setQuitOnLastWindowClosed(True)
                 a0.accept()
 
     def addScheduledTask(self, config: ConfigItem, callback: Callable[[], Any]):
