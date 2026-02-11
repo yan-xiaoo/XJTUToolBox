@@ -55,22 +55,31 @@ class NoticeSourceCard(CardWidget):
         self.hBoxLayout.addWidget(self.browseButton, 0, Qt.AlignRight)
         self.hBoxLayout.addWidget(self.addRuleButton, 0, Qt.AlignRight)
 
+        self.changeRulesetButtonState()
+
     @pyqtSlot()
     def onBrowseButtonClicked(self):
         QDesktopServices.openUrl(QUrl(get_source_url(self.source)))
 
     def mousePressEvent(self, event):
         """
-        鼠标点击事件，显示通知网页来源
+        鼠标点击事件，更改启用状态
         """
         if event.button() == Qt.LeftButton:
             self.checkBox.setChecked(not self.checkBox.isChecked())
             self.checkBox.clicked.emit()
         super().mousePressEvent(event)
 
+    def changeRulesetButtonState(self):
+        """
+        根据当前启用状态更改规则按钮的可用性。如果整张通知卡片没有被启用，那么“设置过滤规则”按钮不可用
+        """
+        self.addRuleButton.setEnabled(self.checkBox.isChecked())
+
     @pyqtSlot()
     def onCheckboxClicked(self):
         """
         当复选框被点击时，发出信号
         """
+        self.changeRulesetButtonState()
         self.checkChanged.emit(self.checkBox.isChecked(), self.source)
