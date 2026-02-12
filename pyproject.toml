@@ -35,6 +35,7 @@ dependencies = [
     "Cython~=3.2.1; sys_platform == 'darwin'",
     "pyobjus>=1.2.4; sys_platform == 'darwin'",
     "urllib3>=2.6.3",
+    "pillow>=12.1.1",
 ]
 
 [tool.uv]
