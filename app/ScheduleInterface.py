@@ -991,9 +991,13 @@ class ScheduleInterface(ScrollArea):
                 days=(course.week_number - 1) * 7 + course.day_of_week - 1)
 
             e = Event()
-            e.add("summary", course.name)
-            e.add("description", course.name + " " + course.location)
-            e.add('location', course.location)
+            name = course.name if course.name else ""
+            location = course.location if course.location else ""
+            e.add("summary", name)
+            e.add("description", f"{name} {location}")
+            # 有的课程可能没有地点信息，如果没有就不添加这个字段
+            if location:
+                e.add('location', location)
 
             if date.date() in ignore_holidays:
                 continue
