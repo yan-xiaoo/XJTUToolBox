@@ -27,7 +27,7 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装 Linux 打包所需的系统依赖 (包含解决 lxml 报错的依赖)
+      # 1. 安装 Linux 打包所需的系统依赖
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
@@ -38,50 +38,76 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
-      # 3. 运行项目自身的构建脚本
+      # 3. 【新增】动态注入 Keyring 乱码拦截补丁 (仅在 Linux 打包前生效)
+      - name: Patch Keyring for Linux
+        run: |
+          python -c "
+          import os
+          file_path = 'app/utils/account.py'
+          
+          if os.path.exists(file_path):
+              with open(file_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+                  
+              # 注入的猴子补丁代码：拦截并包裹 keyring.get_password
+              patch_code = '''
+          # --- Auto-injected by Linux CI ---
+          import keyring
+          import keyring.core
+          _orig_get_password = keyring.core.get_password
+          def _safe_get_password(*args, **kwargs):
+              try:
+                  return _orig_get_password(*args, **kwargs)
+              except Exception as e:
+                  print(f\"[Linux CI Patch] Ignored Keyring Error: {e}\")
+                  return None
+          keyring.core.get_password = _safe_get_password
+          keyring.get_password = _safe_get_password
+          # ---------------------------------
+          '''
+              
+              # 将补丁写在文件最开头
+              with open(file_path, 'w', encoding='utf-8') as f:
+                  f.write(patch_code + '\n' + content)
+              print('Successfully patched account.py for Linux keyring issues.')
+          else:
+              print(f'Warning: {file_path} not found!')
+          "
+
+      # 4. 运行项目自身的构建脚本
       - name: Build Application
         run: uv run build.py
 
-      # 4. 使用 fpm 生成 deb, rpm, pacman 安装包 (添加 Wrapper 外壳以解决数据库权限问题)
+      # 5. 使用 fpm 生成 deb, rpm, pacman 安装包 (包含外壳脚本解决数据库权限)
       - name: Create Linux Packages (DEB, RPM, Pacman)
         run: |
           cd dist/
-          # 提取版本号，如无则默认为 1.0.0
           VERSION=${GITHUB_REF_NAME#v}
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            VERSION="1.0.0"
-          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then VERSION="1.0.0"; fi
           
-          # 创建启动外壳脚本 (Wrapper)
           mkdir -p wrapper/usr/bin
           cat <<'EOF' > wrapper/usr/bin/xjtutoolbox
           #!/bin/sh
-          # 创建并进入用户拥有读写权限的目录
           USER_DIR="$HOME/.config/XJTUToolbox"
           mkdir -p "$USER_DIR"
           cd "$USER_DIR" || exit 1
-          # 启动位于 /opt/ 里的真正程序
           exec /opt/XJTUToolbox/XJTUToolbox "$@"
           EOF
           chmod +x wrapper/usr/bin/xjtutoolbox
 
-          # fpm 打包，将外壳脚本放到 /usr/bin/ 下，并将原始程序放到 /opt/ 下
           fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-amd64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
           fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
           fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
 
-      # 5. 生成 AppImage (修改 AppRun 以解决数据库权限问题)
+      # 6. 生成 AppImage (修改 AppRun 以解决数据库权限)
       - name: Create AppImage
         run: |
-          # 下载官方打包工具
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
           
-          # 准备 AppDir 目录结构
           mkdir -p AppDir/usr/bin
           cp -r dist/XJTUToolbox/* AppDir/usr/bin/
           
-          # 创建 AppRun 启动脚本 (启动前切入读写目录)
           cat <<'EOF' > AppDir/AppRun
           #!/bin/sh
           USER_DIR="$HOME/.config/XJTUToolbox"
@@ -92,7 +118,6 @@ jobs:
           EOF
           chmod +x AppDir/AppRun
           
-          # 创建桌面快捷方式配置文件 (.desktop)
           cat <<EOF > AppDir/xjtutoolbox.desktop
           [Desktop Entry]
           Name=XJTUToolbox
@@ -102,13 +127,11 @@ jobs:
           Categories=Utility;
           EOF
           
-          # 创建一个默认的占位图标
           echo '<svg width="256" height="256" xmlns="http://www.w3.org/2000/svg"><rect width="256" height="256" fill="#007ACC"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="48" font-family="Arial">XJTU</text></svg>' > AppDir/xjtutoolbox.svg
           
-          # 执行打包
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 6. 上传 Artifacts 供下载检查
+      # 7. 上传 Artifacts 供下载检查
       - name: Upload Artifacts (Linux)
         uses: actions/upload-artifact@v4
         with:
@@ -119,7 +142,7 @@ jobs:
             ./dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
             ./dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 7. 发布至 Github Releases
+      # 8. 发布至 Github Releases
       - name: Release Linux
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
