@@ -27,7 +27,7 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装 Linux 打包所需的系统依赖 (新增了 libxml2-dev 和 libxslt-dev 以解决 lxml 报错)
+      # 1. 安装 Linux 打包所需的系统依赖 (包含解决 lxml 报错的依赖)
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
@@ -42,27 +42,35 @@ jobs:
       - name: Build Application
         run: uv run build.py
 
-      # 4. 使用 fpm 生成 deb, rpm, pacman 安装包
+      # 4. 使用 fpm 生成 deb, rpm, pacman 安装包 (添加 Wrapper 外壳以解决数据库权限问题)
       - name: Create Linux Packages (DEB, RPM, Pacman)
         run: |
           cd dist/
-          # 提取版本号，例如从 refs/tags/v1.0.0 提取 1.0.0 作为包版本
+          # 提取版本号，如无则默认为 1.0.0
           VERSION=${GITHUB_REF_NAME#v}
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            VERSION="1.0.0" # 手动触发时的默认版本
+            VERSION="1.0.0"
           fi
           
-          # fpm 会将 dist/XJTUToolbox 映射到安装后的 /opt/XJTUToolbox 目录
-          # 生成 Debian/Ubuntu (apt) 包
-          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-amd64.deb XJTUToolbox=/opt/
-          
-          # 生成 RedHat/CentOS (rpm) 包
-          fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/
-          
-          # 生成 Arch Linux (pacman) 包
-          fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/
+          # 创建启动外壳脚本 (Wrapper)
+          mkdir -p wrapper/usr/bin
+          cat <<'EOF' > wrapper/usr/bin/xjtutoolbox
+          #!/bin/sh
+          # 创建并进入用户拥有读写权限的目录
+          USER_DIR="$HOME/.config/XJTUToolbox"
+          mkdir -p "$USER_DIR"
+          cd "$USER_DIR" || exit 1
+          # 启动位于 /opt/ 里的真正程序
+          exec /opt/XJTUToolbox/XJTUToolbox "$@"
+          EOF
+          chmod +x wrapper/usr/bin/xjtutoolbox
 
-      # 5. 生成 AppImage
+          # fpm 打包，将外壳脚本放到 /usr/bin/ 下，并将原始程序放到 /opt/ 下
+          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-amd64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
+          fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
+          fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
+
+      # 5. 生成 AppImage (修改 AppRun 以解决数据库权限问题)
       - name: Create AppImage
         run: |
           # 下载官方打包工具
@@ -73,9 +81,12 @@ jobs:
           mkdir -p AppDir/usr/bin
           cp -r dist/XJTUToolbox/* AppDir/usr/bin/
           
-          # 创建 AppRun 启动脚本
+          # 创建 AppRun 启动脚本 (启动前切入读写目录)
           cat <<'EOF' > AppDir/AppRun
           #!/bin/sh
+          USER_DIR="$HOME/.config/XJTUToolbox"
+          mkdir -p "$USER_DIR"
+          cd "$USER_DIR" || exit 1
           HERE="$(dirname "$(readlink -f "${0}")")"
           exec "${HERE}/usr/bin/XJTUToolbox" "$@"
           EOF
@@ -85,7 +96,7 @@ jobs:
           cat <<EOF > AppDir/xjtutoolbox.desktop
           [Desktop Entry]
           Name=XJTUToolbox
-          Exec=XJTUToolbox
+          Exec=xjtutoolbox
           Icon=xjtutoolbox
           Type=Application
           Categories=Utility;
@@ -97,7 +108,7 @@ jobs:
           # 执行打包
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 6. 上传 Artifacts
+      # 6. 上传 Artifacts 供下载检查
       - name: Upload Artifacts (Linux)
         uses: actions/upload-artifact@v4
         with:
