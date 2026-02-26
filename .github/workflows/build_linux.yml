@@ -137,9 +137,15 @@ jobs:
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
           
+          # 【修复核心】将 appimagetool 解包，并强制删除冲突的旧版 libreadline 库
+          ./appimagetool --appimage-extract
+          rm -f squashfs-root/usr/lib/libreadline.so*
+          
+          # 准备 AppDir 目录结构
           mkdir -p AppDir/usr/bin
           cp -r dist/XJTUToolbox/* AppDir/usr/bin/
           
+          # 创建 AppRun 启动脚本 (包含目录切换逻辑)
           cat <<'EOF' > AppDir/AppRun
           #!/bin/sh
           USER_DIR="$HOME/.config/XJTUToolbox"
@@ -150,6 +156,7 @@ jobs:
           EOF
           chmod +x AppDir/AppRun
           
+          # 创建桌面快捷方式配置文件 (.desktop)
           cat <<EOF > AppDir/xjtutoolbox.desktop
           [Desktop Entry]
           Name=XJTUToolbox
@@ -159,9 +166,11 @@ jobs:
           Categories=Utility;
           EOF
           
+          # 创建占位图标
           echo '<svg width="256" height="256" xmlns="http://www.w3.org/2000/svg"><rect width="256" height="256" fill="#007ACC"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="48" font-family="Arial">XJTU</text></svg>' > AppDir/xjtutoolbox.svg
           
-          ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
+          # 【修改执行命令】使用解压并摘除毒瘤库后的 AppRun 来执行打包任务
+          ARCH=x86_64 ./squashfs-root/AppRun AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
       # 8. 上传 Artifacts 供下载检查
       - name: Upload Artifacts (Linux)
