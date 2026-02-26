@@ -28,11 +28,11 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装系统依赖 (新增 imagemagick 用于转换 ico 到 png 图标)
+      # 1. 安装系统依赖
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev imagemagick
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev
           sudo gem install fpm
 
       # 2. 安装项目依赖
@@ -65,7 +65,6 @@ jobs:
           '''
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
-              print('Successfully patched account.py for Linux keyring issues.')
           "
 
       # 4. 动态注入入口文件全局拦截补丁 (修复子进程环境变量污染 + SQLite沙箱隔离)
@@ -97,7 +96,7 @@ jobs:
                       db_name = os.path.basename(db_str)
                       database = os.path.join(user_dir, db_name)
               except Exception as e:
-                  print(f\"[SQLite Patch Error] {e}\")
+                  pass
               return _orig_connect(database, *args, **kwargs)
           
           sqlite3.connect = _safe_connect
@@ -105,14 +104,33 @@ jobs:
           '''
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
-              print('Successfully patched app.py for Linux subprocess and SQLite.')
           "
 
       # 5. 运行项目自身的构建脚本
       - name: Build Application
         run: uv run build.py
 
-      # 6. 使用 fpm 生成 deb, rpm, pacman 包 (集成真实应用图标和桌面快捷方式)
+      # 6. 【新增核心修改】使用 Python 和 Pillow 完美提取 .ico 到 .png
+      - name: Extract Icon using Python
+        run: |
+          uv pip install Pillow
+          uv run python -c "
+          import os
+          from PIL import Image
+          ico_path = 'assets/icons/main_icon.ico'
+          png_dir = 'dist/wrapper/usr/share/pixmaps'
+          
+          if os.path.exists(ico_path):
+              os.makedirs(png_dir, exist_ok=True)
+              # Pillow 自动读取 ico，并在保存时提取最优分辨率图层
+              img = Image.open(ico_path)
+              img.save(os.path.join(png_dir, 'xjtutoolbox.png'), format='PNG')
+              print('Icon converted perfectly!')
+          else:
+              print(f'Error: {ico_path} not found!')
+          "
+
+      # 7. 使用 fpm 生成 deb, rpm, pacman 包
       - name: Create Linux Packages (DEB, RPM, Pacman)
         run: |
           cd dist/
@@ -120,11 +138,7 @@ jobs:
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then VERSION="1.0.0"; fi
           
           mkdir -p wrapper/usr/bin
-          mkdir -p wrapper/usr/share/pixmaps
           mkdir -p wrapper/usr/share/applications
-          
-          # 【新增】读取项目里的 ico 并转换为 Linux 标准的 png 图标 ([0]用于提取最大尺寸帧)
-          convert ../assets/icons/main_icon.ico[0] wrapper/usr/share/pixmaps/xjtutoolbox.png
           
           # 创建启动外壳脚本
           cat <<'EOF' > wrapper/usr/bin/xjtutoolbox
@@ -136,7 +150,7 @@ jobs:
           EOF
           chmod +x wrapper/usr/bin/xjtutoolbox
           
-          # 创建标准 Linux 桌面快捷方式配置文件
+          # 创建标准的 Linux 桌面快捷方式
           cat <<EOF > wrapper/usr/share/applications/xjtutoolbox.desktop
           [Desktop Entry]
           Name=XJTUToolbox
@@ -144,14 +158,14 @@ jobs:
           Icon=xjtutoolbox
           Type=Application
           Categories=Utility;
+          Terminal=false
           EOF
 
-          # 【修改】使用 x86_64 替代 amd64，并将图标和快捷方式一并打进系统包里！
           fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
           fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
           fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
 
-      # 7. 生成 AppImage (使用刚才生成的真实图标)
+      # 8. 生成 AppImage
       - name: Create AppImage
         run: |
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -170,13 +184,14 @@ jobs:
           EOF
           chmod +x AppDir/AppRun
           
-          # 从 dist 的 wrapper 里把刚刚转换好的真实图标和快捷方式拿过来
+          # 【双重保险】拷贝图标和快捷方式到 AppImage 根目录和内部结构
           cp dist/wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
           cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
+          cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
           
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 8. 上传 Artifacts 供下载检查
+      # 9. 上传 Artifacts 供下载检查
       - name: Upload Artifacts (Linux)
         uses: actions/upload-artifact@v4
         with:
@@ -187,7 +202,7 @@ jobs:
             ./dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
             ./dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 9. 发布至 Github Releases
+      # 10. 发布至 Github Releases
       - name: Release Linux
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
