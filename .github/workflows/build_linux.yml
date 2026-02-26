@@ -13,8 +13,10 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    # 保持 ubuntu-22.04 以提供绝佳的系统向后兼容性
+  # ==========================================
+  # 任务 1：构建 x86_64 架构的 Linux 包
+  # ==========================================
+  build-linux-x86_64:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -28,64 +30,44 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装系统依赖
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
           sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev
           sudo gem install fpm
 
-      # 2. 安装项目依赖
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
-      # 3. 动态注入 Keyring 乱码拦截补丁
       - name: Patch Keyring for Linux
         run: |
           python -c "
           import os
           file_path = 'app/utils/account.py'
           if os.path.exists(file_path):
-              with open(file_path, 'r', encoding='utf-8') as f:
-                  content = f.read()
+              with open(file_path, 'r', encoding='utf-8') as f: content = f.read()
               patch_code = '''
-          # --- Auto-injected by Linux CI ---
-          import keyring
-          import keyring.core
+          import keyring, keyring.core
           _orig_get_password = keyring.core.get_password
           def _safe_get_password(*args, **kwargs):
-              try:
-                  return _orig_get_password(*args, **kwargs)
-              except Exception as e:
-                  print(f\"[Linux CI Patch] Ignored Keyring Error: {e}\")
-                  return None
-          keyring.core.get_password = _safe_get_password
-          keyring.get_password = _safe_get_password
-          # ---------------------------------
+              try: return _orig_get_password(*args, **kwargs)
+              except Exception: return None
+          keyring.core.get_password = keyring.get_password = _safe_get_password
           '''
-              with open(file_path, 'w', encoding='utf-8') as f:
-                  f.write(patch_code + '\n' + content)
+              with open(file_path, 'w', encoding='utf-8') as f: f.write(patch_code + '\n' + content)
           "
 
-      # 4. 动态注入入口文件全局拦截补丁 (修复子进程环境变量污染 + SQLite沙箱隔离)
       - name: Patch Entrypoint for Linux
         run: |
           python -c "
           import os
           file_path = 'app.py' 
           if os.path.exists(file_path):
-              with open(file_path, 'r', encoding='utf-8') as f:
-                  content = f.read()
+              with open(file_path, 'r', encoding='utf-8') as f: content = f.read()
               patch_code = '''
-          # --- Auto-injected Global Patch for Linux CI ---
-          import os
-          import sys
-          import sqlite3
-
+          import os, sys, sqlite3
           if getattr(sys, 'frozen', False) and sys.platform.startswith('linux'):
-              if 'LD_LIBRARY_PATH' in os.environ:
-                  os.environ['LD_LIBRARY_PATH'] = os.environ.get('LD_LIBRARY_PATH_ORIG', '')
-
+              if 'LD_LIBRARY_PATH' in os.environ: os.environ['LD_LIBRARY_PATH'] = os.environ.get('LD_LIBRARY_PATH_ORIG', '')
           _orig_connect = sqlite3.connect
           def _safe_connect(database, *args, **kwargs):
               try:
@@ -93,24 +75,14 @@ jobs:
                   if db_str and db_str != ':memory:' and not db_str.startswith('file:'):
                       user_dir = os.path.expanduser('~/.config/XJTUToolbox')
                       os.makedirs(user_dir, exist_ok=True)
-                      db_name = os.path.basename(db_str)
-                      database = os.path.join(user_dir, db_name)
-              except Exception as e:
-                  pass
+                      database = os.path.join(user_dir, os.path.basename(db_str))
+              except Exception: pass
               return _orig_connect(database, *args, **kwargs)
-          
           sqlite3.connect = _safe_connect
-          # -----------------------------------------------
           '''
-              with open(file_path, 'w', encoding='utf-8') as f:
-                  f.write(patch_code + '\n' + content)
+              with open(file_path, 'w', encoding='utf-8') as f: f.write(patch_code + '\n' + content)
           "
 
-      # 5. 运行项目自身的构建脚本
-      - name: Build Application
-        run: uv run build.py
-
-      # 6. 【新增核心修改】使用 Python 和 Pillow 完美提取 .ico 到 .png
       - name: Extract Icon using Python
         run: |
           uv pip install Pillow
@@ -119,28 +91,21 @@ jobs:
           from PIL import Image
           ico_path = 'assets/icons/main_icon.ico'
           png_dir = 'dist/wrapper/usr/share/pixmaps'
-          
           if os.path.exists(ico_path):
               os.makedirs(png_dir, exist_ok=True)
-              # Pillow 自动读取 ico，并在保存时提取最优分辨率图层
-              img = Image.open(ico_path)
-              img.save(os.path.join(png_dir, 'xjtutoolbox.png'), format='PNG')
-              print('Icon converted perfectly!')
-          else:
-              print(f'Error: {ico_path} not found!')
+              Image.open(ico_path).save(os.path.join(png_dir, 'xjtutoolbox.png'), format='PNG')
           "
 
-      # 7. 使用 fpm 生成 deb, rpm, pacman 包
+      - name: Build Application
+        run: uv run build.py
+
       - name: Create Linux Packages (DEB, RPM, Pacman)
         run: |
           cd dist/
           VERSION=${GITHUB_REF_NAME#v}
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then VERSION="1.0.0"; fi
           
-          mkdir -p wrapper/usr/bin
-          mkdir -p wrapper/usr/share/applications
-          
-          # 创建启动外壳脚本
+          mkdir -p wrapper/usr/bin wrapper/usr/share/applications
           cat <<'EOF' > wrapper/usr/bin/xjtutoolbox
           #!/bin/sh
           USER_DIR="$HOME/.config/XJTUToolbox"
@@ -150,7 +115,6 @@ jobs:
           EOF
           chmod +x wrapper/usr/bin/xjtutoolbox
           
-          # 创建标准的 Linux 桌面快捷方式
           cat <<EOF > wrapper/usr/share/applications/xjtutoolbox.desktop
           [Desktop Entry]
           Name=XJTUToolbox
@@ -165,7 +129,6 @@ jobs:
           fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
           fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
 
-      # 8. 生成 AppImage
       - name: Create AppImage
         run: |
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -184,26 +147,23 @@ jobs:
           EOF
           chmod +x AppDir/AppRun
           
-          # 【双重保险】拷贝图标和快捷方式到 AppImage 根目录和内部结构
           cp dist/wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
           cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
           cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
           
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 9. 上传 Artifacts 供下载检查
-      - name: Upload Artifacts (Linux)
+      - name: Upload Artifacts (x86_64)
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox-linux
+          name: XJTUToolbox-linux-x86_64
           path: |
             ./dist/XJTUToolbox-linux-x86_64.deb
             ./dist/XJTUToolbox-linux-x86_64.rpm
             ./dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
             ./dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 10. 发布至 Github Releases
-      - name: Release Linux
+      - name: Release Linux x86_64
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
@@ -214,5 +174,174 @@ jobs:
             ./dist/XJTUToolbox-linux-x86_64.rpm
             ./dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
             ./dist/XJTUToolbox-linux-x86_64.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==========================================
+  # 任务 2：构建 ARM64 架构的 Linux 包 (使用 QEMU 模拟)
+  # ==========================================
+  build-linux-arm64:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 激活 QEMU 跨平台指令集模拟器
+      - name: Set up QEMU for ARM64 Simulation
+        uses: docker/setup-qemu-action@v3
+
+      # 启动纯粹的 ARM64 Ubuntu 环境，并在其中执行完整流水线
+      - name: Build Application & Create Packages (ARM64 via QEMU)
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          install: |
+            apt-get update
+            apt-get install -y software-properties-common
+            add-apt-repository ppa:deadsnakes/ppa -y
+            apt-get update
+            apt-get install -y python3.12 python3.12-venv python3.12-dev curl ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev wget
+            gem install fpm
+          env: |
+            GITHUB_REF_NAME: ${{ github.ref_name }}
+          run: |
+            # 1. 安装 UV 并配置 Python
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
+            uv python pin 3.12
+            uv sync --locked --all-extras --dev
+
+            # 2. 注入各类 Python 补丁与提取图标
+            uv run python -c "
+            import os
+            file_path = 'app/utils/account.py'
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f: content = f.read()
+                patch_code = '''
+            import keyring, keyring.core
+            _orig_get_password = keyring.core.get_password
+            def _safe_get_password(*args, **kwargs):
+                try: return _orig_get_password(*args, **kwargs)
+                except Exception: return None
+            keyring.core.get_password = keyring.get_password = _safe_get_password
+            '''
+                with open(file_path, 'w', encoding='utf-8') as f: f.write(patch_code + '\n' + content)
+            "
+
+            uv run python -c "
+            import os
+            file_path = 'app.py' 
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f: content = f.read()
+                patch_code = '''
+            import os, sys, sqlite3
+            if getattr(sys, 'frozen', False) and sys.platform.startswith('linux'):
+                if 'LD_LIBRARY_PATH' in os.environ: os.environ['LD_LIBRARY_PATH'] = os.environ.get('LD_LIBRARY_PATH_ORIG', '')
+            _orig_connect = sqlite3.connect
+            def _safe_connect(database, *args, **kwargs):
+                try:
+                    db_str = str(database)
+                    if db_str and db_str != ':memory:' and not db_str.startswith('file:'):
+                        user_dir = os.path.expanduser('~/.config/XJTUToolbox')
+                        os.makedirs(user_dir, exist_ok=True)
+                        database = os.path.join(user_dir, os.path.basename(db_str))
+                except Exception: pass
+                return _orig_connect(database, *args, **kwargs)
+            sqlite3.connect = _safe_connect
+            '''
+                with open(file_path, 'w', encoding='utf-8') as f: f.write(patch_code + '\n' + content)
+            "
+
+            uv pip install Pillow
+            uv run python -c "
+            import os
+            from PIL import Image
+            ico_path = 'assets/icons/main_icon.ico'
+            png_dir = 'dist/wrapper/usr/share/pixmaps'
+            if os.path.exists(ico_path):
+                os.makedirs(png_dir, exist_ok=True)
+                Image.open(ico_path).save(os.path.join(png_dir, 'xjtutoolbox.png'), format='PNG')
+            "
+
+            # 3. 构建应用程序
+            uv run build.py
+
+            # 4. FPM 跨架构打包 (产物统一命名为 arm64)
+            cd dist/
+            VERSION=${GITHUB_REF_NAME#v}
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then VERSION="1.0.0"; fi
+            
+            mkdir -p wrapper/usr/bin wrapper/usr/share/applications
+            cat <<'EOF' > wrapper/usr/bin/xjtutoolbox
+            #!/bin/sh
+            USER_DIR="$HOME/.config/XJTUToolbox"
+            mkdir -p "$USER_DIR"
+            cd "$USER_DIR" || exit 1
+            exec /opt/XJTUToolbox/XJTUToolbox "$@"
+            EOF
+            chmod +x wrapper/usr/bin/xjtutoolbox
+            
+            cat <<EOF > wrapper/usr/share/applications/xjtutoolbox.desktop
+            [Desktop Entry]
+            Name=XJTUToolbox
+            Exec=xjtutoolbox
+            Icon=xjtutoolbox
+            Type=Application
+            Categories=Utility;
+            Terminal=false
+            EOF
+
+            # 强制统一输出名字为 -arm64
+            fpm -a arm64 -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+            fpm -a arm64 -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+            fpm -a arm64 -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+
+            # 5. ARM64 AppImage 打包 (同样强制产出为 -arm64)
+            wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage
+            chmod +x appimagetool
+            
+            mkdir -p AppDir/usr/bin
+            cp -r XJTUToolbox/* AppDir/usr/bin/
+            
+            cat <<'EOF' > AppDir/AppRun
+            #!/bin/sh
+            USER_DIR="$HOME/.config/XJTUToolbox"
+            mkdir -p "$USER_DIR"
+            cd "$USER_DIR" || exit 1
+            HERE="$(dirname "$(readlink -f "${0}")")"
+            exec "${HERE}/usr/bin/XJTUToolbox" "$@"
+            EOF
+            chmod +x AppDir/AppRun
+            
+            cp wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
+            cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
+            cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
+            
+            ./appimagetool --appimage-extract
+            rm -f squashfs-root/usr/lib/libreadline.so* || true
+            ARCH=arm64 ./squashfs-root/AppRun AppDir XJTUToolbox-linux-arm64.AppImage
+
+      - name: Upload Artifacts (ARM64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-linux-arm64
+          path: |
+            ./dist/XJTUToolbox-linux-arm64.deb
+            ./dist/XJTUToolbox-linux-arm64.rpm
+            ./dist/XJTUToolbox-linux-arm64.pkg.tar.zst
+            ./dist/XJTUToolbox-linux-arm64.AppImage
+
+      - name: Release Linux ARM64
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: XJTUToolbox ${{ github.ref_name }}
+          prerelease: true
+          files: |
+            ./dist/XJTUToolbox-linux-arm64.deb
+            ./dist/XJTUToolbox-linux-arm64.rpm
+            ./dist/XJTUToolbox-linux-arm64.pkg.tar.zst
+            ./dist/XJTUToolbox-linux-arm64.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
