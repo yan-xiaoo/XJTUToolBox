@@ -27,22 +27,12 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装 Linux 打包所需的系统依赖 (用于生成 deb, rpm, pacman 等包)
+      # 1. 安装 Linux 打包所需的系统依赖 (新增了 libxml2-dev 和 libxslt-dev 以解决 lxml 报错)
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
-          # 安装 Ruby 及其开发包 (fpm 需要)
-          # 安装 rpm (生成 rpm 需要)
-          # 安装 libarchive-tools 和 zstd (生成 pacman 需要的 bsdtar 和 zstd)
-          # 安装 file (AppImage 需要)
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file
-          
-          # 安装 fpm
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev
           sudo gem install fpm
-          
-          # 【可选补充】如果你的程序是 GUI 界面 (如 PyQt/PySide)，建议取消下面这行的注释
-          # 这是大多数 Python GUI 程序在 Ubuntu CI 环境中常缺少的系统级图形依赖
-          # sudo apt-get install -y libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libopengl0
 
       # 2. 安装项目依赖
       - name: Install dependencies
@@ -83,7 +73,7 @@ jobs:
           mkdir -p AppDir/usr/bin
           cp -r dist/XJTUToolbox/* AppDir/usr/bin/
           
-          # 创建 AppRun 启动脚本 (负责在双击AppImage时将参数传递给真正的可执行文件)
+          # 创建 AppRun 启动脚本
           cat <<'EOF' > AppDir/AppRun
           #!/bin/sh
           HERE="$(dirname "$(readlink -f "${0}")")"
@@ -101,14 +91,13 @@ jobs:
           Categories=Utility;
           EOF
           
-          # 创建一个默认的占位图标 (AppImage 打包严格要求存在图标)
-          # 注意：如果你项目里有图标，请将此处替换为 `cp 你的图标路径 AppDir/xjtutoolbox.png`
+          # 创建一个默认的占位图标
           echo '<svg width="256" height="256" xmlns="http://www.w3.org/2000/svg"><rect width="256" height="256" fill="#007ACC"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="48" font-family="Arial">XJTU</text></svg>' > AppDir/xjtutoolbox.svg
           
-          # 执行打包 (--appimage-extract-and-run 用于规避 Github Actions 里的 FUSE 环境报错)
+          # 执行打包
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 6. 上传 Artifacts 供下载检查
+      # 6. 上传 Artifacts
       - name: Upload Artifacts (Linux)
         uses: actions/upload-artifact@v4
         with:
