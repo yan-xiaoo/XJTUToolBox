@@ -14,7 +14,9 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    # 【核心修改】将 ubuntu-latest 改为 ubuntu-22.04
+    # 这不仅解决了 appimagetool 的报错，还能最大化打包产物的系统兼容性！
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,7 +29,7 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装 Linux 打包所需的系统依赖 (包含 lxml 依赖)
+      # 1. 安装 Linux 打包所需的系统依赖
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
@@ -38,17 +40,15 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
-      # 3. 动态注入 Keyring 乱码拦截补丁 (解决系统密钥环乱码导致的崩溃)
+      # 3. 动态注入 Keyring 乱码拦截补丁
       - name: Patch Keyring for Linux
         run: |
           python -c "
           import os
           file_path = 'app/utils/account.py'
-          
           if os.path.exists(file_path):
               with open(file_path, 'r', encoding='utf-8') as f:
                   content = f.read()
-                  
               patch_code = '''
           # --- Auto-injected by Linux CI ---
           import keyring
@@ -64,7 +64,6 @@ jobs:
           keyring.get_password = _safe_get_password
           # ---------------------------------
           '''
-              
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
               print('Successfully patched account.py for Linux keyring issues.')
@@ -72,17 +71,15 @@ jobs:
               print(f'Warning: {file_path} not found!')
           "
 
-      # 4. 动态注入底层 SQLite 拦截补丁 (直接拦截 Python 内置 sqlite3，全局生效)
+      # 4. 动态注入底层 SQLite 拦截补丁
       - name: Patch SQLite Path for Linux
         run: |
           python -c "
           import os
           file_path = 'app.py' 
-          
           if os.path.exists(file_path):
               with open(file_path, 'r', encoding='utf-8') as f:
                   content = f.read()
-                  
               patch_code = '''
           # --- Auto-injected Global SQLite Patch ---
           import os
@@ -99,11 +96,9 @@ jobs:
               except Exception as e:
                   print(f\"[SQLite Patch Error] {e}\")
               return _orig_connect(database, *args, **kwargs)
-          
           sqlite3.connect = _safe_connect
           # -----------------------------------------
           '''
-              
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
               print('Successfully patched sqlite3 in app.py')
@@ -115,7 +110,7 @@ jobs:
       - name: Build Application
         run: uv run build.py
 
-      # 6. 使用 fpm 生成 deb, rpm, pacman 安装包 (使用外壳脚本启动以切换工作目录)
+      # 6. 使用 fpm 生成 deb, rpm, pacman 安装包
       - name: Create Linux Packages (DEB, RPM, Pacman)
         run: |
           cd dist/
@@ -136,15 +131,11 @@ jobs:
           fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
           fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
 
-      # 7. 生成 AppImage (包含 Ubuntu 24.04 readline 冲突修复)
+      # 7. 生成 AppImage (回归标准构建命令，得益于 ubuntu-22.04)
       - name: Create AppImage
         run: |
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
-          
-          # 解包并删除引起 /bin/sh 崩溃的旧版 readline 库
-          ./appimagetool --appimage-extract
-          rm -f squashfs-root/usr/lib/libreadline.so*
           
           mkdir -p AppDir/usr/bin
           cp -r dist/XJTUToolbox/* AppDir/usr/bin/
@@ -170,8 +161,8 @@ jobs:
           
           echo '<svg width="256" height="256" xmlns="http://www.w3.org/2000/svg"><rect width="256" height="256" fill="#007ACC"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="48" font-family="Arial">XJTU</text></svg>' > AppDir/xjtutoolbox.svg
           
-          # 使用解压并修复后的工具进行打包
-          ARCH=x86_64 ./squashfs-root/AppRun AppDir dist/XJTUToolbox-linux-x86_64.AppImage
+          # 直接使用 --appimage-extract-and-run 进行标准打包
+          ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
       # 8. 上传 Artifacts
       - name: Upload Artifacts (Linux)
