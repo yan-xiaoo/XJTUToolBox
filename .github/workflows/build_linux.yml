@@ -27,7 +27,7 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装 Linux 打包所需的系统依赖 (包含解决 lxml 报错的依赖)
+      # 1. 安装 Linux 打包所需的系统依赖 (包含 lxml 依赖)
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
@@ -72,36 +72,41 @@ jobs:
               print(f'Warning: {file_path} not found!')
           "
 
-      # 4. 动态注入数据库路径补丁 (拦截 Peewee SQLite 路径，强制写入用户可读写目录)
-      - name: Patch Database Path for Linux
+      # 4. 动态注入底层 SQLite 拦截补丁 (直接拦截 Python 内置 sqlite3，全局生效)
+      - name: Patch SQLite Path for Linux
         run: |
           python -c "
           import os
-          file_path = 'schedule/schedule_database.py'
+          file_path = 'app.py' 
           
           if os.path.exists(file_path):
               with open(file_path, 'r', encoding='utf-8') as f:
                   content = f.read()
                   
               patch_code = '''
-          # --- Auto-injected by Linux CI for DB Path ---
+          # --- Auto-injected Global SQLite Patch ---
           import os
-          import peewee
-          _orig_sqlite_init = peewee.SqliteDatabase.__init__
-          def _safe_sqlite_init(self, database, *args, **kwargs):
-              if database != ':memory:':
-                  user_dir = os.path.expanduser('~/.config/XJTUToolbox')
-                  os.makedirs(user_dir, exist_ok=True)
-                  db_name = os.path.basename(str(database))
-                  database = os.path.join(user_dir, db_name)
-              _orig_sqlite_init(self, database, *args, **kwargs)
-          peewee.SqliteDatabase.__init__ = _safe_sqlite_init
-          # ---------------------------------------------
+          import sqlite3
+          _orig_connect = sqlite3.connect
+          def _safe_connect(database, *args, **kwargs):
+              try:
+                  db_str = str(database)
+                  if db_str and db_str != ':memory:' and not db_str.startswith('file:'):
+                      user_dir = os.path.expanduser('~/.config/XJTUToolbox')
+                      os.makedirs(user_dir, exist_ok=True)
+                      db_name = os.path.basename(db_str)
+                      database = os.path.join(user_dir, db_name)
+              except Exception as e:
+                  print(f\"[SQLite Patch Error] {e}\")
+              return _orig_connect(database, *args, **kwargs)
+          
+          sqlite3.connect = _safe_connect
+          # -----------------------------------------
           '''
               
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
-              print('Successfully patched database path for Linux.')
+              print('Successfully patched sqlite3 in app.py')
           else:
               print(f'Warning: {file_path} not found!')
           "
@@ -131,21 +136,19 @@ jobs:
           fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
           fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
 
-      # 7. 生成 AppImage (修改 AppRun 以切换工作目录)
+      # 7. 生成 AppImage (包含 Ubuntu 24.04 readline 冲突修复)
       - name: Create AppImage
         run: |
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
           
-          # 【修复核心】将 appimagetool 解包，并强制删除冲突的旧版 libreadline 库
+          # 解包并删除引起 /bin/sh 崩溃的旧版 readline 库
           ./appimagetool --appimage-extract
           rm -f squashfs-root/usr/lib/libreadline.so*
           
-          # 准备 AppDir 目录结构
           mkdir -p AppDir/usr/bin
           cp -r dist/XJTUToolbox/* AppDir/usr/bin/
           
-          # 创建 AppRun 启动脚本 (包含目录切换逻辑)
           cat <<'EOF' > AppDir/AppRun
           #!/bin/sh
           USER_DIR="$HOME/.config/XJTUToolbox"
@@ -156,7 +159,6 @@ jobs:
           EOF
           chmod +x AppDir/AppRun
           
-          # 创建桌面快捷方式配置文件 (.desktop)
           cat <<EOF > AppDir/xjtutoolbox.desktop
           [Desktop Entry]
           Name=XJTUToolbox
@@ -166,13 +168,12 @@ jobs:
           Categories=Utility;
           EOF
           
-          # 创建占位图标
           echo '<svg width="256" height="256" xmlns="http://www.w3.org/2000/svg"><rect width="256" height="256" fill="#007ACC"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="48" font-family="Arial">XJTU</text></svg>' > AppDir/xjtutoolbox.svg
           
-          # 【修改执行命令】使用解压并摘除毒瘤库后的 AppRun 来执行打包任务
+          # 使用解压并修复后的工具进行打包
           ARCH=x86_64 ./squashfs-root/AppRun AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 8. 上传 Artifacts 供下载检查
+      # 8. 上传 Artifacts
       - name: Upload Artifacts (Linux)
         uses: actions/upload-artifact@v4
         with:
