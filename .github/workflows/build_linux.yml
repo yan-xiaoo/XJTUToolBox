@@ -31,8 +31,18 @@ jobs:
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm bsdtar
+          # 安装 Ruby 及其开发包 (fpm 需要)
+          # 安装 rpm (生成 rpm 需要)
+          # 安装 libarchive-tools 和 zstd (生成 pacman 需要的 bsdtar 和 zstd)
+          # 安装 file (AppImage 需要)
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file
+          
+          # 安装 fpm
           sudo gem install fpm
+          
+          # 【可选补充】如果你的程序是 GUI 界面 (如 PyQt/PySide)，建议取消下面这行的注释
+          # 这是大多数 Python GUI 程序在 Ubuntu CI 环境中常缺少的系统级图形依赖
+          # sudo apt-get install -y libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libopengl0
 
       # 2. 安装项目依赖
       - name: Install dependencies
