@@ -46,9 +46,8 @@ jobs:
           mkdir -p $PKG_DIR/usr/share/applications
           mkdir -p $PKG_DIR/usr/share/pixmaps
 
-          # 1. 拷贝源码并清理无关文件
-          cp -r ./* $PKG_DIR/opt/xjtutoolbox/
-          rm -rf $PKG_DIR/opt/xjtutoolbox/{.git,.github,docs,dist,uv.lock}
+          # 1. 使用 rsync 拷贝源码，提前排除 dist 和无关文件，避免 cp 产生的死循环报错
+          rsync -a --exclude='dist' --exclude='.git' --exclude='.github' --exclude='docs' --exclude='uv.lock' ./ $PKG_DIR/opt/xjtutoolbox/
 
           # 2. 数据库路径热修复 (无缝解决权限问题)
           DB_FILE="$PKG_DIR/opt/xjtutoolbox/schedule/schedule_database.py"
