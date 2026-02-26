@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build-linux:
-    # 使用 22.04 以保证绝佳的向后兼容性，并避开 24.04 的动态库冲突 Bug
+    # 保持 ubuntu-22.04 以提供绝佳的系统向后兼容性
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -28,28 +28,26 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装 Linux 打包所需的系统依赖 (包含 lxml 依赖)
+      # 1. 安装系统依赖 (新增 imagemagick 用于转换 ico 到 png 图标)
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev imagemagick
           sudo gem install fpm
 
       # 2. 安装项目依赖
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
-      # 3. 动态注入 Keyring 乱码拦截补丁 (解决系统密钥环乱码导致的崩溃)
+      # 3. 动态注入 Keyring 乱码拦截补丁
       - name: Patch Keyring for Linux
         run: |
           python -c "
           import os
           file_path = 'app/utils/account.py'
-          
           if os.path.exists(file_path):
               with open(file_path, 'r', encoding='utf-8') as f:
                   content = f.read()
-                  
               patch_code = '''
           # --- Auto-injected by Linux CI ---
           import keyring
@@ -65,37 +63,30 @@ jobs:
           keyring.get_password = _safe_get_password
           # ---------------------------------
           '''
-              
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
               print('Successfully patched account.py for Linux keyring issues.')
-          else:
-              print(f'Warning: {file_path} not found!')
           "
 
-      # 4. 动态注入入口文件全局拦截补丁 (修复子进程环境变量污染 + SQLite只读报错)
+      # 4. 动态注入入口文件全局拦截补丁 (修复子进程环境变量污染 + SQLite沙箱隔离)
       - name: Patch Entrypoint for Linux
         run: |
           python -c "
           import os
           file_path = 'app.py' 
-          
           if os.path.exists(file_path):
               with open(file_path, 'r', encoding='utf-8') as f:
                   content = f.read()
-                  
               patch_code = '''
           # --- Auto-injected Global Patch for Linux CI ---
           import os
           import sys
           import sqlite3
 
-          # 1. 修复 Linux 下调用外部浏览器或子进程时的环境变量冲突 (过河拆桥)
           if getattr(sys, 'frozen', False) and sys.platform.startswith('linux'):
               if 'LD_LIBRARY_PATH' in os.environ:
                   os.environ['LD_LIBRARY_PATH'] = os.environ.get('LD_LIBRARY_PATH_ORIG', '')
 
-          # 2. 修复 SQLite 数据库由于沙箱只读导致的报错
           _orig_connect = sqlite3.connect
           def _safe_connect(database, *args, **kwargs):
               try:
@@ -112,19 +103,16 @@ jobs:
           sqlite3.connect = _safe_connect
           # -----------------------------------------------
           '''
-              
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
               print('Successfully patched app.py for Linux subprocess and SQLite.')
-          else:
-              print(f'Warning: {file_path} not found!')
           "
 
       # 5. 运行项目自身的构建脚本
       - name: Build Application
         run: uv run build.py
 
-      # 6. 使用 fpm 生成 deb, rpm, pacman 安装包 (使用外壳脚本启动以切换工作目录)
+      # 6. 使用 fpm 生成 deb, rpm, pacman 包 (集成真实应用图标和桌面快捷方式)
       - name: Create Linux Packages (DEB, RPM, Pacman)
         run: |
           cd dist/
@@ -132,6 +120,13 @@ jobs:
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then VERSION="1.0.0"; fi
           
           mkdir -p wrapper/usr/bin
+          mkdir -p wrapper/usr/share/pixmaps
+          mkdir -p wrapper/usr/share/applications
+          
+          # 【新增】读取项目里的 ico 并转换为 Linux 标准的 png 图标 ([0]用于提取最大尺寸帧)
+          convert ../assets/icons/main_icon.ico[0] wrapper/usr/share/pixmaps/xjtutoolbox.png
+          
+          # 创建启动外壳脚本
           cat <<'EOF' > wrapper/usr/bin/xjtutoolbox
           #!/bin/sh
           USER_DIR="$HOME/.config/XJTUToolbox"
@@ -140,12 +135,23 @@ jobs:
           exec /opt/XJTUToolbox/XJTUToolbox "$@"
           EOF
           chmod +x wrapper/usr/bin/xjtutoolbox
+          
+          # 创建标准 Linux 桌面快捷方式配置文件
+          cat <<EOF > wrapper/usr/share/applications/xjtutoolbox.desktop
+          [Desktop Entry]
+          Name=XJTUToolbox
+          Exec=xjtutoolbox
+          Icon=xjtutoolbox
+          Type=Application
+          Categories=Utility;
+          EOF
 
-          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-amd64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
-          fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
-          fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
+          # 【修改】使用 x86_64 替代 amd64，并将图标和快捷方式一并打进系统包里！
+          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+          fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+          fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
 
-      # 7. 生成 AppImage
+      # 7. 生成 AppImage (使用刚才生成的真实图标)
       - name: Create AppImage
         run: |
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -164,16 +170,9 @@ jobs:
           EOF
           chmod +x AppDir/AppRun
           
-          cat <<EOF > AppDir/xjtutoolbox.desktop
-          [Desktop Entry]
-          Name=XJTUToolbox
-          Exec=xjtutoolbox
-          Icon=xjtutoolbox
-          Type=Application
-          Categories=Utility;
-          EOF
-          
-          echo '<svg width="256" height="256" xmlns="http://www.w3.org/2000/svg"><rect width="256" height="256" fill="#007ACC"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="white" font-size="48" font-family="Arial">XJTU</text></svg>' > AppDir/xjtutoolbox.svg
+          # 从 dist 的 wrapper 里把刚刚转换好的真实图标和快捷方式拿过来
+          cp dist/wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
+          cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
           
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
@@ -183,7 +182,7 @@ jobs:
         with:
           name: XJTUToolbox-linux
           path: |
-            ./dist/XJTUToolbox-linux-amd64.deb
+            ./dist/XJTUToolbox-linux-x86_64.deb
             ./dist/XJTUToolbox-linux-x86_64.rpm
             ./dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
             ./dist/XJTUToolbox-linux-x86_64.AppImage
@@ -196,7 +195,7 @@ jobs:
           name: XJTUToolbox ${{ github.ref_name }}
           prerelease: true
           files: |
-            ./dist/XJTUToolbox-linux-amd64.deb
+            ./dist/XJTUToolbox-linux-x86_64.deb
             ./dist/XJTUToolbox-linux-x86_64.rpm
             ./dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
             ./dist/XJTUToolbox-linux-x86_64.AppImage
