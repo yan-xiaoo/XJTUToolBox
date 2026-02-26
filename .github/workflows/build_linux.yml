@@ -1,4 +1,4 @@
-name: Build & Release Linux
+name: Build & Release App (Linux Lightweight)
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build-linux:
-    name: build-linux
+    name: build-linux-native
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,74 +28,104 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
         
-      - name: Install dependencies
-        run: uv sync --locked --all-extras --dev
-        
-      - name: Build Application
-        run: uv run build.py
-
-      - name: Install Packaging Tools (fpm, zstd, rpm)
+      - name: Install Packaging Tools (fpm)
         run: |
           sudo apt-get update
-          # 【更正 1】添加了 rpm 和 file 依赖，确保 fpm 能够正常生成 .rpm 格式
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential zstd rpm file
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm file
           sudo gem install fpm
 
-      - name: Package tar.zst
-        run: |
-          cd dist
-          tar -I zstd -cvf XJTUToolbox-linux-x86_64.tar.zst XJTUToolbox/
-
-      - name: Package deb & rpm (using fpm)
+      - name: Prepare Package Root
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           if [[ "$VERSION" == "" || "$VERSION" == "main" ]]; then VERSION="1.0.0"; fi
+          echo "PKG_VERSION=$VERSION" >> $GITHUB_ENV
 
-          mkdir -p dist/pkg-root/opt/XJTUToolbox
-          mkdir -p dist/pkg-root/usr/bin
-          
-          cp -r dist/XJTUToolbox/* dist/pkg-root/opt/XJTUToolbox/
-          ln -s /opt/XJTUToolbox/XJTUToolbox dist/pkg-root/usr/bin/xjtutoolbox
+          PKG_DIR=$(pwd)/dist/pkg-root
+          mkdir -p $PKG_DIR/opt/xjtutoolbox
+          mkdir -p $PKG_DIR/usr/bin
+          mkdir -p $PKG_DIR/usr/share/applications
+          mkdir -p $PKG_DIR/usr/share/pixmaps
 
-          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -C dist/pkg-root -p dist/XJTUToolbox-linux-x86_64.deb .
-          fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -C dist/pkg-root -p dist/XJTUToolbox-linux-x86_64.rpm .
+          # 1. 拷贝源码并清理无关文件
+          cp -r ./* $PKG_DIR/opt/xjtutoolbox/
+          rm -rf $PKG_DIR/opt/xjtutoolbox/{.git,.github,docs,dist,uv.lock}
 
-      - name: Package AppImage
+          # 2. 数据库路径热修复 (无缝解决权限问题)
+          DB_FILE="$PKG_DIR/opt/xjtutoolbox/schedule/schedule_database.py"
+          if [ -f "$DB_FILE" ]; then
+            sed -i "s|'schedule.db'|__import__('os').path.expanduser('~/.xjtutoolbox_schedule.db')|g" "$DB_FILE"
+            sed -i 's|"schedule.db"|__import__("os").path.expanduser("~/.xjtutoolbox_schedule.db")|g' "$DB_FILE"
+          fi
+
+      - name: Resolve Independent Dependencies (Libs)
         run: |
-          wget -O appimagetool "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
-          chmod +x appimagetool
+          PKG_DIR=$(pwd)/dist/pkg-root
           
-          mkdir -p dist/AppDir/usr/bin
-          cp -r dist/XJTUToolbox/* dist/AppDir/usr/bin/
+          # 使用 uv 将所有依赖安装到独立的 libs 目录中
+          uv pip install --python $(which python3) --target $PKG_DIR/opt/xjtutoolbox/libs -r pyproject.toml
           
-          cd dist/AppDir
-          ln -s usr/bin/XJTUToolbox AppRun
+          # 【核心魔法】删除 libs 里的 PyQt5 及其依赖，强迫程序运行时回退使用系统的 python3-pyqt5
+          # 这样既保证了 PyQt-Fluent-Widgets 等纯 Python 库正常工作，又极大地减小了包体积
+          rm -rf $PKG_DIR/opt/xjtutoolbox/libs/PyQt5*
           
-          echo "[Desktop Entry]" > XJTUToolbox.desktop
-          echo "Name=XJTUToolbox" >> XJTUToolbox.desktop
-          echo "Exec=XJTUToolbox" >> XJTUToolbox.desktop
-          echo "Icon=xjtutoolbox" >> XJTUToolbox.desktop
-          echo "Type=Application" >> XJTUToolbox.desktop
-          echo "Categories=Utility;" >> XJTUToolbox.desktop
-          
-          # 【更正 3】生成一个真实合法的蓝色圆形 SVG 矢量图作为占位符，避免 appimagetool 图像解析报错
-          echo '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="50" fill="#007bff"/></svg>' > xjtutoolbox.svg
-          
-          cd ../..
-          
-          # 【更正 2】注入 APPIMAGE_EXTRACT_AND_RUN=1 环境变量，绕过 Ubuntu 的 FUSE 限制
-          APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool dist/AppDir dist/XJTUToolbox-linux-x86_64.AppImage
+          # 清理缓存文件
+          find $PKG_DIR/opt/xjtutoolbox -name "*.pyc" -delete
+          find $PKG_DIR/opt/xjtutoolbox -name "__pycache__" -delete
 
-      - name: Cleanup Folder
+      - name: Create Launcher & Desktop Integration
         run: |
-          # 使用更通用的 find 命令替代 extglob 以提高脚本在 CI 容器中的容错率
-          find dist -maxdepth 1 -type f -not -name "XJTUToolbox-linux-x86_64.*" -delete
-          find dist -maxdepth 1 -type d -not -name "dist" -exec rm -rf {} +
+          PKG_DIR=$(pwd)/dist/pkg-root
+          
+          # 创建启动脚本 (注入 PYTHONPATH 实现依赖隔离)
+          cat <<EOF > $PKG_DIR/usr/bin/xjtutoolbox
+          #!/bin/sh
+          export PYTHONDONTWRITEBYTECODE=1
+          export PYTHONPATH=/opt/xjtutoolbox/libs:\$PYTHONPATH
+          cd /opt/xjtutoolbox
+          exec python3 app.py "\$@"
+          EOF
+          chmod +x $PKG_DIR/usr/bin/xjtutoolbox
+
+          # 生成 Desktop 文件
+          cat <<EOF > $PKG_DIR/usr/share/applications/xjtutoolbox.desktop
+          [Desktop Entry]
+          Name=XJTUToolBox
+          GenericName=XJTU Toolkit
+          Comment=西安交通大学一站式校园服务工具
+          Exec=xjtutoolbox
+          Icon=xjtutoolbox
+          Type=Application
+          Terminal=false
+          Categories=Utility;Education;Qt;
+          StartupNotify=true
+          StartupWMClass=app.py
+          EOF
+
+          # 图标占位符 (如果你有 assets/logo.png 请替换为拷贝命令)
+          echo '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="50" fill="#007bff"/></svg>' > $PKG_DIR/usr/share/pixmaps/xjtutoolbox.svg
+
+      - name: Package with FPM
+        run: |
+          cd dist
+          
+          # 打包 .deb (适配 Debian/Ubuntu，依赖系统级 python3-pyqt5)
+          fpm -s dir -t deb -n xjtutoolbox -v ${{ env.PKG_VERSION }} \
+              -d "python3" -d "python3-pyqt5" \
+              -C pkg-root -p XJTUToolbox-linux-x86_64.deb .
+              
+          # 打包 .rpm (适配 Fedora/CentOS/openSUSE，依赖系统级 python3-qt5)
+          fpm -s dir -t rpm -n xjtutoolbox -v ${{ env.PKG_VERSION }} \
+              -d "python3" -d "python3-qt5" \
+              -C pkg-root -p XJTUToolbox-linux-x86_64.rpm .
+
+      - name: Cleanup
+        run: |
+          find dist -maxdepth 1 -type d -name "pkg-root" -exec rm -rf {} +
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: XJTUToolbox-linux-x86_64
+          name: XJTUToolbox-linux-native-packages
           path: ./dist/XJTUToolbox-linux-x86_64.*
 
       - name: Prerelease app
