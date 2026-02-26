@@ -27,7 +27,7 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v5
 
-      # 1. 安装 Linux 打包所需的系统依赖
+      # 1. 安装 Linux 打包所需的系统依赖 (包含解决 lxml 报错的依赖)
       - name: Install System Dependencies for Packaging
         run: |
           sudo apt-get update
@@ -38,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
-      # 3. 【新增】动态注入 Keyring 乱码拦截补丁 (仅在 Linux 打包前生效)
+      # 3. 动态注入 Keyring 乱码拦截补丁 (解决系统密钥环乱码导致的崩溃)
       - name: Patch Keyring for Linux
         run: |
           python -c "
@@ -49,7 +49,6 @@ jobs:
               with open(file_path, 'r', encoding='utf-8') as f:
                   content = f.read()
                   
-              # 注入的猴子补丁代码：拦截并包裹 keyring.get_password
               patch_code = '''
           # --- Auto-injected by Linux CI ---
           import keyring
@@ -66,7 +65,6 @@ jobs:
           # ---------------------------------
           '''
               
-              # 将补丁写在文件最开头
               with open(file_path, 'w', encoding='utf-8') as f:
                   f.write(patch_code + '\n' + content)
               print('Successfully patched account.py for Linux keyring issues.')
@@ -74,11 +72,45 @@ jobs:
               print(f'Warning: {file_path} not found!')
           "
 
-      # 4. 运行项目自身的构建脚本
+      # 4. 动态注入数据库路径补丁 (拦截 Peewee SQLite 路径，强制写入用户可读写目录)
+      - name: Patch Database Path for Linux
+        run: |
+          python -c "
+          import os
+          file_path = 'schedule/schedule_database.py'
+          
+          if os.path.exists(file_path):
+              with open(file_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+                  
+              patch_code = '''
+          # --- Auto-injected by Linux CI for DB Path ---
+          import os
+          import peewee
+          _orig_sqlite_init = peewee.SqliteDatabase.__init__
+          def _safe_sqlite_init(self, database, *args, **kwargs):
+              if database != ':memory:':
+                  user_dir = os.path.expanduser('~/.config/XJTUToolbox')
+                  os.makedirs(user_dir, exist_ok=True)
+                  db_name = os.path.basename(str(database))
+                  database = os.path.join(user_dir, db_name)
+              _orig_sqlite_init(self, database, *args, **kwargs)
+          peewee.SqliteDatabase.__init__ = _safe_sqlite_init
+          # ---------------------------------------------
+          '''
+              
+              with open(file_path, 'w', encoding='utf-8') as f:
+                  f.write(patch_code + '\n' + content)
+              print('Successfully patched database path for Linux.')
+          else:
+              print(f'Warning: {file_path} not found!')
+          "
+
+      # 5. 运行项目自身的构建脚本
       - name: Build Application
         run: uv run build.py
 
-      # 5. 使用 fpm 生成 deb, rpm, pacman 安装包 (包含外壳脚本解决数据库权限)
+      # 6. 使用 fpm 生成 deb, rpm, pacman 安装包 (使用外壳脚本启动以切换工作目录)
       - name: Create Linux Packages (DEB, RPM, Pacman)
         run: |
           cd dist/
@@ -99,7 +131,7 @@ jobs:
           fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
           fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox
 
-      # 6. 生成 AppImage (修改 AppRun 以解决数据库权限)
+      # 7. 生成 AppImage (修改 AppRun 以切换工作目录)
       - name: Create AppImage
         run: |
           wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -131,7 +163,7 @@ jobs:
           
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 7. 上传 Artifacts 供下载检查
+      # 8. 上传 Artifacts 供下载检查
       - name: Upload Artifacts (Linux)
         uses: actions/upload-artifact@v4
         with:
@@ -142,7 +174,7 @@ jobs:
             ./dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
             ./dist/XJTUToolbox-linux-x86_64.AppImage
 
-      # 8. 发布至 Github Releases
+      # 9. 发布至 Github Releases
       - name: Release Linux
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
