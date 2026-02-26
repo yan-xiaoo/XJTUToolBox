@@ -1,0 +1,109 @@
+name: Build & Release Linux
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  PYTHONUTF8: 1
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: build-linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install UV
+        uses: astral-sh/setup-uv@v5
+        
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+        
+      - name: Build Application
+        run: uv run build.py
+
+      - name: Install Packaging Tools (fpm, zstd, rpm)
+        run: |
+          sudo apt-get update
+          # 【更正 1】添加了 rpm 和 file 依赖，确保 fpm 能够正常生成 .rpm 格式
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential zstd rpm file
+          sudo gem install fpm
+
+      - name: Package tar.zst
+        run: |
+          cd dist
+          tar -I zstd -cvf XJTUToolbox-linux-x86_64.tar.zst XJTUToolbox/
+
+      - name: Package deb & rpm (using fpm)
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          if [[ "$VERSION" == "" || "$VERSION" == "main" ]]; then VERSION="1.0.0"; fi
+
+          mkdir -p dist/pkg-root/opt/XJTUToolbox
+          mkdir -p dist/pkg-root/usr/bin
+          
+          cp -r dist/XJTUToolbox/* dist/pkg-root/opt/XJTUToolbox/
+          ln -s /opt/XJTUToolbox/XJTUToolbox dist/pkg-root/usr/bin/xjtutoolbox
+
+          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -C dist/pkg-root -p dist/XJTUToolbox-linux-x86_64.deb .
+          fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -C dist/pkg-root -p dist/XJTUToolbox-linux-x86_64.rpm .
+
+      - name: Package AppImage
+        run: |
+          wget -O appimagetool "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+          
+          mkdir -p dist/AppDir/usr/bin
+          cp -r dist/XJTUToolbox/* dist/AppDir/usr/bin/
+          
+          cd dist/AppDir
+          ln -s usr/bin/XJTUToolbox AppRun
+          
+          echo "[Desktop Entry]" > XJTUToolbox.desktop
+          echo "Name=XJTUToolbox" >> XJTUToolbox.desktop
+          echo "Exec=XJTUToolbox" >> XJTUToolbox.desktop
+          echo "Icon=xjtutoolbox" >> XJTUToolbox.desktop
+          echo "Type=Application" >> XJTUToolbox.desktop
+          echo "Categories=Utility;" >> XJTUToolbox.desktop
+          
+          # 【更正 3】生成一个真实合法的蓝色圆形 SVG 矢量图作为占位符，避免 appimagetool 图像解析报错
+          echo '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="50" fill="#007bff"/></svg>' > xjtutoolbox.svg
+          
+          cd ../..
+          
+          # 【更正 2】注入 APPIMAGE_EXTRACT_AND_RUN=1 环境变量，绕过 Ubuntu 的 FUSE 限制
+          APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool dist/AppDir dist/XJTUToolbox-linux-x86_64.AppImage
+
+      - name: Cleanup Folder
+        run: |
+          # 使用更通用的 find 命令替代 extglob 以提高脚本在 CI 容器中的容错率
+          find dist -maxdepth 1 -type f -not -name "XJTUToolbox-linux-x86_64.*" -delete
+          find dist -maxdepth 1 -type d -not -name "dist" -exec rm -rf {} +
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-linux-x86_64
+          path: ./dist/XJTUToolbox-linux-x86_64.*
+
+      - name: Prerelease app
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: XJTUToolbox ${{ github.ref_name }}
+          prerelease: true
+          files: "./dist/XJTUToolbox-linux-x86_64.*"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

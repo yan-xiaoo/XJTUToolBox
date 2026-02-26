@@ -1,0 +1,58 @@
+name: Build & Release Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  PYTHONUTF8: 1
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Build Application
+        # 假设 build.py 会生成 dist/XJTUToolbox 文件夹
+        run: uv run build.py
+
+      - name: Archive (Windows)
+        run: |
+          ls dist/
+          # 将生成的文件压缩为 zip
+          powershell Compress-Archive -Path ./dist/XJTUToolbox -DestinationPath ./dist/XJTUToolbox-windows.zip
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-windows
+          path: ./dist/XJTUToolbox-windows.zip
+
+      - name: Release Windows
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: XJTUToolbox ${{ github.ref_name }}
+          prerelease: true
+          # 仅上传 Windows 的 zip
+          files: ./dist/XJTUToolbox-windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
