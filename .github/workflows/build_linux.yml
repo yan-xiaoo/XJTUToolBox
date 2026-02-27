@@ -116,22 +116,19 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           install: |
             apt-get update
-            # 安装系统自带的 python3-pyqt5 以及其他编译必备工具
-            apt-get install -y curl ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev wget python3-pyqt5 python3-pip python3-venv python3-dev
+            apt-get install -y curl ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev wget python3-pyqt5 python3-pip python3-venv python3-dev squashfs-tools
             gem install fpm
           env: |
             GITHUB_REF_NAME: ${{ github.ref_name }}
           run: |
-            echo "::group::1. 依赖同步与手动补全 UI 库"
+            echo "::group::1. 依赖同步与补全纯 Python 库"
             curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
-            
-            # 使用系统 Python 并开启 site-packages 继承（以获取原生的 PyQt5）
             uv venv --python python3 --system-site-packages .venv
             rm -f uv.lock || true
             uv sync --all-extras --dev
-
-            # 【核心补救】使用 uv pip 代替原生的 pip，安装被跳过的 UI 库
-            uv pip install --no-deps "pyqt-fluent-widgets~=1.8.7" "pyqt5-frameless-window~=0.7.4"
+            
+            # 使用 --no-deps 安装 UI 库，严防死守拉取 PyQt5 源码引发的 qmake 报错
+            uv pip install --no-deps "pyqt-fluent-widgets~=1.8.7" "pyqt5-frameless-window~=0.7.4" "darkdetect"
             echo "::endgroup::"
 
             echo "::group::2. 注入补丁与转换图标"
@@ -161,19 +158,21 @@ jobs:
             fpm -a arm64 -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
             fpm -a arm64 -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
             fpm -a arm64 -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
-            
+            echo "::endgroup::"
+
+            echo "::group::4. 打包 ARM64 AppImage"
             wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage
             chmod +x appimagetool
             mkdir -p AppDir/usr/bin
             cp -r XJTUToolbox/* AppDir/usr/bin/
             echo -e '#!/bin/sh\nUSER_DIR=\"\$HOME/.config/XJTUToolbox\"\nmkdir -p \"\$USER_DIR\"\ncd \"\$USER_DIR\" || exit 1\nHERE=\"\$(dirname \"\$(readlink -f \"\${0}\")\")\"\nexec \"\${HERE}/usr/bin/XJTUToolbox\" \"\$@\"' > AppDir/AppRun
             chmod +x AppDir/AppRun
-            
             cp wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
             cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
             cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
             
-            # 【终极破解】使用 unsquashfs 直接解包，完美绕过 QEMU 的 Exec format error
+            # 使用解压神器当场强解，绕过 QEMU Exec format error
+            apt-get install -y squashfs-tools
             unsquashfs -f -d squashfs-root appimagetool
             rm -f squashfs-root/usr/lib/libreadline.so* || true
             ARCH=arm64 ./squashfs-root/AppRun AppDir XJTUToolbox-linux-arm64.AppImage
