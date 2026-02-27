@@ -171,9 +171,19 @@ jobs:
             cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
             cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
             
-            # 使用解压神器当场强解，绕过 QEMU Exec format error
+            # 【外科手术切割】绕过 QEMU 和文件头限制
             apt-get install -y squashfs-tools
-            unsquashfs -f -d squashfs-root appimagetool
+            
+            # 1. 扫描出 SquashFS 数据块的精确偏移量 (寻找 'hsqs' 魔术头)
+            OFFSET=$(python3 -c "print(open('appimagetool', 'rb').read().find(b'hsqs'))")
+            echo "SquashFS offset found at byte: $OFFSET"
+            
+            # 2. 截掉前缀，生成纯净的 squashfs 压缩镜像
+            tail -c +$((OFFSET + 1)) appimagetool > pure_squashfs.img
+            
+            # 3. 针对纯净镜像解压，绝对不会再报 superblock 错误！
+            unsquashfs -f -d squashfs-root pure_squashfs.img
+            
             rm -f squashfs-root/usr/lib/libreadline.so* || true
             ARCH=arm64 ./squashfs-root/AppRun AppDir XJTUToolbox-linux-arm64.AppImage
             echo "::endgroup::"
