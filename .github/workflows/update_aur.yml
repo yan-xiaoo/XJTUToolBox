@@ -1,31 +1,41 @@
 name: Update AUR Packages
 
 on:
-  # 当 Release 被发布，或者从预发布改为正式发布时触发
+  # 触发条件 1：全自动。当 Release 正式发布或修改时自动触发
   release:
     types: [published, edited]
+    
+  # 触发条件 2：纯手动。让你随时可以在 Actions 面板里看到那个 "Run workflow" 按钮！
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '手动触发时，请输入你要发布的版本号 (如: v1.2.3)'
+        required: true
+        type: string
 
 jobs:
   update-aur:
-    # 核心拦截：如果是 Prerelease 预发布版，直接跳过此任务
-    if: github.event.release.prerelease == false
+    # 拦截器：允许手动强制执行；如果是自动触发，则要求必须是非 Prerelease (正式版) 才执行
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
+    
+    # 智能环境变量：自动分辨此次运行是手动还是自动，提取正确的版本号
+    env:
+      TARGET_TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
     
     steps:
       - name: Checkout GitHub Repository
         uses: actions/checkout@v4
 
-      # 解决时序冲突的终极武器：等待 build_linux 的产物上传完毕
       - name: Wait for Release Assets to be Ready
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          echo "Waiting for compiled assets to appear on release $TAG..."
+          echo "Waiting for compiled assets to appear on release ${{ env.TARGET_TAG }}..."
           
           # 循环检查最多 30 次，每次间隔 30 秒（总计等待 15 分钟）
           for i in {1..30}; do
-            ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name' || echo "")
+            ASSETS=$(gh release view "${{ env.TARGET_TAG }}" --json assets -q '.assets[].name' || echo "")
             if echo "$ASSETS" | grep -q "linux-x86_64.pkg.tar.zst" && echo "$ASSETS" | grep -q "linux-arm64.pkg.tar.zst"; then
               echo "✅ All required assets found! Proceeding with AUR update."
               exit 0
@@ -39,7 +49,7 @@ jobs:
 
       - name: Prepare PKGBUILD Versions
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${{ env.TARGET_TAG }}"
           VERSION="${VERSION#v}" # 去除 'v' 前缀
           
           echo "Updating PKGBUILDs to version $VERSION"
@@ -81,7 +91,7 @@ jobs:
           commit_username: "github-actions[bot]"
           commit_email: "github-actions[bot]@users.noreply.github.com"
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Auto-update to version ${{ github.event.release.tag_name }}"
+          commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
 
       - name: Publish to AUR (xjtutoolbox-bin)
         uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
@@ -91,4 +101,4 @@ jobs:
           commit_username: "github-actions[bot]"
           commit_email: "github-actions[bot]@users.noreply.github.com"
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Auto-update to version ${{ github.event.release.tag_name }}"
+          commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
