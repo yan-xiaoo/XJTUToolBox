@@ -59,8 +59,8 @@ class ScheduleInterface(ScrollArea):
         ]
 
         self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db")) \
-        if accounts.current else None
-
+            if accounts.current else None
+            
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
         self.vBoxLayout = QVBoxLayout(self.view)
