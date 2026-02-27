@@ -1,58 +1,76 @@
 name: Update AUR Packages
 
 on:
-  # Run when a release is published as stable directly, when a prerelease is published (will be gated out),
-  # and when a release is edited (e.g., toggled from prerelease -> release).
+  # 当 Release 被发布，或者从预发布改为正式发布时触发
   release:
-    types: [released, published, edited]
+    types: [published, edited]
 
 jobs:
   update-aur:
+    # 核心拦截：如果是 Prerelease 预发布版，直接跳过此任务
+    if: github.event.release.prerelease == false
     runs-on: ubuntu-latest
-    container: archlinux:latest # 直接使用纯正的 Arch Linux 容器
+    
     steps:
       - name: Checkout GitHub Repository
         uses: actions/checkout@v4
 
-      - name: Install System Dependencies
+      # 解决时序冲突的终极武器：等待 build_linux 的产物上传完毕
+      - name: Wait for Release Assets to be Ready
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pacman -Syu --noconfirm git openssh base-devel sudo jq
+          TAG="${{ github.event.release.tag_name }}"
+          echo "Waiting for compiled assets to appear on release $TAG..."
           
-          # 创建一个普通用户来运行 makepkg (makepkg 不允许在 root 下运行)
-          useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown -R builder:builder .
+          # 循环检查最多 30 次，每次间隔 30 秒（总计等待 15 分钟）
+          for i in {1..30}; do
+            ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name' || echo "")
+            if echo "$ASSETS" | grep -q "linux-x86_64.pkg.tar.zst" && echo "$ASSETS" | grep -q "linux-arm64.pkg.tar.zst"; then
+              echo "✅ All required assets found! Proceeding with AUR update."
+              exit 0
+            fi
+            echo "⏳ Assets not fully ready yet. Waiting 30 seconds... ($i/30)"
+            sleep 30
+          done
+          
+          echo "❌ Timeout waiting for release assets."
+          exit 1
 
-      - name: Update PKGBUILDs and Generate .SRCINFO
+      - name: Prepare PKGBUILD Versions
         run: |
-          VERSION=${{ github.event.release.tag_name }}
-          VERSION=${VERSION#v} # 去除 'v' 前缀，变成纯数字如 1.0.0
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}" # 去除 'v' 前缀
           
-          su builder -c "
-            # ==============================
-            # 处理源码编译版 xjtutoolbox
-            # ==============================
-            cd aur/xjtutoolbox
-            # 更新版本号
-            sed -i \"s/^pkgver=.*/pkgver=$VERSION/\" PKGBUILD
-            # 重置 pkgrel 为 1
-            sed -i \"s/^pkgrel=.*/pkgrel=1/\" PKGBUILD
+          echo "Updating PKGBUILDs to version $VERSION"
+          
+          # 直接在 Ubuntu 环境下更新版本号
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/xjtutoolbox/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/xjtutoolbox/PKGBUILD
+          
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/xjtutoolbox-bin/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/xjtutoolbox-bin/PKGBUILD
+
+      - name: Generate .SRCINFO and Checksums (via Arch Container)
+        run: |
+          # 临时拉起 Arch 容器，执行完毕立刻销毁，保持环境纯净
+          docker run --rm -v ${{ github.workspace }}:/work archlinux:base-devel bash -c "
+            pacman -Syu --noconfirm pacman-contrib sudo git
             
-            # 自动下载源码并更新 SHA256 哈希值
-            updpkgsums
-            # 生成 AUR 必备的 .SRCINFO 文件
-            makepkg --printsrcinfo > .SRCINFO
+            # 创建一个普通用户来运行 makepkg
+            useradd -m builder
+            echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            chown -R builder:builder /work
             
-            # ==============================
-            # 处理预编译版 xjtutoolbox-bin
-            # ==============================
-            cd ../xjtutoolbox-bin
-            sed -i \"s/^pkgver=.*/pkgver=$VERSION/\" PKGBUILD
-            sed -i \"s/^pkgrel=.*/pkgrel=1/\" PKGBUILD
+            echo 'Processing xjtutoolbox (Source Build)...'
+            cd /work/aur/xjtutoolbox
+            su builder -c 'updpkgsums'
+            su builder -c 'makepkg --printsrcinfo > .SRCINFO'
             
-            # 自动下载 GitHub Release 中的 pkg.tar.zst 并更新哈希值
-            updpkgsums
-            makepkg --printsrcinfo > .SRCINFO
+            echo 'Processing xjtutoolbox-bin (Pre-compiled)...'
+            cd /work/aur/xjtutoolbox-bin
+            su builder -c 'updpkgsums'
+            su builder -c 'makepkg --printsrcinfo > .SRCINFO'
           "
 
       - name: Publish to AUR (xjtutoolbox)
