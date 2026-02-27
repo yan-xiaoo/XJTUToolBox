@@ -94,6 +94,6 @@ jobs:
           prerelease: true
           files: |
             ./dist/XJTUToolbox-macOS-*.zip
-            ./dist/XJTUToolbox-macOS-*.dmg
+            # ./dist/XJTUToolbox-macOS-*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
