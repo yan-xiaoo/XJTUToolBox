@@ -1,7 +1,7 @@
 [project]
 name = "XJTUToolBox"
 version = "1.2.3"
-requires-python = ">=3.10"
+requires-python = ">=3.10, <=3.13"
 readme = "README.md"
 description = "A desktop application offering a variety of services for Xi'an Jiaotong University, including attendance check, schedule inquiry, and one-key teaching evaluation."
 dependencies = [
@@ -10,15 +10,19 @@ dependencies = [
     "pycryptodome~=3.21.0",
     "pyqt-fluent-widgets~=1.8.7",
     "pyqt5-frameless-window~=0.7.4",
-    # pyqt5==5.15.11 所引用的 pyqt5-qt5==5.15.11 只在 macOS 与 Linux 上有预编译包
-    # 因此需要为 macOS/Linux 安装 pyqt5==5.15.11
-    "pyqt5>=5.15.11; sys_platform != 'win32'",
+
+    # 【核心修改 1】为 macOS 和 Linux x86_64 安装 pyqt5>=5.15.11
+    # 巧妙地利用平台判断，排除了 Linux aarch64 (ARM64)，以防止 uv 去 PyPI 寻找不存在的包从而引发编译报错。
+    # Linux aarch64 将直接在 CI/CD 中通过系统包管理器 (apt) 获得 python3-pyqt5 支持。
+    "pyqt5>=5.15.11; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
+
     # 在 Windows 下，我们需要强制使用 pyqt5>=5.15.11，但配合软件包 pyqt5-qt5==5.15.2
     # 这是因为 Windows 下 pyqt5==5.15.2 没有 py312 的预构建包（那会还不存在 Python 3.12 呢），所以我们必须使用 pyqt>=5.15.11
     # 但 pyqt5-qt5>=5.15.11 只在 macOS 和 Linux 上有预构建包，这就导致我们不得不搭配两个版本不同的软件包
     # 参考 https://github.com/astral-sh/uv/issues/11865
     "pyqt5>=5.15.11; sys_platform == 'win32'",
     "pyqt5-qt5>=5.15,<=5.15.2; sys_platform == 'win32'",
+
     "platformdirs~=4.3.6",
     "peewee~=3.17.8",
     "icalendar~=6.1.0",
@@ -40,14 +44,16 @@ dependencies = [
 
 [tool.uv]
 package = false
-# 支持平台：x86/x86_64 Windows, x86_64/arm64 macOS, x86_64 linux
+# 支持平台：x86/x86_64 Windows, x86_64/arm64 macOS, x86_64/aarch64 linux
 required-environments = [
     # x86_64 在 Windows 上的标准写法为 "AMD64"；写成 "amd64" 都不行。
-    "sys.platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
     "sys_platform == 'win32' and platform_machine == 'x86'",
-    "sys.platform == 'darwin' and platform_machine == 'x86_64'",
-    "sys.platform == 'darwin' and platform_machine == 'arm64'",
-    "sys.platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    # 【核心修改 2】正式注册 Linux aarch64 (ARM64) 架构的支持
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 
 [dependency-groups]
