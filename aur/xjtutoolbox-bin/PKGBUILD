@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc="XJTUToolBox - A powerful utility tool (Pre-compiled)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/yan-xiaoo/XJTUToolBox"
-license=('MIT')
+license=('GPL3')
 provides=('xjtutoolbox')
 conflicts=('xjtutoolbox')
 
