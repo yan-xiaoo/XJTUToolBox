@@ -3,7 +3,7 @@ name: Update AUR Packages
 on:
   # 触发条件 1：全自动。当 Release 正式发布或修改时自动触发
   release:
-    types: [published, edited]
+    types: [released, published, edited]
     
   # 触发条件 2：纯手动。让你随时可以在 Actions 面板里看到那个 "Run workflow" 按钮！
   workflow_dispatch:
