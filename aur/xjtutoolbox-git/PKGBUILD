@@ -1,5 +1,5 @@
 # Maintainer: Your Name <your.email@example.com>
-pkgbase=xjtutoolbox
+_pkgname=xjtutoolbox
 pkgname=xjtutoolbox-git
 pkgver=1.2.3.r0.g0000000
 pkgrel=1
@@ -8,8 +8,8 @@ arch=('any')
 url="https://github.com/yan-xiaoo/XJTUToolBox"
 license=('GPL3')
 
-provides=("${pkgbase}")
-conflicts=("${pkgbase}" "${pkgbase}-bin")
+provides=("${_pkgname}")
+conflicts=("${_pkgname}" "${_pkgname}-bin")
 
 # 1. 官方仓库与 AUR 依赖 (混合依赖)
 depends=(
@@ -58,37 +58,38 @@ package() {
   cd "XJTUToolBox"
 
   # --- 目录准备 ---
-  install -dm755 "$pkgdir/opt/$pkgbase"
+  # 注意：这里全部改为了 $_pkgname，确保安装到 /opt/xjtutoolbox
+  install -dm755 "$pkgdir/opt/$_pkgname"
   install -dm755 "$pkgdir/usr/bin"
   install -dm755 "$pkgdir/usr/share/applications"
   install -dm755 "$pkgdir/usr/share/pixmaps"
 
   # --- 源码拷贝 ---
-  cp -r . "$pkgdir/opt/$pkgbase/"
-  rm -rf "$pkgdir/opt/$pkgbase/.git"
-  rm -rf "$pkgdir/opt/$pkgbase/docs"
-  rm -f "$pkgdir/opt/$pkgbase/uv.lock"
+  cp -r . "$pkgdir/opt/$_pkgname/"
+  rm -rf "$pkgdir/opt/$_pkgname/.git"
+  rm -rf "$pkgdir/opt/$_pkgname/docs"
+  rm -f "$pkgdir/opt/$_pkgname/uv.lock"
 
   # --- 构建隔离环境 (Venv) ---
-  python -m venv --system-site-packages "$pkgdir/opt/$pkgbase/venv"
+  python -m venv --system-site-packages "$pkgdir/opt/$_pkgname/venv"
   
   export PYTHONDONTWRITEBYTECODE=1
-  "$pkgdir/opt/$pkgbase/venv/bin/pip" install \
+  "$pkgdir/opt/$_pkgname/venv/bin/pip" install \
     --no-cache-dir \
     --no-compile \
     PyQt-Fluent-Widgets
 
   # --- 清理与修正 ---
-  find "$pkgdir/opt/$pkgbase" -name "*.pyc" -delete
-  find "$pkgdir/opt/$pkgbase" -name "__pycache__" -delete
-  find "$pkgdir/opt/$pkgbase/venv" -type f -exec sed -i "s|$pkgdir||g" {} +
+  find "$pkgdir/opt/$_pkgname" -name "*.pyc" -delete
+  find "$pkgdir/opt/$_pkgname" -name "__pycache__" -delete
+  find "$pkgdir/opt/$_pkgname/venv" -type f -exec sed -i "s|$pkgdir||g" {} +
 
   # --- 启动脚本 ---
   cat <<EOF > "$pkgdir/usr/bin/xjtutoolbox"
 #!/bin/sh
 export PYTHONDONTWRITEBYTECODE=1
-cd /opt/$pkgbase
-exec /opt/$pkgbase/venv/bin/python app.py "\$@"
+cd /opt/$_pkgname
+exec /opt/$_pkgname/venv/bin/python app.py "\$@"
 EOF
   chmod +x "$pkgdir/usr/bin/xjtutoolbox"
 
