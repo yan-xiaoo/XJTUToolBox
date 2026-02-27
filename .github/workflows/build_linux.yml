@@ -6,8 +6,12 @@ on:
     tags:
       - "v*.*.*"
 
+# ==========================================
+# 全局环境变量区：配置均在此处集中管理
+# ==========================================
 env:
   PYTHONUTF8: 1
+  ICON_PATH: "assets/icons/main_icon.ico" # ★ 图标源文件路径
 
 permissions:
   contents: write
@@ -39,10 +43,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
+      # ★ 通过 os.environ 获取顶层定义的图标路径
       - name: Extract Icon
         run: |
           uv pip install Pillow
-          uv run python -c "from PIL import Image; import os; os.makedirs('dist/wrapper/usr/share/pixmaps', exist_ok=True); Image.open('assets/icons/main_icon.ico').save('dist/wrapper/usr/share/pixmaps/xjtutoolbox.png', format='PNG')"
+          uv run python -c "import os; from PIL import Image; icon_path = os.environ.get('ICON_PATH'); os.makedirs('dist/wrapper/usr/share/pixmaps', exist_ok=True); Image.open(icon_path).save('dist/wrapper/usr/share/pixmaps/xjtutoolbox.png', format='PNG')"
 
       - name: Build Application
         run: uv run build.py
@@ -106,6 +111,7 @@ jobs:
             gem install fpm
           env: |
             GITHUB_REF_NAME: ${{ github.ref_name }}
+            ICON_PATH: ${{ env.ICON_PATH }} # ★ 将外层变量透传进 QEMU 容器
           run: |
             echo "::group::1. 依赖同步与补全纯 Python 库"
             curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
@@ -119,7 +125,7 @@ jobs:
 
             echo "::group::2. 提取与转换图标"
             uv pip install Pillow
-            uv run python -c "from PIL import Image; import os; os.makedirs('dist/wrapper/usr/share/pixmaps', exist_ok=True); Image.open('assets/icons/main_icon.ico').save('dist/wrapper/usr/share/pixmaps/xjtutoolbox.png', format='PNG')"
+            uv run python -c "import os; from PIL import Image; icon_path = os.environ.get('ICON_PATH'); os.makedirs('dist/wrapper/usr/share/pixmaps', exist_ok=True); Image.open(icon_path).save('dist/wrapper/usr/share/pixmaps/xjtutoolbox.png', format='PNG')"
             echo "::endgroup::"
 
             echo "::group::3. 执行构建与打包 (ARM64)"
