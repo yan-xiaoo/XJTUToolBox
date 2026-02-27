@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import keyring
 import keyring.errors
+import keyring.core
 from Crypto.Cipher import AES
 from PyQt5.QtCore import pyqtSignal, QObject
 
@@ -14,6 +15,12 @@ from .session_manager import SessionManager
 from .config import cfg
 from .migrate_data import DATA_DIRECTORY
 
+# Linux Keyring 崩溃保护层
+_orig_get_password = keyring.core.get_password
+def _safe_get_password(*args, **kwargs):
+    try: return _orig_get_password(*args, **kwargs)
+    except Exception: return None
+keyring.core.get_password = keyring.get_password = _safe_get_password
 
 def pad(text):
     text_length = len(text)

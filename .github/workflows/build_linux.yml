@@ -39,20 +39,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
-      - name: Patch Application
-        run: |
-          python -c "
-          import os
-          def patch(path, code):
-              if os.path.exists(path):
-                  with open(path, 'r', encoding='utf-8') as f: content = f.read()
-                  with open(path, 'w', encoding='utf-8') as f: f.write(code + '\n' + content)
-          
-          patch('app/utils/account.py', 'import keyring, keyring.core\n_orig_get_password = keyring.core.get_password\ndef _safe_get_password(*args, **kwargs):\n    try: return _orig_get_password(*args, **kwargs)\n    except Exception: return None\nkeyring.core.get_password = keyring.get_password = _safe_get_password')
-          
-          patch('app.py', 'import os, sys, sqlite3\nif getattr(sys, \"frozen\", False) and sys.platform.startswith(\"linux\"):\n    if \"LD_LIBRARY_PATH\" in os.environ: os.environ[\"LD_LIBRARY_PATH\"] = os.environ.get(\"LD_LIBRARY_PATH_ORIG\", \"\")\n_orig_connect = sqlite3.connect\ndef _safe_connect(database, *args, **kwargs):\n    try:\n        db_str = str(database)\n        if db_str and db_str != \":memory:\" and not db_str.startswith(\"file:\"):\n            user_dir = os.path.expanduser(\"~/.config/XJTUToolbox\")\n            os.makedirs(user_dir, exist_ok=True)\n            database = os.path.join(user_dir, os.path.basename(db_str))\n    except Exception: pass\n    return _orig_connect(database, *args, **kwargs)\nsqlite3.connect = _safe_connect')
-          "
-
       - name: Extract Icon
         run: |
           uv pip install Pillow
@@ -131,16 +117,7 @@ jobs:
             uv pip install --no-deps "pyqt-fluent-widgets~=1.8.7" "pyqt5-frameless-window~=0.7.4" "darkdetect"
             echo "::endgroup::"
 
-            echo "::group::2. 注入补丁与转换图标"
-            uv run python -c "
-            import os
-            def patch(path, code):
-                if os.path.exists(path):
-                    with open(path, 'r', encoding='utf-8') as f: content = f.read()
-                    with open(path, 'w', encoding='utf-8') as f: f.write(code + '\n' + content)
-            patch('app/utils/account.py', 'import keyring, keyring.core\n_orig_get_password = keyring.core.get_password\ndef _safe_get_password(*args, **kwargs):\n    try: return _orig_get_password(*args, **kwargs)\n    except Exception: return None\nkeyring.core.get_password = keyring.get_password = _safe_get_password')
-            patch('app.py', 'import os, sys, sqlite3\nif getattr(sys, \"frozen\", False) and sys.platform.startswith(\"linux\"):\n    if \"LD_LIBRARY_PATH\" in os.environ: os.environ[\"LD_LIBRARY_PATH\"] = os.environ.get(\"LD_LIBRARY_PATH_ORIG\", \"\")\n_orig_connect = sqlite3.connect\ndef _safe_connect(database, *args, **kwargs):\n    try:\n        db_str = str(database)\n        if db_str and db_str != \":memory:\" and not db_str.startswith(\"file:\"):\n            user_dir = os.path.expanduser(\"~/.config/XJTUToolbox\")\n            os.makedirs(user_dir, exist_ok=True)\n            database = os.path.join(user_dir, os.path.basename(db_str))\n    except Exception: pass\n    return _orig_connect(database, *args, **kwargs)\nsqlite3.connect = _safe_connect')
-            "
+            echo "::group::2. 提取与转换图标"
             uv pip install Pillow
             uv run python -c "from PIL import Image; import os; os.makedirs('dist/wrapper/usr/share/pixmaps', exist_ok=True); Image.open('assets/icons/main_icon.ico').save('dist/wrapper/usr/share/pixmaps/xjtutoolbox.png', format='PNG')"
             echo "::endgroup::"
