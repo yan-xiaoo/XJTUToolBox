@@ -21,6 +21,8 @@ QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setApplicationName("xjtutoolbox")
+    app.setDesktopFileName("xjtutoolbox.desktop")
     window = MainWindow()
     # 在 MacOS 下，安装事件过滤器以处理 Dock 图标被点击时的事件
     if platform.system() == 'Darwin':
