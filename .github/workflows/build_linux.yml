@@ -62,7 +62,7 @@ jobs:
           chmod +x wrapper/usr/bin/xjtutoolbox
           echo -e '[Desktop Entry]\nName=XJTUToolbox\nExec=xjtutoolbox\nIcon=xjtutoolbox\nType=Application\nCategories=Utility;\nTerminal=false' > wrapper/usr/share/applications/xjtutoolbox.desktop
           
-          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-amd64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
           fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
           fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
 
