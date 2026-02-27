@@ -131,7 +131,7 @@ jobs:
             uv sync --all-extras --dev
 
             # 【核心补救】使用 uv pip 代替原生的 pip，安装被跳过的 UI 库
-            uv pip install "pyqt-fluent-widgets~=1.8.7" "pyqt5-frameless-window~=0.7.4"
+            uv pip install --no-deps "pyqt-fluent-widgets~=1.8.7" "pyqt5-frameless-window~=0.7.4"
             echo "::endgroup::"
 
             echo "::group::2. 注入补丁与转换图标"
