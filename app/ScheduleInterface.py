@@ -58,8 +58,19 @@ class ScheduleInterface(ScrollArea):
             self.tr("周日")
         ]
 
-        self.schedule_service = ScheduleService(os.path.join(account_data_directory(accounts.current), "schedule.db")) \
-            if accounts.current else None
+        if accounts.current:
+        # 1. 获取目标文件夹路径
+            db_dir = account_data_directory(accounts.current)
+    
+        # 2. 强制创建文件夹（解决 Linux 下找不到路径的问题）
+            os.makedirs(db_dir, exist_ok=True)
+    
+        # 3. 拼接完整路径并初始化数据库服务
+            db_path = os.path.join(db_dir, "schedule.db")
+            self.schedule_service = ScheduleService(db_path)
+        else:
+        # 如果没有当前账号，则保持为空
+            self.schedule_service = None
 
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 

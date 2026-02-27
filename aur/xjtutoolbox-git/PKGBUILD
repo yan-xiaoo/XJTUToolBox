@@ -1,12 +1,15 @@
 # Maintainer: Your Name <your.email@example.com>
 pkgbase=xjtutoolbox
-pkgname=xjtutoolbox
-pkgver=1.2.3
+pkgname=xjtutoolbox-git
+pkgver=1.2.3.r0.g0000000
 pkgrel=1
-pkgdesc="仙交百宝箱：西安交通大学一站式校园服务工具（混合依赖模式：Official + AUR + Venv）"
+pkgdesc="仙交百宝箱：西安交通大学一站式校园服务工具（Git 最新源码版）"
 arch=('any')
 url="https://github.com/yan-xiaoo/XJTUToolBox"
 license=('GPL3')
+
+provides=("${pkgbase}")
+conflicts=("${pkgbase}" "${pkgbase}-bin")
 
 # 1. 官方仓库与 AUR 依赖 (混合依赖)
 depends=(
@@ -41,13 +44,18 @@ depends=(
 )
 
 makedepends=('git' 'python-pip')
-provides=("${pkgbase}")
-conflicts=("${pkgbase}")
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/yan-xiaoo/XJTUToolBox/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('SKIP') # 实际由 GitHub Actions 里的 updpkgsums 自动计算覆盖
+
+source=("git+https://github.com/yan-xiaoo/XJTUToolBox.git")
+sha256sums=('SKIP')
+
+# 动态生成版本号
+pkgver() {
+  cd "XJTUToolBox"
+  git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g' | sed 's/^v//'
+}
 
 package() {
-  cd "XJTUToolBox-${pkgver}"
+  cd "XJTUToolBox"
 
   # --- 目录准备 ---
   install -dm755 "$pkgdir/opt/$pkgbase"
