@@ -1,8 +1,10 @@
 name: Update AUR Packages
 
 on:
+  # Run when a release is published as stable directly, when a prerelease is published (will be gated out),
+  # and when a release is edited (e.g., toggled from prerelease -> release).
   release:
-    types: [published] # 当你在 GitHub 上正式点下 Publish Release 时触发
+    types: [released, published, edited]
 
 jobs:
   update-aur:
