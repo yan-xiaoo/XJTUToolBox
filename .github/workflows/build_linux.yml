@@ -79,6 +79,17 @@ jobs:
           cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
           ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
 
+      # ★ 新增：上传 x86_64 构建产物到 Actions 页面
+      - name: Upload Artifacts (x86_64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-linux-x86_64
+          path: |
+            dist/XJTUToolbox-linux-x86_64.deb
+            dist/XJTUToolbox-linux-x86_64.rpm
+            dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
+            dist/XJTUToolbox-linux-x86_64.AppImage
+
       - name: Upload & Release (x86_64)
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
@@ -171,10 +182,22 @@ jobs:
             ARCH=arm64 ./squashfs-root/AppRun AppDir XJTUToolbox-linux-arm64.AppImage
             echo "::endgroup::"
 
-      - name: Release ARM64
+      # ★ 新增：上传 arm64 构建产物到 Actions 页面 (QEMU 运行完毕后，文件保留在宿主机的 dist/ 中)
+      - name: Upload Artifacts (arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-linux-arm64
+          path: |
+            dist/XJTUToolbox-linux-arm64.deb
+            dist/XJTUToolbox-linux-arm64.rpm
+            dist/XJTUToolbox-linux-arm64.pkg.tar.zst
+            dist/XJTUToolbox-linux-arm64.AppImage
+
+      # ★ 新增：为 arm64 补全 Release 上传步骤
+      - name: Upload & Release (arm64)
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: dist/XJTUToolbox-linux-arm64.*
+          files: dist/XJTUToolbox-linux-arm64*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
