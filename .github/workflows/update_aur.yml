@@ -1,0 +1,74 @@
+name: Update AUR Packages
+
+on:
+  release:
+    types: [published] # 当你在 GitHub 上正式点下 Publish Release 时触发
+
+jobs:
+  update-aur:
+    runs-on: ubuntu-latest
+    container: archlinux:latest # 直接使用纯正的 Arch Linux 容器
+    steps:
+      - name: Checkout GitHub Repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          pacman -Syu --noconfirm git openssh base-devel sudo jq
+          
+          # 创建一个普通用户来运行 makepkg (makepkg 不允许在 root 下运行)
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder .
+
+      - name: Update PKGBUILDs and Generate .SRCINFO
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+          VERSION=${VERSION#v} # 去除 'v' 前缀，变成纯数字如 1.0.0
+          
+          su builder -c "
+            # ==============================
+            # 处理源码编译版 xjtutoolbox
+            # ==============================
+            cd aur/xjtutoolbox
+            # 更新版本号
+            sed -i \"s/^pkgver=.*/pkgver=$VERSION/\" PKGBUILD
+            # 重置 pkgrel 为 1
+            sed -i \"s/^pkgrel=.*/pkgrel=1/\" PKGBUILD
+            
+            # 自动下载源码并更新 SHA256 哈希值
+            updpkgsums
+            # 生成 AUR 必备的 .SRCINFO 文件
+            makepkg --printsrcinfo > .SRCINFO
+            
+            # ==============================
+            # 处理预编译版 xjtutoolbox-bin
+            # ==============================
+            cd ../xjtutoolbox-bin
+            sed -i \"s/^pkgver=.*/pkgver=$VERSION/\" PKGBUILD
+            sed -i \"s/^pkgrel=.*/pkgrel=1/\" PKGBUILD
+            
+            # 自动下载 GitHub Release 中的 pkg.tar.zst 并更新哈希值
+            updpkgsums
+            makepkg --printsrcinfo > .SRCINFO
+          "
+
+      - name: Publish to AUR (xjtutoolbox)
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: xjtutoolbox
+          pkgbuild: ./aur/xjtutoolbox/PKGBUILD
+          commit_username: "github-actions[bot]"
+          commit_email: "github-actions[bot]@users.noreply.github.com"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Auto-update to version ${{ github.event.release.tag_name }}"
+
+      - name: Publish to AUR (xjtutoolbox-bin)
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: xjtutoolbox-bin
+          pkgbuild: ./aur/xjtutoolbox-bin/PKGBUILD
+          commit_username: "github-actions[bot]"
+          commit_email: "github-actions[bot]@users.noreply.github.com"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Auto-update to version ${{ github.event.release.tag_name }}"
