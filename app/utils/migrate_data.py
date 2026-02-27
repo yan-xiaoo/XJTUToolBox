@@ -21,15 +21,19 @@ DATA_DIRECTORY = platformdirs.user_data_dir(APP_NAME, ensure_exists=True)
 CACHE_DIRECTORY = platformdirs.user_cache_dir(APP_NAME, ensure_exists=True)
 
 
-def account_data_directory(account) -> str:
+def account_data_directory(account, ensure_exists: bool = True) -> str:
     """
     获取账户数据文件夹路径
 
     :param account: 账户对象
-    :returns 账户数据文件夹路径
+    :param ensure_exists: 是否确保文件夹存在（若不存在则创建）
+    :returns: 账户数据文件夹路径
     """
     db_dir = os.path.join(DATA_DIRECTORY, "data", account.uuid)
-    os.makedirs(db_dir, exist_ok=True)
+    
+    if ensure_exists:
+        os.makedirs(db_dir, exist_ok=True)
+        
     return db_dir
 
 
