@@ -168,11 +168,14 @@ jobs:
             cp -r XJTUToolbox/* AppDir/usr/bin/
             echo -e '#!/bin/sh\nUSER_DIR=\"\$HOME/.config/XJTUToolbox\"\nmkdir -p \"\$USER_DIR\"\ncd \"\$USER_DIR\" || exit 1\nHERE=\"\$(dirname \"\$(readlink -f \"\${0}\")\")\"\nexec \"\${HERE}/usr/bin/XJTUToolbox\" \"\$@\"' > AppDir/AppRun
             chmod +x AppDir/AppRun
+            
             cp wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
             cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
             cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
-            ./appimagetool --appimage-extract
-            rm -f squashfs-root/usr/lib/libreadline.so*
+            
+            # 【终极破解】使用 unsquashfs 直接解包，完美绕过 QEMU 的 Exec format error
+            unsquashfs -f -d squashfs-root appimagetool
+            rm -f squashfs-root/usr/lib/libreadline.so* || true
             ARCH=arm64 ./squashfs-root/AppRun AppDir XJTUToolbox-linux-arm64.AppImage
             echo "::endgroup::"
 
