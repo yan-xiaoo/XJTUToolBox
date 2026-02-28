@@ -1,0 +1,203 @@
+name: Build & Release Linux
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+# ==========================================
+# 全局环境变量区：配置均在此处集中管理
+# ==========================================
+env:
+  PYTHONUTF8: 1
+  ICON_PATH: "assets/icons/main_icon.ico" # ★ 图标源文件路径
+
+permissions:
+  contents: write
+
+jobs:
+  # ==========================================
+  # 任务 1：构建 x86_64 架构的 Linux 包
+  # ==========================================
+  build-linux-x86_64:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev
+          sudo gem install fpm
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+
+      # ★ 通过 os.environ 获取顶层定义的图标路径
+      - name: Extract Icon
+        run: |
+          uv pip install Pillow
+          uv run python -c "import os; from PIL import Image; icon_path = os.environ.get('ICON_PATH'); os.makedirs('dist/wrapper/usr/share/pixmaps', exist_ok=True); Image.open(icon_path).save('dist/wrapper/usr/share/pixmaps/xjtutoolbox.png', format='PNG')"
+
+      - name: Build Application
+        run: uv run build.py
+
+      - name: Create Packages (x86_64)
+        run: |
+          cd dist/
+          VERSION=${GITHUB_REF_NAME#v}
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then VERSION="1.0.0"; fi
+          mkdir -p wrapper/usr/bin wrapper/usr/share/applications
+          echo -e '#!/bin/sh\nUSER_DIR="$HOME/.config/XJTUToolbox"\nmkdir -p "$USER_DIR"\ncd "$USER_DIR" || exit 1\nexec /opt/XJTUToolbox/XJTUToolbox "$@"' > wrapper/usr/bin/xjtutoolbox
+          chmod +x wrapper/usr/bin/xjtutoolbox
+          echo -e '[Desktop Entry]\nName=XJTUToolbox\nExec=xjtutoolbox\nIcon=xjtutoolbox\nType=Application\nCategories=Utility;\nTerminal=false' > wrapper/usr/share/applications/xjtutoolbox.desktop
+          
+          fpm -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+          fpm -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+          fpm -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-x86_64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+
+      - name: Create AppImage (x86_64)
+        run: |
+          wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          mkdir -p AppDir/usr/bin
+          cp -r dist/XJTUToolbox/* AppDir/usr/bin/
+          echo -e '#!/bin/sh\nUSER_DIR="$HOME/.config/XJTUToolbox"\nmkdir -p "$USER_DIR"\ncd "$USER_DIR" || exit 1\nHERE="$(dirname "$(readlink -f "${0}")")"\nexec "${HERE}/usr/bin/XJTUToolbox" "$@"' > AppDir/AppRun
+          chmod +x AppDir/AppRun
+          cp dist/wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
+          cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
+          cp dist/wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
+          ./appimagetool --appimage-extract-and-run AppDir dist/XJTUToolbox-linux-x86_64.AppImage
+
+      # ★ 新增：上传 x86_64 构建产物到 Actions 页面
+      - name: Upload Artifacts (x86_64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-linux-x86_64
+          path: |
+            dist/XJTUToolbox-linux-x86_64.deb
+            dist/XJTUToolbox-linux-x86_64.rpm
+            dist/XJTUToolbox-linux-x86_64.pkg.tar.zst
+            dist/XJTUToolbox-linux-x86_64.AppImage
+
+      - name: Upload & Release (x86_64)
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/XJTUToolbox-linux-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==========================================
+  # 任务 2：构建 ARM64 架构的 Linux 包 (QEMU)
+  # ==========================================
+  build-linux-arm64:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build ARM64 via QEMU
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          install: |
+            apt-get update
+            apt-get install -y curl ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev wget python3-pyqt5 python3-pip python3-venv python3-dev squashfs-tools
+            gem install fpm
+          env: |
+            GITHUB_REF_NAME: ${{ github.ref_name }}
+            ICON_PATH: ${{ env.ICON_PATH }} # ★ 将外层变量透传进 QEMU 容器
+          run: |
+            echo "::group::1. 依赖同步与补全纯 Python 库"
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
+            uv venv --python python3 --system-site-packages .venv
+            rm -f uv.lock || true
+            uv sync --all-extras --dev
+            
+            # 使用 --no-deps 安装 UI 库，严防死守拉取 PyQt5 源码引发的 qmake 报错
+            uv pip install --no-deps "pyqt-fluent-widgets~=1.8.7" "pyqt5-frameless-window~=0.7.4" "darkdetect"
+            echo "::endgroup::"
+
+            echo "::group::2. 提取与转换图标"
+            uv pip install Pillow
+            uv run python -c "import os; from PIL import Image; icon_path = os.environ.get('ICON_PATH'); os.makedirs('dist/wrapper/usr/share/pixmaps', exist_ok=True); Image.open(icon_path).save('dist/wrapper/usr/share/pixmaps/xjtutoolbox.png', format='PNG')"
+            echo "::endgroup::"
+
+            echo "::group::3. 执行构建与打包 (ARM64)"
+            uv run build.py
+            cd dist/
+            VERSION=${GITHUB_REF_NAME#v}
+            [ ! \"\$VERSION\" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ] && VERSION=\"1.0.0\"
+            mkdir -p wrapper/usr/bin wrapper/usr/share/applications
+            echo -e '#!/bin/sh\nUSER_DIR=\"\$HOME/.config/XJTUToolbox\"\nmkdir -p \"\$USER_DIR\"\ncd \"\$USER_DIR\" || exit 1\nexec /opt/XJTUToolbox/XJTUToolbox \"\$@\"' > wrapper/usr/bin/xjtutoolbox
+            chmod +x wrapper/usr/bin/xjtutoolbox
+            echo -e '[Desktop Entry]\nName=XJTUToolbox\nExec=xjtutoolbox\nIcon=xjtutoolbox\nType=Application\nCategories=Utility;\nTerminal=false' > wrapper/usr/share/applications/xjtutoolbox.desktop
+            
+            fpm -a arm64 -s dir -t deb -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.deb XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+            fpm -a arm64 -s dir -t rpm -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.rpm XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+            fpm -a arm64 -s dir -t pacman -n xjtutoolbox -v $VERSION -p XJTUToolbox-linux-arm64.pkg.tar.zst XJTUToolbox=/opt/ wrapper/usr/bin/xjtutoolbox=/usr/bin/xjtutoolbox wrapper/usr/share/pixmaps/xjtutoolbox.png=/usr/share/pixmaps/xjtutoolbox.png wrapper/usr/share/applications/xjtutoolbox.desktop=/usr/share/applications/xjtutoolbox.desktop
+            echo "::endgroup::"
+
+            echo "::group::4. 打包 ARM64 AppImage"
+            wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage
+            chmod +x appimagetool
+            mkdir -p AppDir/usr/bin
+            cp -r XJTUToolbox/* AppDir/usr/bin/
+            echo -e '#!/bin/sh\nUSER_DIR=\"\$HOME/.config/XJTUToolbox\"\nmkdir -p \"\$USER_DIR\"\ncd \"\$USER_DIR\" || exit 1\nHERE=\"\$(dirname \"\$(readlink -f \"\${0}\")\")\"\nexec \"\${HERE}/usr/bin/XJTUToolbox\" \"\$@\"' > AppDir/AppRun
+            chmod +x AppDir/AppRun
+            cp wrapper/usr/share/applications/xjtutoolbox.desktop AppDir/
+            cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/
+            cp wrapper/usr/share/pixmaps/xjtutoolbox.png AppDir/.DirIcon
+            
+            # 【外科手术切割】绕过 QEMU 和文件头限制
+            apt-get install -y squashfs-tools
+            
+            # 1. 扫描出 SquashFS 数据块的精确偏移量 (寻找 'hsqs' 魔术头)
+            OFFSET=$(python3 -c "print(open('appimagetool', 'rb').read().find(b'hsqs'))")
+            echo "SquashFS offset found at byte: $OFFSET"
+            
+            # 2. 截掉前缀，生成纯净的 squashfs 压缩镜像
+            tail -c +$((OFFSET + 1)) appimagetool > pure_squashfs.img
+            
+            # 3. 针对纯净镜像解压，绝对不会再报 superblock 错误！
+            unsquashfs -f -d squashfs-root pure_squashfs.img
+            
+            rm -f squashfs-root/usr/lib/libreadline.so* || true
+            ARCH=arm64 ./squashfs-root/AppRun AppDir XJTUToolbox-linux-arm64.AppImage
+            echo "::endgroup::"
+
+      # ★ 新增：上传 arm64 构建产物到 Actions 页面 (QEMU 运行完毕后，文件保留在宿主机的 dist/ 中)
+      - name: Upload Artifacts (arm64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-linux-arm64
+          path: |
+            dist/XJTUToolbox-linux-arm64.deb
+            dist/XJTUToolbox-linux-arm64.rpm
+            dist/XJTUToolbox-linux-arm64.pkg.tar.zst
+            dist/XJTUToolbox-linux-arm64.AppImage
+
+      # ★ 新增：为 arm64 补全 Release 上传步骤
+      - name: Upload & Release (arm64)
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/XJTUToolbox-linux-arm64*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

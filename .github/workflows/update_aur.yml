@@ -1,0 +1,115 @@
+name: Update AUR Packages
+
+on:
+  release:
+    types: [released, published, edited]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '手动触发时，请输入要发布的版本号 (如: v1.2.3)'
+        required: true
+        type: string
+
+jobs:
+  update-aur:
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    
+    env:
+      TARGET_TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+    
+    steps:
+      - name: Checkout GitHub Repository
+        uses: actions/checkout@v4
+
+      # 1. 智能等待：确保 Release 的编译产物已经就绪 (仅针对 -bin 版本需要)
+      - name: Wait for Release Assets to be Ready
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Waiting for compiled assets to appear on release ${{ env.TARGET_TAG }}..."
+          for i in {1..30}; do
+            ASSETS=$(gh release view "${{ env.TARGET_TAG }}" --json assets -q '.assets[].name' || echo "")
+            if echo "$ASSETS" | grep -q "linux-x86_64.pkg.tar.zst" && echo "$ASSETS" | grep -q "linux-arm64.pkg.tar.zst"; then
+              echo "✅ All required assets found! Proceeding with AUR update."
+              exit 0
+            fi
+            echo "⏳ Assets not fully ready yet. Waiting 30 seconds... ($i/30)"
+            sleep 30
+          done
+          echo "❌ Timeout waiting for release assets."
+          exit 1
+
+      # 2. 同步更新三个 PKGBUILD 的版本号
+      - name: Prepare PKGBUILD Versions
+        run: |
+          VERSION="${{ env.TARGET_TAG }}"
+          VERSION="${VERSION#v}" # 去除 'v' 前缀
+          
+          echo "Updating PKGBUILDs to version $VERSION"
+          
+          # 稳定源码版
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/xjtutoolbox/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/xjtutoolbox/PKGBUILD
+          
+          # 预编译版
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/xjtutoolbox-bin/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/xjtutoolbox-bin/PKGBUILD
+
+          # Git 源码版
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/xjtutoolbox-git/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/xjtutoolbox-git/PKGBUILD
+
+      # 3. 在干净的 Arch 容器中生成 .SRCINFO (AUR 必备元数据)
+      - name: Generate .SRCINFO and Checksums
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/work archlinux:base-devel bash -c "
+            pacman -Syu --noconfirm pacman-contrib sudo git
+            useradd -m builder
+            echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            chown -R builder:builder /work
+            
+            echo 'Processing xjtutoolbox (Source)...'
+            cd /work/aur/xjtutoolbox
+            su builder -c 'updpkgsums && makepkg --printsrcinfo > .SRCINFO'
+            
+            echo 'Processing xjtutoolbox-bin (Binary)...'
+            cd /work/aur/xjtutoolbox-bin
+            su builder -c 'updpkgsums && makepkg --printsrcinfo > .SRCINFO'
+
+            echo 'Processing xjtutoolbox-git (Git Master)...'
+            cd /work/aur/xjtutoolbox-git
+            # Git 包的 checksums 通常是 SKIP，但运行 updpkgsums 是安全且规范的
+            su builder -c 'updpkgsums && makepkg --printsrcinfo > .SRCINFO'
+          "
+
+      # 4. 发布到三个不同的 AUR 仓库
+      - name: Publish to AUR (xjtutoolbox)
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: xjtutoolbox
+          pkgbuild: ./aur/xjtutoolbox/PKGBUILD
+          commit_username: "github-actions[bot]"
+          commit_email: "github-actions[bot]@users.noreply.github.com"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
+
+      - name: Publish to AUR (xjtutoolbox-bin)
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: xjtutoolbox-bin
+          pkgbuild: ./aur/xjtutoolbox-bin/PKGBUILD
+          commit_username: "github-actions[bot]"
+          commit_email: "github-actions[bot]@users.noreply.github.com"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
+
+      - name: Publish to AUR (xjtutoolbox-git)
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: xjtutoolbox-git
+          pkgbuild: ./aur/xjtutoolbox-git/PKGBUILD
+          commit_username: "github-actions[bot]"
+          commit_email: "github-actions[bot]@users.noreply.github.com"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"

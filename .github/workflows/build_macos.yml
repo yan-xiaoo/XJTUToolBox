@@ -1,0 +1,99 @@
+name: Build & Release MacOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  PYTHONUTF8: 1
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          # 完全恢复你要求的 macos-15-intel
+          - os: 'macos-15-intel'
+          - os: 'macos-latest'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install UV
+        uses: astral-sh/setup-uv@v5
+        
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+        
+      - name: Build Application
+        run: uv run build.py
+        
+      # 1. 生成 ZIP 文件 (完全保留你原来的代码)
+      - name: Archive(macOS)
+        run: |
+          ls dist/
+          arch=`uname -m`
+          cd dist/ && zip XJTUToolbox-macOS-${arch}.zip -r XJTUToolbox.app/
+
+      # 2. 生成 DMG 文件 (新增，直接生成，不套 zip)
+      - name: Create DMG
+        run: |
+          cd dist/
+          arch=`uname -m`
+          DMG_NAME="XJTUToolbox-macOS-${arch}.dmg"
+          
+          if [ ! -d "XJTUToolbox.app" ]; then
+            echo "Error: XJTUToolbox.app not found!"
+            exit 1
+          fi
+
+          create-dmg \
+            --volname "XJTUToolbox Installer" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --app-drop-link 600 185 \
+            "$DMG_NAME" \
+            "XJTUToolbox.app"
+
+      # 上传 Artifacts (同时包含 .zip 和 .dmg)
+      - name: Upload Artifacts(macOS)
+        uses: actions/upload-artifact@v4
+        with:
+          name: XJTUToolbox-macOS-${{ runner.arch }}
+          path: |
+            ./dist/XJTUToolbox-macOS-*.zip
+            ./dist/XJTUToolbox-macOS-*.dmg
+
+      # 清理文件夹 (利用 extglob 同时保留 zip 和 dmg)
+      - name: Cleanup Folder(macOS)
+        run: |
+          shopt -s extglob
+          rm -rf ./dist/!(XJTUToolbox-macOS-*.zip|XJTUToolbox-macOS-*.dmg)
+
+      # 发布 Release (将两个文件一起挂载到 Release 页面)
+      - name: Prerelease app
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: XJTUToolbox ${{ github.ref_name }}
+          prerelease: true
+          files: |
+            ./dist/XJTUToolbox-macOS-*.zip
+            # ./dist/XJTUToolbox-macOS-*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
