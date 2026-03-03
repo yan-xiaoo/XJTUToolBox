@@ -5,6 +5,8 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "v*.*.*-*"
+      - "v*.*.*.*"
 
 env:
   PYTHONUTF8: 1
