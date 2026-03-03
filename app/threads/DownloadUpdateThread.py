@@ -1,8 +1,10 @@
 import os
+import platform
 import time
 from typing import List, Optional
 
 import requests
+from PyQt5.QtCore import QStandardPaths
 
 from app.components.ProgressInfoBar import ProgressBarThread
 from app.utils import CACHE_DIRECTORY, logger
@@ -12,7 +14,14 @@ class DownloadUpdateThread(ProgressBarThread):
     def __init__(self, download_url: List[str], download_file_path: Optional[str] = None, total_size: Optional[int] = None, parent=None):
         super().__init__(parent)
         if download_file_path is None:
-            download_file_path = os.path.join(CACHE_DIRECTORY, "update.zip")
+            # 对于 MacOS：将更新 dmg 文件下载到”下载“目录下
+            # 对于 Windows：将更新 zip 文件下载到缓存目录下
+            if platform.system() == "Darwin":
+                # 通过一个随机的后缀来避免下载过程中可能出现的文件名冲突
+                random_bytes = os.urandom(2).hex()
+                download_file_path = os.path.join(QStandardPaths.writableLocation(QStandardPaths.DownloadLocation), f"XJTUToolBox_{random_bytes}.dmg")
+            else:
+                download_file_path = os.path.join(CACHE_DIRECTORY, "update.zip")
 
         self.download_file_path = download_file_path
         self.download_urls = download_url

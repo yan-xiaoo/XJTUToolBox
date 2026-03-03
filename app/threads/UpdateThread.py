@@ -4,7 +4,7 @@ import os.path
 import subprocess
 import sys
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl, QStandardPaths
 from PyQt5.QtGui import QDesktopServices
 from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox
 
@@ -154,14 +154,14 @@ def checkUpdate(self, timeout=5):
             elif system == "Darwin":
                 box = MessageBox(
                     self.tr("更新下载完成"),
-                    self.tr("由于 macOS 系统限制，我们无法自动完成更新，请自行解压下载的文件，将其拖动到「应用程序」文件夹中覆盖当前版本，"
+                    self.tr("由于 macOS 系统限制，我们无法自动完成更新。请通过下载的 dmg 镜像自行安装新版本程序，"
                             "然后重新启动程序。"),
                     parent=self.window()
                 )
                 box.yesButton.setText(self.tr("退出程序"))
                 box.cancelButton.setText(self.tr("暂不退出"))
                 if box.exec():
-                    QDesktopServices.openUrl(QUrl("file:///" + CACHE_DIRECTORY))
+                    QDesktopServices.openUrl(QUrl("file:///" + QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)))
                     sys.exit(0)
         else:
             InfoBar.error(

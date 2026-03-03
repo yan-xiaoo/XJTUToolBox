@@ -62,14 +62,15 @@ jobs:
           fi
 
           create-dmg \
-            --volname "XJTUToolbox Installer" \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --app-drop-link 600 185 \
-            "$DMG_NAME" \
-            "XJTUToolbox.app"
-
+          --volname "XJTUToolBox" \
+          --background "assets/icons/dmg_background@2x.png" \
+          --window-size 600 430 \
+          --icon-size 128 \
+          --icon "XJTUToolbox.app" 147 250 \
+          --hide-extension "XJTUToolbox.app" \
+          --app-drop-link 436 252 \
+          "$DMG_NAME" \
+          "XJTUToolbox.app"
       # 上传 Artifacts (同时包含 .zip 和 .dmg)
       - name: Upload Artifacts(macOS)
         uses: actions/upload-artifact@v4
@@ -85,7 +86,7 @@ jobs:
           shopt -s extglob
           rm -rf ./dist/!(XJTUToolbox-macOS-*.zip|XJTUToolbox-macOS-*.dmg)
 
-      # 发布 Release (将两个文件一起挂载到 Release 页面)
+      # 发布 Release （只挂载 dmg 文件）
       - name: Prerelease app
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
@@ -93,7 +94,6 @@ jobs:
           name: XJTUToolbox ${{ github.ref_name }}
           prerelease: true
           files: |
-            ./dist/XJTUToolbox-macOS-*.zip
-            # ./dist/XJTUToolbox-macOS-*.dmg
+            ./dist/XJTUToolbox-macOS-*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
