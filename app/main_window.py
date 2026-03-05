@@ -28,9 +28,11 @@ from .sessions.jwxt_session import JWXTSession
 from .sessions.gmis_session import GMISSession
 from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
+from .sessions.lms_session import LMSSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.EmptyRoomInterface import EmptyRoomInterface
+from .sub_interfaces.LMSInterface import LMSInterface
 from .sub_interfaces.NoticeInterface import NoticeInterface
 from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
@@ -49,6 +51,7 @@ def registerSession():
     SessionManager.global_register(JwappSession, "jwapp")
     SessionManager.global_register(GMISSession, "gmis")
     SessionManager.global_register(GSTESession, "gste")
+    SessionManager.global_register(LMSSession, "lms")
 
 
 class MacReopenFilter(QObject):
@@ -154,6 +157,8 @@ class MainWindow(MSFluentWindow):
         QApplication.processEvents()
         self.empty_room_interface = EmptyRoomInterface(self)
         QApplication.processEvents()
+        self.lms_interface = LMSInterface(self)
+        QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
         self.tray_interface.main_interface.connect(lambda: self.show())
@@ -171,6 +176,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.schedule_interface, FIF.CALENDAR, self.tr("课表"))
         self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
         self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
+        self.addSubInterface(self.lms_interface, FIF.BOOK_SHELF, self.tr("思源学堂"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",
