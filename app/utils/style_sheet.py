@@ -23,6 +23,7 @@ class StyleSheet(StyleSheetBase, Enum):
     NOTICE_INTERFACE = "notice_interface"
     NOTICE_SETTING_INTERFACE = "notice_setting_interface"
     EMPTY_ROOM_INTERFACE = "empty_room_interface"
+    LMS_INTERFACE = "lms_interface"
 
     def path(self, theme=Theme.AUTO):
         theme = cfg.theme if theme == Theme.AUTO else theme

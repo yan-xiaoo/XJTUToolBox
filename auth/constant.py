@@ -6,8 +6,8 @@
 JWXT_LOGIN_URL = "https://jwxt.xjtu.edu.cn/jwapp/sys/homeapp/index.do"
 # webvpn 登录地址
 WEBVPN_LOGIN_URL = "https://webvpn.xjtu.edu.cn/login?cas_login=true"
-# 思源学堂登录地址
-BB_LOGIN_URL = "https://cas.xjtu.edu.cn/login?TARGET=https%3A%2F%2Fbb.xjtu.edu.cn%2Fwebapps%2Fbb-SSOIntegrationDemo-BBLEARN%2Findex.jsp"
+# 思源学堂（新版）登录地址
+LMS_LOGIN_URL = "lms.xjtu.edu.cn"
 # 本科生考勤系统登录地址
 # 都 2024 年了，本科考勤系统还是不支持 https，所以这里的地址是 http 的。
 ATTENDANCE_URL = "http://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1372&redirectUri=http://bkkq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
@@ -26,7 +26,6 @@ JWAPP_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1370&red
 # 网站为 https://ywtb.xjtu.edu.cn/
 # 这边直接用网站名称当变量名了
 YWTB_LOGIN_URL = "https://login.xjtu.edu.cn/cas/login?service=https%3A%2F%2Fywtb.xjtu.edu.cn%2F%3Fpath%3Dhttps%253A%252F%252Fywtb.xjtu.edu.cn%252Fmain.html%2523%252FIndex"
-
 
 # 研究生管理信息系统（Graduate Management Information System, gmis）的登录地址
 # 网站为 https://gmis.xjtu.edu.cn/
