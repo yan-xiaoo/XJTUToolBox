@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Any, Literal, Mapping, NotRequired, TypedDict, cast
+from typing import Any, Literal, Mapping, NotRequired, TypedDict, cast, Optional
 from urllib.parse import parse_qs, urlparse
 
 from requests import Session
@@ -309,7 +309,13 @@ class LMSUtil:
         if not isinstance(courses, list):
             raise ValueError("Unexpected response from /api/my-courses: 'courses' is not a list.")
 
-        extracted_courses = [self._extract_course_summary(one) for one in courses if isinstance(one, dict)]
+        extracted_courses = []
+        for one in courses:
+            if isinstance(one, dict):
+                result = self._extract_course_summary(one)
+                if result is not None:
+                    extracted_courses.append(result)
+
         return cast(LMSCourseListResponse, {"courses": extracted_courses})
 
     def get_my_courses(self) -> list[LMSCourseSummary]:
@@ -543,7 +549,7 @@ class LMSUtil:
         self._replay_video_cache[replay_code] = list(result)
         return result
 
-    def _extract_course_summary(self, course: Mapping[str, Any]) -> LMSCourseSummary:
+    def _extract_course_summary(self, course: Mapping[str, Any]) -> Optional[LMSCourseSummary]:
         instructors_raw = course.get("instructors", [])
         instructors = [
             {
@@ -558,6 +564,10 @@ class LMSUtil:
         semester = course.get("semester", {})
         department = course.get("department", {})
         course_attributes = course.get("course_attributes", {})
+
+        # 有一些不完整课程的 academic_year 或 semester 可能是 None。我们忽略这些课程。
+        if academic_year is None or semester is None or department is None or course_attributes is None:
+            return None
 
         return cast(
             LMSCourseSummary,
