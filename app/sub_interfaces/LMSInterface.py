@@ -2,9 +2,9 @@ import os
 import re
 from urllib.parse import urlparse, unquote
 
-from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths
+from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths, QTimer
 from PyQt5.QtGui import QDesktopServices, QFont
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QStackedWidget, QTableWidgetItem, \
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QTableWidgetItem, \
     QFileDialog, QLabel, QSizePolicy
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, PrimaryPushButton, PushButton, TableWidget, \
     InfoBar, InfoBarPosition, CaptionLabel, BodyLabel, isDarkTheme, Pivot, IndeterminateProgressBar
@@ -85,25 +85,31 @@ class LMSInterface(ScrollArea):
         self._current_detail_uploads: list[dict] = []
         self._current_submission: dict | None = None
         self._download_jobs: list[tuple[ProgressInfoBar, LMSFileDownloadThread]] = []
-        self.activity_type_filter = "all"
+        self.activity_type_filter = "homework"
 
         self.view = QWidget(self)
         self.setObjectName("LMSInterface")
         self.view.setObjectName("view")
         self.vBoxLayout = QVBoxLayout(self.view)
+        self.vBoxLayout.setAlignment(Qt.AlignTop)
 
         self.titleLabel = TitleLabel(self.tr("思源学堂"), self.view)
         self.titleLabel.setContentsMargins(10, 15, 0, 0)
+        self.titleLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.titleLabel.setObjectName("titleLabel")
         self.vBoxLayout.addWidget(self.titleLabel)
 
         self.minorLabel = StrongBodyLabel(self.tr("选择课程、查看活动并浏览详细内容"), self.view)
         self.minorLabel.setContentsMargins(15, 5, 0, 0)
+        self.minorLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.vBoxLayout.addWidget(self.minorLabel)
         self.vBoxLayout.addSpacing(10)
 
-        self.stackedWidget = QStackedWidget(self)
-        self.vBoxLayout.addWidget(self.stackedWidget, stretch=1)
+        self.pageHost = QWidget(self.view)
+        self.pageLayout = QVBoxLayout(self.pageHost)
+        self.pageLayout.setContentsMargins(0, 0, 0, 0)
+        self.pageLayout.setSpacing(0)
+        self.vBoxLayout.addWidget(self.pageHost)
 
         self.thread = LMSThread()
         self.processWidget = ProcessWidget(self.thread, self.view, stoppable=True, hide_on_end=True)
@@ -133,8 +139,10 @@ class LMSInterface(ScrollArea):
     def _initCoursePage(self):
         self.coursePage = QFrame(self)
         layout = QVBoxLayout(self.coursePage)
+        layout.setAlignment(Qt.AlignTop)
 
         commandFrame = QFrame(self.coursePage)
+        commandFrame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         commandLayout = QHBoxLayout(commandFrame)
 
         self.refreshCoursesButton = PrimaryPushButton(self.tr("刷新课程"), commandFrame)
@@ -156,15 +164,9 @@ class LMSInterface(ScrollArea):
         self.courseTable.setHorizontalHeaderLabels([
             self.tr("课程"), self.tr("学年学期"), self.tr("任课教师"), self.tr("学分"), self.tr("发布"), self.tr("教学班")
         ])
-        self.courseTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.courseTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.courseTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.courseTable.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.courseTable.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.courseTable.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.courseTable.setColumnWidth(5, 230)
+        self.apply_full_width_column_width(self.courseTable)
         self.courseTable.verticalHeader().setVisible(False)
-        self.courseTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.courseTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.courseTable.setMinimumHeight(0)
         self.courseTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.courseTable.setSelectionMode(TableWidget.SelectionMode.SingleSelection)
@@ -176,16 +178,18 @@ class LMSInterface(ScrollArea):
 
         layout.addWidget(commandFrame)
         layout.addWidget(self.userInfoLabel)
-        layout.addWidget(self.courseTable, stretch=1)
+        layout.addWidget(self.courseTable)
         layout.addWidget(self.courseLoadingFrame)
 
-        self.stackedWidget.addWidget(self.coursePage)
+        self.pageLayout.addWidget(self.coursePage)
 
     def _initActivityPage(self):
         self.activityPage = QFrame(self)
         layout = QVBoxLayout(self.activityPage)
+        layout.setAlignment(Qt.AlignTop)
 
         commandFrame = QFrame(self.activityPage)
+        commandFrame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         commandLayout = QHBoxLayout(commandFrame)
         self.backToCourseButton = PushButton(self.tr("返回课程"), commandFrame)
         self.refreshActivitiesButton = PrimaryPushButton(self.tr("刷新活动"), commandFrame)
@@ -198,12 +202,11 @@ class LMSInterface(ScrollArea):
         commandLayout.addStretch(1)
 
         self.activityTypePivot = Pivot(self.activityPage)
-        self.activityTypePivot.addItem("all", self.tr("全部"), onClick=lambda: self.onActivityTypeChanged("all"))
         self.activityTypePivot.addItem("homework", self.tr("作业"), onClick=lambda: self.onActivityTypeChanged("homework"))
         self.activityTypePivot.addItem("material", self.tr("资料"), onClick=lambda: self.onActivityTypeChanged("material"))
         self.activityTypePivot.addItem("lesson", self.tr("课程回放"), onClick=lambda: self.onActivityTypeChanged("lesson"))
         self.activityTypePivot.addItem("lecture_live", self.tr("直播"), onClick=lambda: self.onActivityTypeChanged("lecture_live"))
-        self.activityTypePivot.setCurrentItem("all")
+        self.activityTypePivot.setCurrentItem(self.activity_type_filter)
 
         self.activityTable = TableWidget(self.activityPage)
         self.activityTable.setRowCount(0)
@@ -211,13 +214,9 @@ class LMSInterface(ScrollArea):
         self.activityTable.setHorizontalHeaderLabels([
             self.tr("活动"), self.tr("开始时间"), self.tr("结束时间"), self.tr("发布"), self.tr("状态")
         ])
-        self.activityTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.activityTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.activityTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.activityTable.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.activityTable.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.apply_full_width_column_width(self.activityTable)
         self.activityTable.verticalHeader().setVisible(False)
-        self.activityTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.activityTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.activityTable.setMinimumHeight(0)
         self.activityTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.activityTable.setSelectionMode(TableWidget.SelectionMode.SingleSelection)
@@ -229,10 +228,10 @@ class LMSInterface(ScrollArea):
 
         layout.addWidget(commandFrame)
         layout.addWidget(self.activityTypePivot)
-        layout.addWidget(self.activityTable, stretch=1)
+        layout.addWidget(self.activityTable)
         layout.addWidget(self.activityLoadingFrame)
 
-        self.stackedWidget.addWidget(self.activityPage)
+        self.pageLayout.addWidget(self.activityPage)
 
     def _initDetailPage(self):
         self.detailPage = QFrame(self)
@@ -253,15 +252,14 @@ class LMSInterface(ScrollArea):
         self.detailTitleLabel = TitleLabel("-", self.detailPage)
         self.detailTitleLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-        self.detailInfoLabel = self.create_section_title(self.tr("活动信息"), self.detailPage)
+        self.detailInfoLabel = self.create_section_title(self.tr("详细信息"), self.detailPage)
 
         self.detailInfoTable = TableWidget(self.detailPage)
         self.detailInfoTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.detailInfoTable.setColumnCount(2)
         self.detailInfoTable.horizontalHeader().setVisible(False)
         self.detailInfoTable.verticalHeader().setVisible(False)
-        self.detailInfoTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.detailInfoTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.apply_default_column_width(self.detailInfoTable)
         self.detailInfoTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.detailInfoTable.setSelectionMode(TableWidget.SelectionMode.NoSelection)
 
@@ -288,10 +286,7 @@ class LMSInterface(ScrollArea):
         self.detailSubmissionTable.setHorizontalHeaderLabels([
             self.tr("得分"), self.tr("提交时间"), self.tr("更新时间"), self.tr("详情")
         ])
-        self.detailSubmissionTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.detailSubmissionTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.detailSubmissionTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.detailSubmissionTable.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.apply_default_column_width(self.detailSubmissionTable)
         self.detailSubmissionTable.verticalHeader().setVisible(False)
         self.detailSubmissionTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.detailSubmissionTable.setSelectionMode(TableWidget.SelectionMode.NoSelection)
@@ -300,14 +295,11 @@ class LMSInterface(ScrollArea):
         self.detailReplayLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.detailReplayTable = TableWidget(self.detailPage)
         self.detailReplayTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.detailReplayTable.setColumnCount(4)
+        self.detailReplayTable.setColumnCount(3)
         self.detailReplayTable.setHorizontalHeaderLabels([
-            self.tr("视频"), self.tr("文件大小"), self.tr("查看"), self.tr("另存为")
+            self.tr("视频"), self.tr("文件大小"), self.tr("另存为")
         ])
-        self.detailReplayTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.detailReplayTable.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.detailReplayTable.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.detailReplayTable.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.apply_default_column_width(self.detailReplayTable)
         self.detailReplayTable.verticalHeader().setVisible(False)
         self.detailReplayTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.detailReplayTable.setSelectionMode(TableWidget.SelectionMode.NoSelection)
@@ -328,7 +320,7 @@ class LMSInterface(ScrollArea):
         layout.addWidget(self.detailReplayLabel)
         layout.addWidget(self.detailReplayTable)
         layout.addWidget(self.detailLoadingFrame)
-        self.stackedWidget.addWidget(self.detailPage)
+        self.pageLayout.addWidget(self.detailPage)
 
     def _initSubmissionDetailPage(self):
         self.submissionPage = QFrame(self)
@@ -370,7 +362,7 @@ class LMSInterface(ScrollArea):
         self.submissionUploadsTable = self.create_upload_table(self.submissionPage)
         self.submissionUploadsTable.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        self.submissionCorrectTitle = self.create_section_title(self.tr("批阅附件（submission_correct）"), self.submissionPage)
+        self.submissionCorrectTitle = self.create_section_title(self.tr("批阅附件"), self.submissionPage)
         self.submissionCorrectTitle.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.submissionCorrectTable = self.create_upload_table(self.submissionPage)
         self.submissionCorrectTable.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -385,7 +377,7 @@ class LMSInterface(ScrollArea):
         layout.addWidget(self.submissionUploadsTable)
         layout.addWidget(self.submissionCorrectTitle)
         layout.addWidget(self.submissionCorrectTable)
-        self.stackedWidget.addWidget(self.submissionPage)
+        self.pageLayout.addWidget(self.submissionPage)
 
     def create_loading_frame(self, parent: QWidget) -> QFrame:
         frame = QFrame(parent)
@@ -400,13 +392,14 @@ class LMSInterface(ScrollArea):
         return frame
 
     def switchPage(self, page: QWidget):
-        self.stackedWidget.setCurrentWidget(page)
-        is_list_page = page in (self.coursePage, self.activityPage)
-        vertical_policy = QSizePolicy.Ignored if is_list_page else QSizePolicy.Preferred
-        self.stackedWidget.setSizePolicy(QSizePolicy.Expanding, vertical_policy)
-        self.stackedWidget.updateGeometry()
+        pages = (self.coursePage, self.activityPage, self.detailPage, self.submissionPage)
+        for one in pages:
+            one.setVisible(one is page)
+
+        self.pageHost.adjustSize()
         self.view.adjustSize()
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.verticalScrollBar().setValue(0)
 
     def show_loading(self, page: QWidget, show: bool):
         mapping = {
@@ -427,13 +420,9 @@ class LMSInterface(ScrollArea):
 
     def create_upload_table(self, parent: QWidget) -> TableWidget:
         table = TableWidget(parent)
-        table.setColumnCount(5)
-        table.setHorizontalHeaderLabels([self.tr("名称"), self.tr("大小"), self.tr("查看"), self.tr("另存为"), self.tr("链接")])
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels([self.tr("名称"), self.tr("大小"), self.tr("另存为")])
+        self.apply_default_column_width(table)
         table.verticalHeader().setVisible(False)
         table.setWordWrap(True)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -441,6 +430,18 @@ class LMSInterface(ScrollArea):
         table.setEditTriggers(TableWidget.NoEditTriggers)
         table.setSelectionMode(TableWidget.SelectionMode.NoSelection)
         return table
+
+    @staticmethod
+    def apply_default_column_width(table: TableWidget):
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
+
+    @staticmethod
+    def apply_full_width_column_width(table: TableWidget):
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setStretchLastSection(True)
 
     def create_section_title(self, text: str, parent: QWidget) -> StrongBodyLabel:
         label = StrongBodyLabel(text, parent)
@@ -453,12 +454,12 @@ class LMSInterface(ScrollArea):
     @staticmethod
     def update_table_height(table: TableWidget, min_rows: int = 0, min_height: int = 38):
         header_h = table.horizontalHeader().height() if table.horizontalHeader().isVisible() else 0
-        total_rows = max(table.rowCount(), min_rows)
-        rows_h = 0
-        for i in range(total_rows):
-            rows_h += table.rowHeight(i) if i < table.rowCount() else table.verticalHeader().defaultSectionSize()
+        if table.rowCount() > 0:
+            rows_h = table.verticalHeader().length()
+        else:
+            rows_h = table.verticalHeader().defaultSectionSize() * min_rows
         frame_h = table.frameWidth() * 2
-        scrollbar_h = table.horizontalScrollBar().height() if table.horizontalScrollBar().isVisible() else 0
+        scrollbar_h = table.horizontalScrollBar().sizeHint().height() if table.horizontalScrollBar().isVisible() else 0
         table.setFixedHeight(max(header_h + rows_h + frame_h + scrollbar_h + 2, min_height))
 
     def lock(self):
@@ -562,6 +563,9 @@ class LMSInterface(ScrollArea):
             self.courseTable.setItem(row, 4, QTableWidgetItem(self.bool_text(course_attr.get("published"))))
             self.courseTable.setItem(row, 5, QTableWidgetItem(str(course_attr.get("teaching_class_name") or "-")))
 
+        self.courseTable.resizeRowsToContents()
+        self.update_table_height(self.courseTable, min_rows=1, min_height=140)
+
         if courses:
             self.success(self.tr("加载完成"), self.tr("已获取 {0} 门课程").format(len(courses)), parent=self)
         else:
@@ -578,8 +582,8 @@ class LMSInterface(ScrollArea):
 
         self.selected_course_id = course_id
         self.selected_course_name = str(course.get("name") or "-")
-        self.activityTypePivot.setCurrentItem("all")
-        self.activity_type_filter = "all"
+        self.activity_type_filter = "homework"
+        self.activityTypePivot.setCurrentItem(self.activity_type_filter)
         self.activityTable.setRowCount(0)
         self.refreshActivities()
 
@@ -589,7 +593,7 @@ class LMSInterface(ScrollArea):
         if self.selected_course_id != course_id:
             return
         self._activities = activities
-        self.filter_activities("all")
+        self.filter_activities(self.activity_type_filter)
         self.switchPage(self.activityPage)
         if not activities:
             self.success(self.tr("无活动"), self.tr("该课程暂无可显示活动"), parent=self)
@@ -599,10 +603,7 @@ class LMSInterface(ScrollArea):
         self.filter_activities(key)
 
     def filter_activities(self, key: str):
-        if key == "all":
-            self._filtered_activities = list(self._activities)
-        else:
-            self._filtered_activities = [one for one in self._activities if str(one.get("type") or "") == key]
+        self._filtered_activities = [one for one in self._activities if str(one.get("type") or "") == key]
 
         self.activityTable.setRowCount(len(self._filtered_activities))
         for row, activity in enumerate(self._filtered_activities):
@@ -611,6 +612,9 @@ class LMSInterface(ScrollArea):
             self.activityTable.setItem(row, 2, QTableWidgetItem(self.time_text(activity.get("end_time"))))
             self.activityTable.setItem(row, 3, QTableWidgetItem(self.bool_text(activity.get("published"))))
             self.activityTable.setItem(row, 4, QTableWidgetItem(self.activity_status_text(activity)))
+
+        self.activityTable.resizeRowsToContents()
+        self.update_table_height(self.activityTable, min_rows=1, min_height=140)
 
     @pyqtSlot(int, int)
     def onActivityClicked(self, row: int, _column: int):
@@ -668,6 +672,8 @@ class LMSInterface(ScrollArea):
     def onCurrentAccountChanged(self):
         self.courseTable.setRowCount(0)
         self.activityTable.setRowCount(0)
+        self.update_table_height(self.courseTable, min_rows=1, min_height=140)
+        self.update_table_height(self.activityTable, min_rows=1, min_height=140)
         self.populate_info_table(self.detailInfoTable, [(self.tr("提示"), self.tr("请选择一个活动查看详情"))])
         self.detailRichContent.setVisible(False)
         self.detailRichTitle.setVisible(False)
@@ -704,7 +710,7 @@ class LMSInterface(ScrollArea):
         self.detailSubmissionLabel.setVisible(visible)
         self.detailSubmissionTable.setVisible(visible)
         self.detailSubmissionTable.resizeRowsToContents()
-        self.update_table_height(self.detailSubmissionTable, min_rows=0, min_height=140)
+        self.update_table_height(self.detailSubmissionTable, min_rows=0, min_height=38)
 
     def _set_replay_rows(self, replay_videos):
         rows = [one for one in replay_videos if isinstance(one, dict)] if isinstance(replay_videos, list) else []
@@ -713,19 +719,15 @@ class LMSInterface(ScrollArea):
             self.detailReplayTable.setItem(row, 0, QTableWidgetItem(self.safe_text(video.get("label"))))
             self.detailReplayTable.setItem(row, 1, QTableWidgetItem(self.format_size(video.get("size"))))
 
-            view_btn = PushButton(self.tr("查看"), self.detailReplayTable)
-            view_btn.clicked.connect(lambda _=False, one=video: self._open_file(one))
-            self.detailReplayTable.setCellWidget(row, 2, view_btn)
-
             save_btn = PushButton(self.tr("另存为"), self.detailReplayTable)
             save_btn.clicked.connect(lambda _=False, one=video: self._save_file(one))
-            self.detailReplayTable.setCellWidget(row, 3, save_btn)
+            self.detailReplayTable.setCellWidget(row, 2, save_btn)
 
         visible = len(rows) > 0
         self.detailReplayLabel.setVisible(visible)
         self.detailReplayTable.setVisible(visible)
         self.detailReplayTable.resizeRowsToContents()
-        self.update_table_height(self.detailReplayTable, min_rows=0, min_height=140)
+        self.update_table_height(self.detailReplayTable, min_rows=0, min_height=38)
 
     def show_submission_page(self, submission: dict):
         self._current_submission = submission
@@ -740,17 +742,24 @@ class LMSInterface(ScrollArea):
         self.submissionInstructorLabel.setVisible(has_instructor)
 
         sub_uploads = submission.get("uploads", []) if isinstance(submission.get("uploads"), list) else []
-        self.populate_upload_table(self.submissionUploadsTable, sub_uploads)
-        self.submissionUploadsTitle.setVisible(len(sub_uploads) > 0)
-        self.submissionUploadsTable.setVisible(len(sub_uploads) > 0)
+        sub_upload_count = self.populate_upload_table(self.submissionUploadsTable, sub_uploads)
+        self.submissionUploadsTitle.setVisible(sub_upload_count > 0)
+        self.submissionUploadsTable.setVisible(sub_upload_count > 0)
 
         submission_correct = submission.get("submission_correct", {}) if isinstance(submission.get("submission_correct"), dict) else {}
         correct_uploads = submission_correct.get("uploads", []) if isinstance(submission_correct.get("uploads"), list) else []
-        self.populate_upload_table(self.submissionCorrectTable, correct_uploads)
-        self.submissionCorrectTitle.setVisible(len(correct_uploads) > 0)
-        self.submissionCorrectTable.setVisible(len(correct_uploads) > 0)
+        correct_upload_count = self.populate_upload_table(self.submissionCorrectTable, correct_uploads)
+        self.submissionCorrectTitle.setVisible(correct_upload_count > 0)
+        self.submissionCorrectTable.setVisible(correct_upload_count > 0)
 
         self.switchPage(self.submissionPage)
+        QTimer.singleShot(0, self._refresh_submission_upload_table_heights)
+
+    def _refresh_submission_upload_table_heights(self):
+        for table in (self.submissionUploadsTable, self.submissionCorrectTable):
+            if table.isVisible():
+                table.resizeRowsToContents()
+                self.update_table_height(table, min_rows=0, min_height=38)
 
     def _open_file(self, file_info: dict):
         url = file_info.get("preview_url") or file_info.get("download_url")
@@ -794,30 +803,24 @@ class LMSInterface(ScrollArea):
     def _cleanup_download_job(self, bar: ProgressInfoBar, thread: LMSFileDownloadThread):
         self._download_jobs = [one for one in self._download_jobs if one != (bar, thread)]
 
-    def populate_upload_table(self, table: TableWidget, uploads):
+    def populate_upload_table(self, table: TableWidget, uploads) -> int:
         rows = [one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else []
         table.setRowCount(len(rows))
         for row, upload in enumerate(rows):
             table.setItem(row, 0, QTableWidgetItem(self.safe_text(upload.get("name"))))
             table.setItem(row, 1, QTableWidgetItem(self.format_size(upload.get("size"))))
 
-            view_btn = PushButton(self.tr("查看"), table)
-            view_btn.clicked.connect(lambda _=False, one=upload: self._open_file(one))
-            table.setCellWidget(row, 2, view_btn)
-
             save_btn = PushButton(self.tr("另存为"), table)
             save_btn.clicked.connect(lambda _=False, one=upload: self._save_file(one))
-            table.setCellWidget(row, 3, save_btn)
-
-            link_text = upload.get("preview_url") or upload.get("download_url") or "-"
-            table.setItem(row, 4, QTableWidgetItem(self.safe_text(link_text)))
+            table.setCellWidget(row, 2, save_btn)
 
         if table is self.detailUploadsTable:
             visible = len(rows) > 0
             self.detailUploadsTable.setVisible(visible)
 
         table.resizeRowsToContents()
-        self.update_table_height(table, min_rows=0, min_height=140)
+        self.update_table_height(table, min_rows=0, min_height=38)
+        return len(rows)
 
     def populate_info_table(self, table: TableWidget, rows: list[tuple[str, object]]):
         table.setRowCount(len(rows))
@@ -853,6 +856,9 @@ class LMSInterface(ScrollArea):
                 (self.tr("开始时间"), self.time_text(detail.get("start_time"))),
                 (self.tr("结束时间"), self.time_text(detail.get("end_time"))),
                 (self.tr("提交方式"), self.tr("小组") if detail.get("submit_by_group") else self.tr("个人")),
+                (self.tr("最高分"), detail.get("highest_score")),
+                (self.tr("最低分"), detail.get("lowest_score")),
+                (self.tr("平均分"), detail.get("average_score")),
             ], self.safe_text(detail.get("description"))
 
         if type_name == "material":
