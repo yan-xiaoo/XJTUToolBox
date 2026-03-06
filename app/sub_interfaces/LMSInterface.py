@@ -164,7 +164,7 @@ class LMSInterface(ScrollArea):
         self.courseTable.setHorizontalHeaderLabels([
             self.tr("课程"), self.tr("学年学期"), self.tr("任课教师"), self.tr("学分"), self.tr("发布"), self.tr("教学班")
         ])
-        self.apply_default_column_width(self.courseTable)
+        self.apply_full_width_column_width(self.courseTable)
         self.courseTable.verticalHeader().setVisible(False)
         self.courseTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.courseTable.setMinimumHeight(0)
@@ -214,7 +214,7 @@ class LMSInterface(ScrollArea):
         self.activityTable.setHorizontalHeaderLabels([
             self.tr("活动"), self.tr("开始时间"), self.tr("结束时间"), self.tr("发布"), self.tr("状态")
         ])
-        self.apply_default_column_width(self.activityTable)
+        self.apply_full_width_column_width(self.activityTable)
         self.activityTable.verticalHeader().setVisible(False)
         self.activityTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.activityTable.setMinimumHeight(0)
@@ -436,6 +436,12 @@ class LMSInterface(ScrollArea):
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
+
+    @staticmethod
+    def apply_full_width_column_width(table: TableWidget):
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setStretchLastSection(True)
 
     def create_section_title(self, text: str, parent: QWidget) -> StrongBodyLabel:
         label = StrongBodyLabel(text, parent)
