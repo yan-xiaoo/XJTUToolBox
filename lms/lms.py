@@ -136,9 +136,10 @@ class LMSUtil:
         data = self._get_json(f"{self.BASE_URL}/api/activities/{activity_id}")
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from /api/activities/{activity_id}: expected object.")
-        detail = self._extract_activity_detail(data)
+        detail = cast(LMSActivity, self._extract_activity_detail(data))
         if str(detail.get("type")) == ActivityType.HOMEWORK.value:
-            detail["submission_list"] = self._get_submission_list(activity_id, activity_detail=data)
+            submission_list = self._get_submission_list(activity_id, activity_detail=data)
+            detail["submission_list"] = self._inject_submission_marked_attachment_urls(submission_list)
         return detail
 
     def _get_submission_list(
@@ -184,6 +185,75 @@ class LMSUtil:
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from {url}: expected object.")
         return self._extract_submission_list(data)
+
+    def _inject_submission_marked_attachment_urls(
+        self, submission_list: LMSSubmissionListResponse
+    ) -> LMSSubmissionListResponse:
+        submissions = submission_list.get("list", [])
+        if not isinstance(submissions, list):
+            return submission_list
+
+        for submission in submissions:
+            if not isinstance(submission, dict):
+                continue
+
+            submission_id = self._coerce_int(submission.get("id"))
+            if submission_id is None:
+                continue
+
+            try:
+                marked_data = self._get_json(f"{self.BASE_URL}/api/submissions/{submission_id}/marked_attachments")
+            except Exception:
+                # 标注附件仅用于增强显示，不应影响作业详情主流程。
+                continue
+
+            if not isinstance(marked_data, Mapping):
+                continue
+
+            marked_infos = marked_data.get("marked_attachment_infos", [])
+            if not isinstance(marked_infos, list) or not marked_infos:
+                continue
+
+            attachment_map: dict[tuple[str, str], str] = {}
+            for info in marked_infos:
+                if not isinstance(info, Mapping):
+                    continue
+
+                marked_attachment = info.get("marked_attachment")
+                if not isinstance(marked_attachment, Mapping):
+                    continue
+
+                attachment_url = marked_attachment.get("url")
+                if not isinstance(attachment_url, str) or not attachment_url:
+                    continue
+
+                origin_upload = info.get("origin_upload")
+                if not isinstance(origin_upload, Mapping):
+                    continue
+
+                origin_candidates: list[Mapping[str, Any]] = [origin_upload]
+                nested_origin_upload = origin_upload.get("upload")
+                if isinstance(nested_origin_upload, Mapping):
+                    origin_candidates.insert(0, nested_origin_upload)
+
+                for origin_candidate in origin_candidates:
+                    for key in self._build_upload_match_keys(origin_candidate):
+                        attachment_map.setdefault(key, attachment_url)
+
+            uploads = submission.get("uploads", [])
+            if not isinstance(uploads, list):
+                continue
+
+            for upload in uploads:
+                if not isinstance(upload, dict):
+                    continue
+                for key in self._build_upload_match_keys(upload):
+                    resolved_attachment_url = attachment_map.get(key)
+                    if isinstance(resolved_attachment_url, str) and resolved_attachment_url:
+                        upload["attachment_url"] = resolved_attachment_url
+                        break
+
+        return submission_list
 
     def _get_lesson_player_url_response(
         self,
@@ -510,7 +580,6 @@ class LMSUtil:
             }
         except KeyError:
             raise ValueError(f"Missing required upload fields in: {upload!r}")
-
         if upload_id is not None and upload_id > 0:
             result["download_url"] = f"{self.BASE_URL}/api/uploads/{upload_id}/blob"
         if reference_id is not None and reference_id > 0:
@@ -847,6 +916,28 @@ class LMSUtil:
         if isinstance(value, str) and value.isdigit():
             return int(value)
         return None
+
+    @staticmethod
+    def _build_upload_match_keys(upload: Mapping[str, Any]) -> list[tuple[str, str]]:
+        keys: list[tuple[str, str]] = []
+
+        upload_id = LMSUtil._coerce_int(upload.get("id"))
+        if upload_id is not None and upload_id > 0:
+            keys.append(("id", str(upload_id)))
+
+        upload_key = upload.get("key")
+        if isinstance(upload_key, str) and upload_key:
+            keys.append(("key", upload_key))
+
+        reference_id = LMSUtil._coerce_int(upload.get("reference_id"))
+        if reference_id is not None and reference_id > 0:
+            keys.append(("reference_id", str(reference_id)))
+
+        name = upload.get("name")
+        if isinstance(name, str) and name:
+            keys.append(("name", name))
+
+        return keys
 
     @staticmethod
     def _extract_url_query_param(url: str, key: str) -> str | None:
