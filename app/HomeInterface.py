@@ -9,7 +9,7 @@ from .components.CardManagerDialog import CardManagerDialog
 
 class HomeFrame(QWidget):
     """在存在账户时，显示的主界面"""
-    default_layout = ["schedule", "attendance", "score", "judge", "notice", "empty_room"]
+    default_layout = ["schedule", "attendance", "score", "lms", "judge", "notice", "empty_room"]
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
@@ -170,6 +170,13 @@ class HomeFrame(QWidget):
                 'content': self.tr("查看你各学期的成绩"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.score_interface),
                 'color': LinkCard.LinkCardColor.BLUE
+            },
+            'lms': {
+                'icon': FIF.DOCUMENT.icon(theme=Theme.DARK),
+                'title': self.tr("思源学堂"),
+                'content': self.tr("查看作业、资料、回放和直播"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.lms_interface),
+                'color': LinkCard.LinkCardColor.LIGHT_BLUE
             },
             'judge': {
                 'icon': FIF.BOOK_SHELF.icon(theme=Theme.DARK),

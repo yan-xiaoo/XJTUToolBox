@@ -1,11 +1,13 @@
 import os
 import re
+import json
+import time
 from urllib.parse import urlparse, unquote
 
-from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths, QTimer, QVariantAnimation, QEasingCurve
-from PyQt5.QtGui import QDesktopServices, QFont
+from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths, QTimer, QEvent, QPoint
+from PyQt5.QtGui import QDesktopServices, QFont, QPixmap, QPainter, QColor, QPen, QPainterPath
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QHeaderView, QTableWidgetItem, \
-    QFileDialog, QLabel, QSizePolicy
+    QFileDialog, QLabel, QSizePolicy, QDialog
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, PrimaryPushButton, PushButton, TableWidget, \
     InfoBar, InfoBarPosition, CaptionLabel, BodyLabel, isDarkTheme, Pivot, IndeterminateProgressBar
 
@@ -70,6 +72,495 @@ class LMSFileDownloadThread(ProgressBarThread):
             self.error.emit(self.tr("下载失败"), str(e))
 
 
+class LMSImagePreviewDialog(QDialog):
+    def __init__(self, fetch_pixmap_callback, preview_key_callback, safe_text_callback, parent=None):
+        super().__init__(parent)
+        self._fetch_pixmap = fetch_pixmap_callback
+        self._preview_key = preview_key_callback
+        self._safe_text = safe_text_callback
+
+        self._preview_images: list[dict] = []
+        self._preview_index = 0
+        self._preview_scale = 1.0
+        self._preview_original_pixmap: QPixmap | None = None
+        self._current_preview_file: dict | None = None
+        self._overlay_text: str | None = None
+        self._overlay_items: list[dict] = []
+        self._dragging = False
+        self._drag_start = QPoint()
+        self._drag_h_value = 0
+        self._drag_v_value = 0
+
+        self.setObjectName("lmsImagePreviewDialog")
+        self.setWindowTitle(self.tr("图片预览"))
+        self.resize(960, 680)
+        self.setModal(False)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        self.previewTitleLabel = TitleLabel("-", self)
+        self.previewTitleLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        toolFrame = QFrame(self)
+        toolLayout = QHBoxLayout(toolFrame)
+        toolLayout.setContentsMargins(0, 0, 0, 0)
+        toolLayout.setSpacing(8)
+
+        self.previewPrevButton = PushButton(self.tr("上一张"), toolFrame)
+        self.previewNextButton = PushButton(self.tr("下一张"), toolFrame)
+        self.previewZoomOutButton = PushButton(self.tr("缩小"), toolFrame)
+        self.previewZoomInButton = PushButton(self.tr("放大"), toolFrame)
+        self.previewResetZoomButton = PushButton(self.tr("重置"), toolFrame)
+        self.previewScaleLabel = CaptionLabel("100%", toolFrame)
+
+        for one in (
+            self.previewPrevButton, self.previewNextButton, self.previewZoomOutButton,
+            self.previewZoomInButton, self.previewResetZoomButton
+        ):
+            one.setMinimumWidth(112)
+
+        self.previewPrevButton.clicked.connect(self.preview_prev_image)
+        self.previewNextButton.clicked.connect(self.preview_next_image)
+        self.previewZoomOutButton.clicked.connect(lambda: self.set_preview_scale(self._preview_scale / 1.2))
+        self.previewZoomInButton.clicked.connect(lambda: self.set_preview_scale(self._preview_scale * 1.2))
+        self.previewResetZoomButton.clicked.connect(lambda: self.set_preview_scale(1.0))
+
+        toolLayout.addWidget(self.previewPrevButton)
+        toolLayout.addWidget(self.previewNextButton)
+        toolLayout.addSpacing(10)
+        toolLayout.addWidget(self.previewZoomOutButton)
+        toolLayout.addWidget(self.previewZoomInButton)
+        toolLayout.addWidget(self.previewResetZoomButton)
+        toolLayout.addSpacing(8)
+        toolLayout.addWidget(self.previewScaleLabel)
+        toolLayout.addStretch(1)
+
+        self.previewScrollArea = ScrollArea(self)
+        self.previewScrollArea.setWidgetResizable(True)
+        self.previewScrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.previewScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.previewContent = QWidget(self.previewScrollArea)
+        self.previewContent.setObjectName("lmsPreviewContent")
+        previewLayout = QVBoxLayout(self.previewContent)
+        previewLayout.setContentsMargins(16, 16, 16, 16)
+        previewLayout.setAlignment(Qt.AlignCenter)
+
+        self.previewImageLabel = QLabel(self.previewContent)
+        self.previewImageLabel.setObjectName("lmsPreviewImageLabel")
+        self.previewImageLabel.setAlignment(Qt.AlignCenter)
+        self.previewImageLabel.setText(self.tr("无可预览图片"))
+        self.previewImageLabel.setCursor(Qt.OpenHandCursor)
+        previewLayout.addWidget(self.previewImageLabel, alignment=Qt.AlignCenter)
+        self.previewScaleLabel.setObjectName("lmsPreviewScaleLabel")
+        self.previewScrollArea.setWidget(self.previewContent)
+        self.previewScrollArea.viewport().installEventFilter(self)
+
+        layout.addWidget(self.previewTitleLabel)
+        layout.addWidget(toolFrame)
+        layout.addWidget(self.previewScrollArea, stretch=1)
+        self._apply_dialog_theme()
+
+    def _apply_dialog_theme(self):
+        if isDarkTheme():
+            bg = "#202020"
+            fg = "#F2F2F2"
+            sub_fg = "#D0D0D0"
+        else:
+            bg = "#FFFFFF"
+            fg = "#202020"
+            sub_fg = "#505050"
+
+        self.setStyleSheet(
+            f"QDialog#lmsImagePreviewDialog{{background-color:{bg};}}"
+            f"QWidget#lmsPreviewContent{{background-color:{bg};}}"
+            f"QLabel#lmsPreviewImageLabel{{color:{fg};background:transparent;}}"
+            f"QLabel#lmsPreviewScaleLabel{{color:{sub_fg};background:transparent;}}"
+        )
+
+    def set_preview_scale(self, scale: float):
+        self._preview_scale = max(0.1, min(float(scale), 8.0))
+        self.previewScaleLabel.setText(f"{int(round(self._preview_scale * 100))}%")
+        self._apply_preview_scale()
+
+    def _apply_preview_scale(self):
+        if self._preview_original_pixmap is None or self._preview_original_pixmap.isNull():
+            self.previewImageLabel.setPixmap(QPixmap())
+            return
+
+        width = max(1, int(self._preview_original_pixmap.width() * self._preview_scale))
+        height = max(1, int(self._preview_original_pixmap.height() * self._preview_scale))
+        scaled = self._preview_original_pixmap.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = self._draw_overlay(scaled)
+        self.previewImageLabel.setText("")
+        self.previewImageLabel.setPixmap(scaled)
+        self.previewImageLabel.resize(scaled.size())
+
+    def _draw_overlay(self, scaled: QPixmap) -> QPixmap:
+        if (not self._overlay_items) and (not self._overlay_text):
+            return scaled
+
+        rendered = QPixmap(scaled)
+        painter = QPainter(rendered)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        if self._overlay_items and self._preview_original_pixmap is not None:
+            base_w = max(1.0, float(self._preview_original_pixmap.width()))
+            base_h = max(1.0, float(self._preview_original_pixmap.height()))
+            scale_x = rendered.width() / base_w
+            scale_y = rendered.height() / base_h
+
+            painter.setBrush(Qt.NoBrush)
+
+            for item in self._overlay_items[:300]:
+                if not self._overlay_item_matches_current(item):
+                    continue
+
+                color = QColor(str(item.get("color") or "#FFC800"))
+                if not color.isValid():
+                    color = QColor(255, 200, 0, 230)
+                color.setAlpha(230)
+                pen = QPen(color)
+                border_width = self._to_float(item.get("border_width")) or 2.0
+                pen.setWidth(max(1, int(round(border_width * (scale_x + scale_y) / 2))))
+                painter.setPen(pen)
+
+                unit = str(item.get("coord_unit") or "").strip().lower()
+                item_base_w = self._to_float(item.get("base_w")) or self._to_float(item.get("source_width"))
+                item_base_h = self._to_float(item.get("base_h")) or self._to_float(item.get("source_height"))
+
+                def to_px_x(value: float) -> float:
+                    return self._coordinate_to_pixel(value, rendered.width(), base_w, item_base_w, unit)
+
+                def to_px_y(value: float) -> float:
+                    return self._coordinate_to_pixel(value, rendered.height(), base_h, item_base_h, unit)
+
+                path_cmds = item.get("path")
+                if isinstance(path_cmds, list) and path_cmds:
+                    path = QPainterPath()
+                    cursor_x = None
+                    cursor_y = None
+                    for cmd in path_cmds:
+                        if not isinstance(cmd, (list, tuple)) or len(cmd) < 3:
+                            continue
+                        op = str(cmd[0]).upper()
+                        nums = [self._to_float(one) for one in cmd[1:]]
+                        if op == "M" and len(nums) >= 2 and nums[0] is not None and nums[1] is not None:
+                            x = to_px_x(nums[0])
+                            y = to_px_y(nums[1])
+                            path.moveTo(x, y)
+                            cursor_x, cursor_y = x, y
+                        elif op == "L" and len(nums) >= 2 and nums[0] is not None and nums[1] is not None:
+                            x = to_px_x(nums[0])
+                            y = to_px_y(nums[1])
+                            if cursor_x is None:
+                                path.moveTo(x, y)
+                            else:
+                                path.lineTo(x, y)
+                            cursor_x, cursor_y = x, y
+                        elif op == "Q" and len(nums) >= 4 and all(v is not None for v in nums[:4]):
+                            cx = to_px_x(nums[0])
+                            cy = to_px_y(nums[1])
+                            x = to_px_x(nums[2])
+                            y = to_px_y(nums[3])
+                            if cursor_x is None:
+                                path.moveTo(cx, cy)
+                            path.quadTo(cx, cy, x, y)
+                            cursor_x, cursor_y = x, y
+                        elif op == "C" and len(nums) >= 6 and all(v is not None for v in nums[:6]):
+                            c1x = to_px_x(nums[0])
+                            c1y = to_px_y(nums[1])
+                            c2x = to_px_x(nums[2])
+                            c2y = to_px_y(nums[3])
+                            x = to_px_x(nums[4])
+                            y = to_px_y(nums[5])
+                            if cursor_x is None:
+                                path.moveTo(c1x, c1y)
+                            path.cubicTo(c1x, c1y, c2x, c2y, x, y)
+                            cursor_x, cursor_y = x, y
+                    painter.drawPath(path)
+
+                x = self._to_float(item.get("x"))
+                y = self._to_float(item.get("y"))
+                w = self._to_float(item.get("w"))
+                h = self._to_float(item.get("h"))
+                text = str(item.get("text") or "").strip()
+                if x is None or y is None:
+                    continue
+
+                px = int(to_px_x(x))
+                py = int(to_px_y(y))
+
+                if w is not None and h is not None:
+                    pw = int(abs(to_px_x(w)))
+                    ph = int(abs(to_px_y(h)))
+                    painter.drawRect(px, py, max(2, pw), max(2, ph))
+                else:
+                    painter.drawEllipse(px - 5, py - 5, 10, 10)
+
+                if text:
+                    painter.drawText(px + 8, py - 8, text[:120])
+
+        if self._overlay_text:
+            overlay = self._overlay_text.strip()
+            if overlay:
+                if len(overlay) > 1600:
+                    overlay = overlay[:1600] + "..."
+                lines = [line.strip() for line in overlay.splitlines() if line.strip()]
+                if not lines:
+                    lines = [overlay]
+                lines = lines[:10]
+                panel_w = min(int(rendered.width() * 0.72), 560)
+                line_h = 20
+                panel_h = line_h * len(lines) + 16
+                panel_x = 12
+                panel_y = 12
+
+                panel_color = QColor(0, 0, 0, 128) if not isDarkTheme() else QColor(20, 20, 20, 170)
+                painter.fillRect(panel_x, panel_y, panel_w, panel_h, panel_color)
+                painter.setPen(QColor(255, 255, 255, 235))
+                y = panel_y + 22
+                for line in lines:
+                    painter.drawText(panel_x + 10, y, line[:84])
+                    y += line_h
+
+        painter.end()
+        return rendered
+
+    @staticmethod
+    def _to_float(value) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _normalize_token(value) -> str:
+        text = str(value or "").strip().lower()
+        return text
+
+    @classmethod
+    def _collect_file_tokens(cls, file_info: dict | None) -> set[str]:
+        if not isinstance(file_info, dict):
+            return set()
+
+        tokens: set[str] = set()
+
+        def add_token(raw):
+            token = cls._normalize_token(raw)
+            if token:
+                tokens.add(token)
+
+        def add_from_value(value):
+            if value is None:
+                return
+            if isinstance(value, (int, float)):
+                add_token(str(int(value)) if isinstance(value, float) and value.is_integer() else str(value))
+                return
+            if not isinstance(value, str):
+                return
+            text = value.strip()
+            if not text:
+                return
+            add_token(text)
+            parsed = urlparse(text)
+            path = unquote(parsed.path or "").strip()
+            if path:
+                add_token(path)
+                base = os.path.basename(path)
+                if base:
+                    add_token(base)
+                    stem, _ = os.path.splitext(base)
+                    if stem:
+                        add_token(stem)
+
+        for key in ("id", "reference_id", "key", "name", "download_url", "preview_url", "url", "href", "src", "link"):
+            add_from_value(file_info.get(key))
+        return tokens
+
+    @classmethod
+    def _collect_overlay_item_tokens(cls, item: dict) -> set[str]:
+        tokens: set[str] = set()
+        raw_targets = item.get("targets")
+        values = raw_targets if isinstance(raw_targets, list) else [raw_targets]
+        for one in values:
+            token = cls._normalize_token(one)
+            if token:
+                tokens.add(token)
+        return tokens
+
+    def _overlay_item_matches_current(self, item: dict) -> bool:
+        page_hint = self._to_float(item.get("page_index"))
+        if page_hint is not None:
+            page_index = int(round(page_hint))
+            if page_index not in {self._preview_index, self._preview_index + 1}:
+                return False
+
+        item_tokens = self._collect_overlay_item_tokens(item)
+        if not item_tokens:
+            return True
+
+        file_tokens = self._collect_file_tokens(self._current_preview_file)
+        if not file_tokens:
+            return True
+        return not file_tokens.isdisjoint(item_tokens)
+
+    @staticmethod
+    def _coordinate_to_pixel(
+            value: float,
+            rendered_size: int,
+            default_base_size: float,
+            item_base_size: float | None,
+            unit: str
+    ) -> float:
+        unit_text = (unit or "").strip().lower()
+        if unit_text in {"percent", "%", "pct"}:
+            return value * rendered_size / 100.0
+        if unit_text in {"ratio", "normalized", "relative"}:
+            return value * rendered_size
+        if unit_text in {"px", "pixel", "pixels"}:
+            base = item_base_size if item_base_size and item_base_size > 0 else default_base_size
+            return value * rendered_size / max(1.0, float(base))
+
+        if -1.0 <= value <= 1.0:
+            return value * rendered_size
+
+        if item_base_size is not None and item_base_size > 0:
+            return value * rendered_size / item_base_size
+
+        return value * rendered_size / max(1.0, default_base_size)
+
+    def _fit_width_scale(self) -> float:
+        if self._preview_original_pixmap is None or self._preview_original_pixmap.isNull():
+            return 1.0
+        viewport_w = self.previewScrollArea.viewport().width()
+        target_w = max(1, viewport_w - 40)
+        return max(0.1, min(target_w / max(1, self._preview_original_pixmap.width()), 8.0))
+
+    def _zoom_at(self, cursor_pos: QPoint, factor: float):
+        if self._preview_original_pixmap is None or self._preview_original_pixmap.isNull():
+            return
+
+        old_scale = self._preview_scale
+        old_w = max(1.0, self._preview_original_pixmap.width() * old_scale)
+        old_h = max(1.0, self._preview_original_pixmap.height() * old_scale)
+        h_bar = self.previewScrollArea.horizontalScrollBar()
+        v_bar = self.previewScrollArea.verticalScrollBar()
+        rel_x = (h_bar.value() + cursor_pos.x()) / old_w
+        rel_y = (v_bar.value() + cursor_pos.y()) / old_h
+
+        self.set_preview_scale(old_scale * factor)
+
+        new_w = max(1.0, self._preview_original_pixmap.width() * self._preview_scale)
+        new_h = max(1.0, self._preview_original_pixmap.height() * self._preview_scale)
+        h_bar.setValue(int(rel_x * new_w - cursor_pos.x()))
+        v_bar.setValue(int(rel_y * new_h - cursor_pos.y()))
+
+    def _set_preview_pixmap(self, pixmap: QPixmap | None):
+        self._preview_original_pixmap = pixmap if pixmap and not pixmap.isNull() else None
+        if self._preview_original_pixmap is None:
+            self.previewImageLabel.setCursor(Qt.ArrowCursor)
+        else:
+            self.previewImageLabel.setCursor(Qt.OpenHandCursor)
+        self._apply_preview_scale()
+
+    def _load_current_preview_image(self):
+        count = len(self._preview_images)
+        if count <= 0:
+            self._current_preview_file = None
+            self.previewTitleLabel.setText(self.tr("无可预览图片"))
+            self.previewPrevButton.setEnabled(False)
+            self.previewNextButton.setEnabled(False)
+            self._set_preview_pixmap(None)
+            self.previewImageLabel.setText(self.tr("无可预览图片"))
+            self.previewScaleLabel.setText("-")
+            return
+
+        self._preview_index = max(0, min(self._preview_index, count - 1))
+        current = self._preview_images[self._preview_index]
+        self._current_preview_file = current
+        name = self._safe_text(current.get("name"))
+        self.previewTitleLabel.setText(f"{name} ({self._preview_index + 1}/{count})")
+        self.previewPrevButton.setEnabled(self._preview_index > 0)
+        self.previewNextButton.setEnabled(self._preview_index < count - 1)
+
+        pixmap, error_text = self._fetch_pixmap(current)
+        if pixmap is None or pixmap.isNull():
+            self._set_preview_pixmap(None)
+            self.previewImageLabel.setText(error_text or self.tr("图片加载失败"))
+            self.previewScaleLabel.setText("-")
+            return
+
+        self._set_preview_pixmap(pixmap)
+        self.set_preview_scale(self._fit_width_scale())
+        self.previewScrollArea.horizontalScrollBar().setValue(0)
+        self.previewScrollArea.verticalScrollBar().setValue(0)
+
+    def eventFilter(self, watched, event):
+        if watched is self.previewScrollArea.viewport() and self._preview_original_pixmap is not None:
+            if event.type() == QEvent.Wheel:
+                step = event.angleDelta().y()
+                if step != 0:
+                    factor = 1.15 if step > 0 else (1 / 1.15)
+                    self._zoom_at(event.pos(), factor)
+                    return True
+
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._dragging = True
+                self._drag_start = event.pos()
+                self._drag_h_value = self.previewScrollArea.horizontalScrollBar().value()
+                self._drag_v_value = self.previewScrollArea.verticalScrollBar().value()
+                self.previewImageLabel.setCursor(Qt.ClosedHandCursor)
+                return True
+
+            if event.type() == QEvent.MouseMove and self._dragging:
+                delta = event.pos() - self._drag_start
+                self.previewScrollArea.horizontalScrollBar().setValue(self._drag_h_value - delta.x())
+                self.previewScrollArea.verticalScrollBar().setValue(self._drag_v_value - delta.y())
+                return True
+
+            if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self._dragging = False
+                self.previewImageLabel.setCursor(Qt.OpenHandCursor)
+                return True
+
+        return super().eventFilter(watched, event)
+
+    def open_images(self, images: list[dict], selected_key: str,
+                    overlay_text: str | None = None, overlay_items: list[dict] | None = None,
+                    review_mode: bool = False):
+        self._apply_dialog_theme()
+        self._overlay_text = overlay_text
+        self._overlay_items = [one for one in (overlay_items or []) if isinstance(one, dict)]
+        self._current_preview_file = None
+        self.setWindowTitle(self.tr("批改预览") if review_mode else self.tr("图片预览"))
+        self._preview_images = [one for one in images if isinstance(one, dict)]
+        self._preview_index = 0
+        for i, one in enumerate(self._preview_images):
+            if self._preview_key(one) == selected_key:
+                self._preview_index = i
+                break
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        QTimer.singleShot(0, self._load_current_preview_image)
+
+    def preview_prev_image(self):
+        if self._preview_index <= 0:
+            return
+        self._preview_index -= 1
+        self._load_current_preview_image()
+
+    def preview_next_image(self):
+        if self._preview_index >= len(self._preview_images) - 1:
+            return
+        self._preview_index += 1
+        self._load_current_preview_image()
+
+
 class LMSInterface(ScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,13 +575,21 @@ class LMSInterface(ScrollArea):
         self._filtered_activities: list[dict] = []
         self._current_detail_uploads: list[dict] = []
         self._current_submission: dict | None = None
-        self._current_submission_rows: list[dict] = []
-        self._current_detail_type = ""
+        self._active_page: QWidget | None = None
+        self._preview_source_page: QWidget | None = None
+        self._preview_images: list[dict] = []
+        self._preview_index = -1
+        self._preview_scale = 1.0
+        self._preview_original_pixmap: QPixmap | None = None
+        self._preview_pixmap_cache: dict[str, QPixmap] = {}
+        self._mark_overlay_cache: dict[str, tuple[str | None, list[dict]]] = {}
+        self._preview_dialog = None
         self._download_jobs: list[tuple[ProgressInfoBar, LMSFileDownloadThread]] = []
+        self._courses_cache_ttl_seconds = 300
+        self._activities_cache_ttl_seconds = 300
+        self._courses_cache: dict[str, dict] = {}
+        self._activities_cache: dict[tuple[str, int], dict] = {}
         self.activity_type_filter = "homework"
-        self._activity_expand_animating = False
-        self._activity_expand_duration_ms = 420
-        self._activity_height_anim: QVariantAnimation | None = None
 
         self.view = QWidget(self)
         self.setObjectName("LMSInterface")
@@ -125,6 +624,7 @@ class LMSInterface(ScrollArea):
         self._initActivityPage()
         self._initDetailPage()
         self._initSubmissionDetailPage()
+        self._initImagePreviewPage()
 
         self.thread.error.connect(self.onThreadError)
         self.thread.coursesLoaded.connect(self.onCoursesLoaded)
@@ -154,7 +654,7 @@ class LMSInterface(ScrollArea):
         self.refreshCoursesButton.setFixedHeight(40)
         self.openWebButton = PushButton(self.tr("打开思源学堂"), commandFrame)
         self.openWebButton.setFixedHeight(40)
-        self.refreshCoursesButton.clicked.connect(self.refreshCourses)
+        self.refreshCoursesButton.clicked.connect(lambda: self.refreshCourses(force=True))
         self.openWebButton.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://lms.xjtu.edu.cn")))
 
         commandLayout.addWidget(self.refreshCoursesButton)
@@ -169,7 +669,7 @@ class LMSInterface(ScrollArea):
         self.courseTable.setHorizontalHeaderLabels([
             self.tr("课程"), self.tr("学年学期"), self.tr("任课教师"), self.tr("学分"), self.tr("发布"), self.tr("教学班")
         ])
-        self.apply_default_column_width(self.courseTable)
+        self.apply_full_width_column_width(self.courseTable)
         self.courseTable.verticalHeader().setVisible(False)
         self.courseTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.courseTable.setMinimumHeight(0)
@@ -201,7 +701,7 @@ class LMSInterface(ScrollArea):
         self.backToCourseButton.setFixedHeight(40)
         self.refreshActivitiesButton.setFixedHeight(40)
         self.backToCourseButton.clicked.connect(lambda: self.switchPage(self.coursePage))
-        self.refreshActivitiesButton.clicked.connect(self.refreshActivities)
+        self.refreshActivitiesButton.clicked.connect(lambda: self.refreshActivities(force=True))
         commandLayout.addWidget(self.backToCourseButton)
         commandLayout.addWidget(self.refreshActivitiesButton)
         commandLayout.addStretch(1)
@@ -219,7 +719,7 @@ class LMSInterface(ScrollArea):
         self.activityTable.setHorizontalHeaderLabels([
             self.tr("活动"), self.tr("开始时间"), self.tr("结束时间"), self.tr("发布"), self.tr("状态")
         ])
-        self.apply_default_column_width(self.activityTable)
+        self.apply_full_width_column_width(self.activityTable)
         self.activityTable.verticalHeader().setVisible(False)
         self.activityTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.activityTable.setMinimumHeight(0)
@@ -285,17 +785,6 @@ class LMSInterface(ScrollArea):
 
         self.detailSubmissionLabel = self.create_section_title(self.tr("每次提交"), self.detailPage)
         self.detailSubmissionLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.detailSubmissionHeader = QFrame(self.detailPage)
-        self.detailSubmissionHeader.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.detailSubmissionHeaderLayout = QHBoxLayout(self.detailSubmissionHeader)
-        self.detailSubmissionHeaderLayout.setContentsMargins(0, 0, 0, 0)
-        self.detailSubmissionHeaderLayout.setSpacing(6)
-        self.viewMySubmissionButton = PushButton(self.tr("查看个人作业"), self.detailSubmissionHeader)
-        self.viewMySubmissionButton.setVisible(False)
-        self.viewMySubmissionButton.clicked.connect(self.open_latest_submission)
-        self.detailSubmissionHeaderLayout.addWidget(self.detailSubmissionLabel)
-        self.detailSubmissionHeaderLayout.addStretch(1)
-        self.detailSubmissionHeaderLayout.addWidget(self.viewMySubmissionButton)
         self.detailSubmissionTable = TableWidget(self.detailPage)
         self.detailSubmissionTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.detailSubmissionTable.setColumnCount(4)
@@ -331,7 +820,7 @@ class LMSInterface(ScrollArea):
         layout.addWidget(self.detailRichContent)
         layout.addWidget(self.detailUploadsTitle)
         layout.addWidget(self.detailUploadsTable)
-        layout.addWidget(self.detailSubmissionHeader)
+        layout.addWidget(self.detailSubmissionLabel)
         layout.addWidget(self.detailSubmissionTable)
         layout.addWidget(self.detailReplayLabel)
         layout.addWidget(self.detailReplayTable)
@@ -349,7 +838,7 @@ class LMSInterface(ScrollArea):
         commandFrame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         commandLayout = QHBoxLayout(commandFrame)
         self.backToDetailButton = PushButton(self.tr("返回活动详情"), commandFrame)
-        self.backToDetailButton.clicked.connect(self.back_to_detail_page)
+        self.backToDetailButton.clicked.connect(lambda: self.switchPage(self.detailPage))
         commandLayout.addWidget(self.backToDetailButton)
         commandLayout.addStretch(1)
 
@@ -395,6 +884,80 @@ class LMSInterface(ScrollArea):
         layout.addWidget(self.submissionCorrectTable)
         self.pageLayout.addWidget(self.submissionPage)
 
+    def _initImagePreviewPage(self):
+        self.imagePreviewPage = QFrame(self)
+        layout = QVBoxLayout(self.imagePreviewPage)
+        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignTop)
+
+        commandFrame = QFrame(self.imagePreviewPage)
+        commandFrame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        commandLayout = QHBoxLayout(commandFrame)
+        self.backFromPreviewButton = PushButton(self.tr("返回"), commandFrame)
+        self.backFromPreviewButton.setFixedHeight(40)
+        self.backFromPreviewButton.clicked.connect(self.back_from_preview_page)
+        commandLayout.addWidget(self.backFromPreviewButton)
+        commandLayout.addStretch(1)
+
+        self.previewTitleLabel = TitleLabel("-", self.imagePreviewPage)
+        self.previewTitleLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        toolFrame = QFrame(self.imagePreviewPage)
+        toolLayout = QHBoxLayout(toolFrame)
+        toolLayout.setContentsMargins(0, 0, 0, 0)
+        toolLayout.setSpacing(8)
+
+        self.previewPrevButton = PushButton(self.tr("上一张"), toolFrame)
+        self.previewNextButton = PushButton(self.tr("下一张"), toolFrame)
+        self.previewZoomOutButton = PushButton(self.tr("缩小"), toolFrame)
+        self.previewZoomInButton = PushButton(self.tr("放大"), toolFrame)
+        self.previewResetZoomButton = PushButton(self.tr("重置"), toolFrame)
+        self.previewScaleLabel = CaptionLabel("100%", toolFrame)
+
+        for one in (
+            self.previewPrevButton, self.previewNextButton, self.previewZoomOutButton,
+            self.previewZoomInButton, self.previewResetZoomButton
+        ):
+            one.setMinimumWidth(112)
+
+        self.previewPrevButton.clicked.connect(self.preview_prev_image)
+        self.previewNextButton.clicked.connect(self.preview_next_image)
+        self.previewZoomOutButton.clicked.connect(lambda: self.set_preview_scale(self._preview_scale / 1.2))
+        self.previewZoomInButton.clicked.connect(lambda: self.set_preview_scale(self._preview_scale * 1.2))
+        self.previewResetZoomButton.clicked.connect(lambda: self.set_preview_scale(1.0))
+
+        toolLayout.addWidget(self.previewPrevButton)
+        toolLayout.addWidget(self.previewNextButton)
+        toolLayout.addSpacing(10)
+        toolLayout.addWidget(self.previewZoomOutButton)
+        toolLayout.addWidget(self.previewZoomInButton)
+        toolLayout.addWidget(self.previewResetZoomButton)
+        toolLayout.addSpacing(8)
+        toolLayout.addWidget(self.previewScaleLabel)
+        toolLayout.addStretch(1)
+
+        self.previewScrollArea = ScrollArea(self.imagePreviewPage)
+        self.previewScrollArea.setWidgetResizable(True)
+        self.previewScrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.previewScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.previewContent = QWidget(self.previewScrollArea)
+        previewLayout = QVBoxLayout(self.previewContent)
+        previewLayout.setContentsMargins(16, 16, 16, 16)
+        previewLayout.setAlignment(Qt.AlignCenter)
+
+        self.previewImageLabel = QLabel(self.previewContent)
+        self.previewImageLabel.setAlignment(Qt.AlignCenter)
+        self.previewImageLabel.setText(self.tr("无可预览图片"))
+        previewLayout.addWidget(self.previewImageLabel, alignment=Qt.AlignCenter)
+        self.previewScrollArea.setWidget(self.previewContent)
+
+        layout.addWidget(commandFrame)
+        layout.addWidget(self.previewTitleLabel)
+        layout.addWidget(toolFrame)
+        layout.addWidget(self.previewScrollArea, stretch=1)
+        self.pageLayout.addWidget(self.imagePreviewPage)
+
     def create_loading_frame(self, parent: QWidget) -> QFrame:
         frame = QFrame(parent)
         layout = QVBoxLayout(frame)
@@ -408,7 +971,7 @@ class LMSInterface(ScrollArea):
         return frame
 
     def switchPage(self, page: QWidget):
-        pages = (self.coursePage, self.activityPage, self.detailPage, self.submissionPage)
+        pages = (self.coursePage, self.activityPage, self.detailPage, self.submissionPage, self.imagePreviewPage)
         for one in pages:
             one.setVisible(one is page)
 
@@ -416,7 +979,7 @@ class LMSInterface(ScrollArea):
         self.view.adjustSize()
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.verticalScrollBar().setValue(0)
-        self._schedule_table_layout_refresh()
+        self._active_page = page
 
     def show_loading(self, page: QWidget, show: bool):
         mapping = {
@@ -424,7 +987,7 @@ class LMSInterface(ScrollArea):
             self.activityPage: (self.activityLoadingFrame, [self.activityTable]),
             self.detailPage: (self.detailLoadingFrame, [self.detailInfoTable, self.detailRichContent,
                                                         self.detailRichTitle, self.detailUploadsTitle,
-                                                        self.detailUploadsTable, self.detailSubmissionHeader,
+                                                        self.detailUploadsTable, self.detailSubmissionLabel,
                                                         self.detailSubmissionTable, self.detailReplayLabel,
                                                         self.detailReplayTable]),
         }
@@ -434,40 +997,13 @@ class LMSInterface(ScrollArea):
         frame.setVisible(show)
         for widget in hides:
             widget.setVisible(not show)
-        if page is self.activityPage:
-            self.activityTypePivot.setVisible(True)
-        self._schedule_table_layout_refresh()
-
-    def _schedule_table_layout_refresh(self):
-        QTimer.singleShot(0, self._refresh_visible_table_layouts)
-
-    def _refresh_visible_table_layouts(self):
-        tables = (
-            (self.courseTable, 1, 140),
-            (self.activityTable, 1, 140),
-            (self.detailInfoTable, 1, 38),
-            (self.detailUploadsTable, 0, 38),
-            (self.detailSubmissionTable, 0, 38),
-            (self.detailReplayTable, 0, 38),
-            (self.submissionUploadsTable, 0, 38),
-            (self.submissionCorrectTable, 0, 38),
-        )
-        for table, min_rows, min_height in tables:
-            if table is self.activityTable and self._activity_expand_animating:
-                continue
-            if table.isVisible():
-                table.resizeRowsToContents()
-                self.update_table_height(table, min_rows=min_rows, min_height=min_height)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._schedule_table_layout_refresh()
 
     def create_upload_table(self, parent: QWidget) -> TableWidget:
         table = TableWidget(parent)
         table.setColumnCount(3)
-        table.setHorizontalHeaderLabels([self.tr("名称"), self.tr("大小"), self.tr("另存为")])
+        table.setHorizontalHeaderLabels([self.tr("名称"), self.tr("大小"), self.tr("操作")])
         self.apply_default_column_width(table)
+        table.setColumnWidth(2, 420)
         table.verticalHeader().setVisible(False)
         table.setWordWrap(True)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -482,6 +1018,12 @@ class LMSInterface(ScrollArea):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
 
+    @staticmethod
+    def apply_full_width_column_width(table: TableWidget):
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setStretchLastSection(True)
+
     def create_section_title(self, text: str, parent: QWidget) -> StrongBodyLabel:
         label = StrongBodyLabel(text, parent)
         f = label.font()
@@ -491,7 +1033,7 @@ class LMSInterface(ScrollArea):
         return label
 
     @staticmethod
-    def _calc_table_height(table: TableWidget, min_rows: int = 0, min_height: int = 38) -> int:
+    def update_table_height(table: TableWidget, min_rows: int = 0, min_height: int = 38):
         header_h = table.horizontalHeader().height() if table.horizontalHeader().isVisible() else 0
         if table.rowCount() > 0:
             rows_h = table.verticalHeader().length()
@@ -499,11 +1041,7 @@ class LMSInterface(ScrollArea):
             rows_h = table.verticalHeader().defaultSectionSize() * min_rows
         frame_h = table.frameWidth() * 2
         scrollbar_h = table.horizontalScrollBar().sizeHint().height() if table.horizontalScrollBar().isVisible() else 0
-        return max(header_h + rows_h + frame_h + scrollbar_h + 2, min_height)
-
-    @staticmethod
-    def update_table_height(table: TableWidget, min_rows: int = 0, min_height: int = 38):
-        table.setFixedHeight(LMSInterface._calc_table_height(table, min_rows=min_rows, min_height=min_height))
+        table.setFixedHeight(max(header_h + rows_h + frame_h + scrollbar_h + 2, min_height))
 
     def lock(self):
         self.refreshCoursesButton.setEnabled(False)
@@ -552,8 +1090,65 @@ class LMSInterface(ScrollArea):
         self.show_loading(self.activityPage, False)
         self.show_loading(self.detailPage, False)
 
-    @pyqtSlot()
-    def refreshCourses(self):
+    def _cache_account_key(self) -> str:
+        if accounts.current is not None and getattr(accounts.current, "username", None):
+            return str(accounts.current.username)
+        return "__none__"
+
+    @staticmethod
+    def _is_cache_valid(cache_time: float, ttl_seconds: int) -> bool:
+        return (time.time() - cache_time) <= max(1, ttl_seconds)
+
+    def _get_cached_courses(self) -> tuple[dict, list] | None:
+        key = self._cache_account_key()
+        cached = self._courses_cache.get(key)
+        if not isinstance(cached, dict):
+            return None
+        cache_time = float(cached.get("time", 0.0))
+        if not self._is_cache_valid(cache_time, self._courses_cache_ttl_seconds):
+            self._courses_cache.pop(key, None)
+            return None
+        user_info = cached.get("user_info")
+        courses = cached.get("courses")
+        if isinstance(user_info, dict) and isinstance(courses, list):
+            return user_info, courses
+        return None
+
+    def _set_cached_courses(self, user_info: dict, courses: list):
+        self._courses_cache[self._cache_account_key()] = {
+            "time": time.time(),
+            "user_info": user_info,
+            "courses": courses
+        }
+
+    def _get_cached_activities(self, course_id: int) -> list | None:
+        key = (self._cache_account_key(), int(course_id))
+        cached = self._activities_cache.get(key)
+        if not isinstance(cached, dict):
+            return None
+        cache_time = float(cached.get("time", 0.0))
+        if not self._is_cache_valid(cache_time, self._activities_cache_ttl_seconds):
+            self._activities_cache.pop(key, None)
+            return None
+        activities = cached.get("activities")
+        return activities if isinstance(activities, list) else None
+
+    def _set_cached_activities(self, course_id: int, activities: list):
+        key = (self._cache_account_key(), int(course_id))
+        self._activities_cache[key] = {
+            "time": time.time(),
+            "activities": activities
+        }
+
+    def refreshCourses(self, force: bool = False):
+        if not force:
+            cached = self._get_cached_courses()
+            if cached is not None:
+                user_info, courses = cached
+                self.switchPage(self.coursePage)
+                self.onCoursesLoaded(user_info, courses, from_cache=True)
+                return
+
         self.show_loading(self.coursePage, True)
         self.switchPage(self.coursePage)
         self.processWidget.setVisible(True)
@@ -561,11 +1156,18 @@ class LMSInterface(ScrollArea):
         self.thread.action = LMSAction.LOAD_COURSES
         self.thread.start()
 
-    @pyqtSlot()
-    def refreshActivities(self):
+    def refreshActivities(self, force: bool = False):
         if self.selected_course_id is None:
             self.error(self.tr("未选择课程"), self.tr("请先选择一门课程"), parent=self)
             return
+
+        if not force:
+            cached = self._get_cached_activities(self.selected_course_id)
+            if cached is not None:
+                self.switchPage(self.activityPage)
+                self.onActivitiesLoaded(self.selected_course_id, cached, from_cache=True)
+                return
+
         self.show_loading(self.activityPage, True)
         self.switchPage(self.activityPage)
         self.processWidget.setVisible(True)
@@ -575,9 +1177,15 @@ class LMSInterface(ScrollArea):
         self.thread.start()
 
     @pyqtSlot(dict, list)
-    def onCoursesLoaded(self, user_info: dict, courses: list):
+    def onCoursesLoaded(self, user_info: dict, courses: list, from_cache: bool = False):
         self.show_loading(self.coursePage, False)
         self._courses = courses
+        self._set_cached_courses(user_info if isinstance(user_info, dict) else {}, courses if isinstance(courses, list) else [])
+        if not from_cache:
+            account_key = self._cache_account_key()
+            stale_keys = [key for key in self._activities_cache.keys() if isinstance(key, tuple) and key[0] == account_key]
+            for one in stale_keys:
+                self._activities_cache.pop(one, None)
         self._activities = []
         self._filtered_activities = []
         self.selected_course_id = None
@@ -585,8 +1193,6 @@ class LMSInterface(ScrollArea):
         self.selected_course_name = ""
         self.selected_activity_name = ""
         self._current_detail_uploads = []
-        self._current_submission_rows = []
-        self._current_detail_type = ""
 
         user_name = user_info.get("name") or self.tr("未知用户")
         user_no = user_info.get("userNo") or "-"
@@ -611,6 +1217,9 @@ class LMSInterface(ScrollArea):
         self.courseTable.resizeRowsToContents()
         self.update_table_height(self.courseTable, min_rows=1, min_height=140)
 
+        if from_cache:
+            return
+
         if courses:
             self.success(self.tr("加载完成"), self.tr("已获取 {0} 门课程").format(len(courses)), parent=self)
         else:
@@ -629,21 +1238,19 @@ class LMSInterface(ScrollArea):
         self.selected_course_name = str(course.get("name") or "-")
         self.activity_type_filter = "homework"
         self.activityTypePivot.setCurrentItem(self.activity_type_filter)
-        self._stop_activity_expand_animation()
         self.activityTable.setRowCount(0)
-        self._current_submission_rows = []
-        self._current_detail_type = ""
         self.refreshActivities()
 
     @pyqtSlot(int, list)
-    def onActivitiesLoaded(self, course_id: int, activities: list):
+    def onActivitiesLoaded(self, course_id: int, activities: list, from_cache: bool = False):
         self.show_loading(self.activityPage, False)
         if self.selected_course_id != course_id:
             return
+        self._set_cached_activities(course_id, activities if isinstance(activities, list) else [])
         self._activities = activities
         self.filter_activities(self.activity_type_filter)
         self.switchPage(self.activityPage)
-        if not activities:
+        if (not from_cache) and (not activities):
             self.success(self.tr("无活动"), self.tr("该课程暂无可显示活动"), parent=self)
 
     def onActivityTypeChanged(self, key: str):
@@ -651,7 +1258,6 @@ class LMSInterface(ScrollArea):
         self.filter_activities(key)
 
     def filter_activities(self, key: str):
-        self._stop_activity_expand_animation()
         self._filtered_activities = [one for one in self._activities if str(one.get("type") or "") == key]
 
         self.activityTable.setRowCount(len(self._filtered_activities))
@@ -663,53 +1269,7 @@ class LMSInterface(ScrollArea):
             self.activityTable.setItem(row, 4, QTableWidgetItem(self.activity_status_text(activity)))
 
         self.activityTable.resizeRowsToContents()
-        target_h = self._calc_table_height(self.activityTable, min_rows=1, min_height=140)
-        if not self._filtered_activities:
-            self.activityTable.setFixedHeight(target_h)
-            return
-        self._start_activity_expand_animation(target_h)
-
-    def _stop_activity_expand_animation(self):
-        if self._activity_height_anim is not None:
-            self._activity_height_anim.stop()
-            self._activity_height_anim.deleteLater()
-            self._activity_height_anim = None
-        self._activity_expand_animating = False
-
-    def _activity_table_base_height(self) -> int:
-        header_h = self.activityTable.horizontalHeader().height() if self.activityTable.horizontalHeader().isVisible() else 0
-        frame_h = self.activityTable.frameWidth() * 2
-        scrollbar_h = self.activityTable.horizontalScrollBar().sizeHint().height() if self.activityTable.horizontalScrollBar().isVisible() else 0
-        return header_h + frame_h + scrollbar_h + 2
-
-    def _start_activity_expand_animation(self, target_height: int):
-        start_height = max(self._activity_table_base_height(), 38)
-        self.activityTable.setFixedHeight(start_height)
-        if target_height <= start_height:
-            self.activityTable.setFixedHeight(target_height)
-            self._activity_expand_animating = False
-            return
-
-        self._stop_activity_expand_animation()
-        self._activity_expand_animating = True
-        anim = QVariantAnimation(self)
-        anim.setStartValue(start_height)
-        anim.setEndValue(target_height)
-        anim.setDuration(self._activity_expand_duration_ms)
-        curve = QEasingCurve(QEasingCurve.OutBack)
-        if hasattr(curve, "setOvershoot"):
-            curve.setOvershoot(1.15)
-        anim.setEasingCurve(curve)
-        anim.valueChanged.connect(lambda value: self.activityTable.setFixedHeight(int(value)))
-
-        def _finish():
-            self.activityTable.setFixedHeight(target_height)
-            self._activity_expand_animating = False
-            self._activity_height_anim = None
-
-        anim.finished.connect(_finish)
-        self._activity_height_anim = anim
-        anim.start()
+        self.update_table_height(self.activityTable, min_rows=1, min_height=140)
 
     @pyqtSlot(int, int)
     def onActivityClicked(self, row: int, _column: int):
@@ -720,7 +1280,6 @@ class LMSInterface(ScrollArea):
         if not isinstance(activity_id, int):
             return
 
-        self._stop_activity_expand_animation()
         self.selected_activity_id = activity_id
         self.selected_activity_name = str(activity.get("title") or "-")
         self.detailTitleLabel.setText(f"{self.selected_course_name} / {self.selected_activity_name}")
@@ -744,7 +1303,6 @@ class LMSInterface(ScrollArea):
         self.populate_upload_table(self.detailUploadsTable, self._current_detail_uploads)
         self.detailUploadsTitle.setVisible(self.detailUploadsTable.isVisible())
 
-        self._current_detail_type = str(detail.get("type") or "")
         info_rows, rich_text = self.build_detail_rows(detail)
         self.populate_info_table(self.detailInfoTable, info_rows)
         self.set_html_label(self.detailRichContent, rich_text)
@@ -756,7 +1314,7 @@ class LMSInterface(ScrollArea):
         submission_list = detail.get("submission_list", {})
         if isinstance(submission_list, dict):
             submission_rows = submission_list.get("list", []) if isinstance(submission_list.get("list"), list) else []
-        self._set_submission_rows(submission_rows, keep_section_visible=(self._current_detail_type == "homework"))
+        self._set_submission_rows(submission_rows)
 
         replay_rows = detail.get("replay_videos", []) if isinstance(detail.get("replay_videos"), list) else []
         if str(detail.get("type") or "") == "lesson":
@@ -764,11 +1322,9 @@ class LMSInterface(ScrollArea):
         else:
             replay_rows = []
         self._set_replay_rows(replay_rows)
-        self._schedule_table_layout_refresh()
 
     @pyqtSlot()
     def onCurrentAccountChanged(self):
-        self._stop_activity_expand_animation()
         self.courseTable.setRowCount(0)
         self.activityTable.setRowCount(0)
         self.update_table_height(self.courseTable, min_rows=1, min_height=140)
@@ -790,14 +1346,15 @@ class LMSInterface(ScrollArea):
         self._filtered_activities = []
         self._current_detail_uploads = []
         self._current_submission = None
-        self._current_submission_rows = []
-        self._current_detail_type = ""
+        self._preview_pixmap_cache.clear()
+        self._mark_overlay_cache.clear()
+        if self._preview_dialog is not None:
+            self._preview_dialog.close()
 
         self.switchPage(self.coursePage)
 
-    def _set_submission_rows(self, submissions, keep_section_visible: bool = False):
+    def _set_submission_rows(self, submissions):
         rows = [one for one in submissions if isinstance(one, dict)] if isinstance(submissions, list) else []
-        self._current_submission_rows = rows
         self.detailSubmissionTable.setRowCount(len(rows))
         for row, sub in enumerate(rows):
             self.detailSubmissionTable.setItem(row, 0, QTableWidgetItem(self.safe_text(sub.get("score"))))
@@ -808,33 +1365,11 @@ class LMSInterface(ScrollArea):
             detail_btn.clicked.connect(lambda _=False, one=sub: self.show_submission_page(one))
             self.detailSubmissionTable.setCellWidget(row, 3, detail_btn)
 
-        visible = keep_section_visible or (len(rows) > 0)
-        self.detailSubmissionHeader.setVisible(visible)
+        visible = len(rows) > 0
         self.detailSubmissionLabel.setVisible(visible)
-        self.viewMySubmissionButton.setVisible(keep_section_visible)
         self.detailSubmissionTable.setVisible(visible)
         self.detailSubmissionTable.resizeRowsToContents()
         self.update_table_height(self.detailSubmissionTable, min_rows=0, min_height=38)
-
-    def open_latest_submission(self):
-        if not self._current_submission_rows:
-            self.error(self.tr("无可查看内容"), self.tr("当前作业暂无个人提交记录"), parent=self)
-            return
-        latest = next((one for one in self._current_submission_rows if one.get("is_latest_version") is True), None)
-        if latest is None:
-            latest = max(
-                self._current_submission_rows,
-                key=lambda one: str(one.get("updated_at") or one.get("submitted_at") or one.get("created_at") or ""),
-            )
-        self.show_submission_page(latest)
-
-    def back_to_detail_page(self):
-        self.switchPage(self.detailPage)
-        self._set_submission_rows(
-            self._current_submission_rows,
-            keep_section_visible=(self._current_detail_type == "homework"),
-        )
-        self._schedule_table_layout_refresh()
 
     def _set_replay_rows(self, replay_videos):
         rows = [one for one in replay_videos if isinstance(one, dict)] if isinstance(replay_videos, list) else []
@@ -844,6 +1379,7 @@ class LMSInterface(ScrollArea):
             self.detailReplayTable.setItem(row, 1, QTableWidgetItem(self.format_size(video.get("size"))))
 
             save_btn = PushButton(self.tr("另存为"), self.detailReplayTable)
+            save_btn.setMinimumWidth(112)
             save_btn.clicked.connect(lambda _=False, one=video: self._save_file(one))
             self.detailReplayTable.setCellWidget(row, 2, save_btn)
 
@@ -865,14 +1401,24 @@ class LMSInterface(ScrollArea):
         self.submissionInstructorTitle.setVisible(has_instructor)
         self.submissionInstructorLabel.setVisible(has_instructor)
 
+        submission_correct = submission.get("submission_correct", {}) if isinstance(submission.get("submission_correct"), dict) else {}
+        correct_uploads = submission_correct.get("uploads", []) if isinstance(submission_correct.get("uploads"), list) else []
         sub_uploads = submission.get("uploads", []) if isinstance(submission.get("uploads"), list) else []
-        sub_upload_count = self.populate_upload_table(self.submissionUploadsTable, sub_uploads)
+        review_context_uploads = [one for one in correct_uploads if isinstance(one, dict)]
+
+        sub_upload_count = self.populate_upload_table(
+            self.submissionUploadsTable,
+            sub_uploads,
+            review_context_uploads=review_context_uploads
+        )
         self.submissionUploadsTitle.setVisible(sub_upload_count > 0)
         self.submissionUploadsTable.setVisible(sub_upload_count > 0)
 
-        submission_correct = submission.get("submission_correct", {}) if isinstance(submission.get("submission_correct"), dict) else {}
-        correct_uploads = submission_correct.get("uploads", []) if isinstance(submission_correct.get("uploads"), list) else []
-        correct_upload_count = self.populate_upload_table(self.submissionCorrectTable, correct_uploads)
+        correct_upload_count = self.populate_upload_table(
+            self.submissionCorrectTable,
+            correct_uploads,
+            review_context_uploads=review_context_uploads
+        )
         self.submissionCorrectTitle.setVisible(correct_upload_count > 0)
         self.submissionCorrectTable.setVisible(correct_upload_count > 0)
 
@@ -927,16 +1473,725 @@ class LMSInterface(ScrollArea):
     def _cleanup_download_job(self, bar: ProgressInfoBar, thread: LMSFileDownloadThread):
         self._download_jobs = [one for one in self._download_jobs if one != (bar, thread)]
 
-    def populate_upload_table(self, table: TableWidget, uploads) -> int:
+    @staticmethod
+    def _is_image_upload(file_info: dict) -> bool:
+        name = str(file_info.get("name") or "").lower()
+        file_type = str(file_info.get("type") or "").lower()
+        image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg", ".heic", ".heif")
+        if any(name.endswith(ext) for ext in image_exts):
+            return True
+        if file_type.startswith("image/"):
+            return True
+        return file_type in {"png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "svg", "heic", "heif"}
+
+    @staticmethod
+    def _is_image_by_url(file_info: dict) -> bool:
+        image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg", ".heic", ".heif")
+        for key in ("download_url", "preview_url", "url", "href"):
+            value = file_info.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            path = unquote(urlparse(value).path or "").lower()
+            if any(path.endswith(ext) for ext in image_exts):
+                return True
+        return False
+
+    def _can_try_preview(self, file_info: dict) -> bool:
+        if self._is_image_upload(file_info) or self._is_image_by_url(file_info):
+            return True
+        return bool(file_info.get("preview_url") or file_info.get("download_url"))
+
+    @staticmethod
+    def _is_mark_attachment_upload(file_info: dict) -> bool:
+        name = str(file_info.get("name") or "").strip().lower()
+        return name in {"markattachment.txt", "markattatchment.txt"}
+
+    @staticmethod
+    def _as_float(value) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _preview_key(self, file_info: dict) -> str:
+        download_url = str(file_info.get("download_url") or "")
+        preview_url = str(file_info.get("preview_url") or "")
+        reference_id = str(file_info.get("reference_id") or "")
+        upload_id = str(file_info.get("id") or "")
+        return f"{upload_id}|{reference_id}|{download_url}|{preview_url}"
+
+    def _extract_nested_url(self, payload) -> str | None:
+        if isinstance(payload, str):
+            text = payload.strip().strip('"').strip("'")
+            if text.startswith("http://") or text.startswith("https://"):
+                return text
+            if text and text[0] in "{[":
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    return None
+                return self._extract_nested_url(parsed)
+            return None
+
+        if isinstance(payload, dict):
+            for key in ("url", "download_url", "preview_url", "signed_url", "src", "href", "link"):
+                result = self._extract_nested_url(payload.get(key))
+                if result:
+                    return result
+            for value in payload.values():
+                result = self._extract_nested_url(value)
+                if result:
+                    return result
+            return None
+
+        if isinstance(payload, list):
+            for value in payload:
+                result = self._extract_nested_url(value)
+                if result:
+                    return result
+        return None
+
+    def _resolve_upload_urls(self, file_info: dict) -> list[str]:
+        urls: list[str] = []
+        for key in ("download_url", "preview_url", "url", "href"):
+            value = file_info.get(key)
+            if isinstance(value, str) and value.startswith(("http://", "https://")) and value not in urls:
+                urls.append(value)
+
+        nested = self._extract_nested_url(file_info)
+        if nested and nested not in urls:
+            urls.append(nested)
+        return urls
+
+    def _fetch_text_payload(self, file_info: dict) -> tuple[str | None, str | None]:
+        if accounts.current is None:
+            return None, self.tr("请先登录后再预览")
+
+        try:
+            session = accounts.current.session_manager.get_session("lms")
+        except Exception as e:
+            return None, str(e)
+
+        queue = self._resolve_upload_urls(file_info)
+        tried: set[str] = set()
+        errors: list[str] = []
+
+        while queue and len(tried) < 12:
+            url = queue.pop(0)
+            if not isinstance(url, str) or not url or url in tried:
+                continue
+            tried.add(url)
+
+            try:
+                response = session.get(url, timeout=30)
+                response.raise_for_status()
+            except Exception as e:
+                errors.append(str(e))
+                continue
+
+            data = response.content or b""
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+            nested_url = None
+            text = None
+
+            if "json" in content_type:
+                try:
+                    payload = response.json()
+                    text = json.dumps(payload, ensure_ascii=False)
+                    nested_url = self._extract_nested_url(payload)
+                except Exception:
+                    text = None
+
+            if text is None and data:
+                for encoding in ("utf-8-sig", "utf-8", "gb18030", "latin-1"):
+                    try:
+                        text = data.decode(encoding)
+                        break
+                    except Exception:
+                        continue
+                if text:
+                    nested_url = nested_url or self._extract_nested_url(text[:4096])
+
+            if nested_url and nested_url not in tried and nested_url not in queue:
+                queue.append(nested_url)
+                if text and len(text.strip()) < 2048 and text.strip().startswith(("http://", "https://", "{", "[")):
+                    continue
+
+            if text and text.strip():
+                return text, None
+
+        reason = errors[-1] if errors else self.tr("无法读取批改标注文件")
+        return None, reason
+
+    def _extract_mark_overlay_items(self, payload) -> list[dict]:
+        items: list[dict] = []
+        page_container_keys = {"pages", "images", "attachments", "files", "canvases", "slides"}
+
+        def normalize_token(value) -> str:
+            return str(value or "").strip().lower()
+
+        def add_tokens_from_value(raw, tokens: set[str]):
+            if raw is None:
+                return
+            if isinstance(raw, (int, float)):
+                if isinstance(raw, float) and raw.is_integer():
+                    tokens.add(str(int(raw)))
+                else:
+                    tokens.add(str(raw))
+                return
+            if isinstance(raw, str):
+                text = raw.strip()
+                if not text:
+                    return
+                token = normalize_token(text)
+                if token:
+                    tokens.add(token)
+                parsed = urlparse(text)
+                path = unquote(parsed.path or "").strip()
+                if path:
+                    path_token = normalize_token(path)
+                    if path_token:
+                        tokens.add(path_token)
+                    base = os.path.basename(path)
+                    if base:
+                        tokens.add(normalize_token(base))
+                        stem, _ = os.path.splitext(base)
+                        if stem:
+                            tokens.add(normalize_token(stem))
+                return
+            if isinstance(raw, dict):
+                for key in (
+                        "id", "upload_id", "uploadId", "reference_id", "referenceId", "file_id", "fileId",
+                        "target_id", "targetId", "image_id", "imageId", "key", "upload_key", "file_key",
+                        "name", "file_name", "fileName", "image_name", "imageName",
+                        "url", "download_url", "preview_url", "src", "href", "link"
+                ):
+                    add_tokens_from_value(raw.get(key), tokens)
+                return
+            if isinstance(raw, (list, tuple)):
+                for one in raw[:12]:
+                    add_tokens_from_value(one, tokens)
+
+        def collect_target_tokens(node) -> set[str]:
+            if not isinstance(node, dict):
+                return set()
+            tokens: set[str] = set()
+            for key in (
+                    "id", "upload_id", "uploadId", "reference_id", "referenceId", "file_id", "fileId",
+                    "target_id", "targetId", "image_id", "imageId", "key", "upload_key", "file_key",
+                    "name", "file_name", "fileName", "image_name", "imageName",
+                    "url", "download_url", "preview_url", "src", "href", "link"
+            ):
+                add_tokens_from_value(node.get(key), tokens)
+            return {one for one in tokens if one}
+
+        def parse_unit_hint(node, inherited: str | None) -> str | None:
+            if not isinstance(node, dict):
+                return inherited
+            for key in ("coord_unit", "coordinate_unit", "coordinateUnit", "unit"):
+                value = node.get(key)
+                if not isinstance(value, str):
+                    continue
+                text = value.strip().lower()
+                if not text:
+                    continue
+                if "percent" in text or text in {"%", "pct"}:
+                    return "percent"
+                if "ratio" in text or "normalized" in text or "relative" in text:
+                    return "ratio"
+                if "pixel" in text or text in {"px", "pixels"}:
+                    return "px"
+            return inherited
+
+        def parse_page_hint(node, inherited: int | None) -> int | None:
+            if not isinstance(node, dict):
+                return inherited
+            for key in ("page_index", "pageIndex", "image_index", "imageIndex", "img_index", "imgIndex", "page"):
+                value = self._as_float(node.get(key))
+                if value is None:
+                    continue
+                return int(round(value))
+            return inherited
+
+        def parse_dimension_hints(node, inherited_w: float | None, inherited_h: float | None) -> tuple[float | None, float | None]:
+            width = inherited_w
+            height = inherited_h
+            if not isinstance(node, dict):
+                return width, height
+
+            for w_key, h_key in (
+                    ("image_width", "image_height"),
+                    ("img_width", "img_height"),
+                    ("origin_width", "origin_height"),
+                    ("original_width", "original_height"),
+                    ("natural_width", "natural_height"),
+                    ("canvas_width", "canvas_height"),
+                    ("page_width", "page_height"),
+            ):
+                w = self._as_float(node.get(w_key))
+                h = self._as_float(node.get(h_key))
+                if w is not None and h is not None and w > 0 and h > 0:
+                    return w, h
+
+            size = node.get("size")
+            if isinstance(size, dict):
+                w = self._as_float(size.get("width"))
+                h = self._as_float(size.get("height"))
+                if w is not None and h is not None and w > 0 and h > 0:
+                    return w, h
+
+            return width, height
+
+        def append_item(
+                item: dict,
+                context_tokens: set[str],
+                context_w: float | None,
+                context_h: float | None,
+                context_page: int | None,
+                context_unit: str | None,
+        ):
+            if context_tokens:
+                item["targets"] = sorted(context_tokens)[:24]
+            if context_w is not None and context_w > 0:
+                item["base_w"] = context_w
+            if context_h is not None and context_h > 0:
+                item["base_h"] = context_h
+            if context_page is not None:
+                item["page_index"] = context_page
+            if context_unit:
+                item["coord_unit"] = context_unit
+            items.append(item)
+
+        def walk(
+                node,
+                context_tokens: set[str] | None = None,
+                context_w: float | None = None,
+                context_h: float | None = None,
+                context_page: int | None = None,
+                context_unit: str | None = None,
+                parent_key: str | None = None,
+        ):
+            inherited_tokens = set(context_tokens or set())
+
+            if isinstance(node, dict):
+                local_tokens = inherited_tokens | collect_target_tokens(node)
+                local_w, local_h = parse_dimension_hints(node, context_w, context_h)
+                local_page = parse_page_hint(node, context_page)
+                local_unit = parse_unit_hint(node, context_unit)
+
+                text = ""
+                for key in ("text", "comment", "content", "remark", "label", "note", "msg", "message"):
+                    value = node.get(key)
+                    if isinstance(value, str) and value.strip():
+                        text = value.strip()
+                        break
+
+                x = self._as_float(node.get("x"))
+                y = self._as_float(node.get("y"))
+                w = self._as_float(node.get("w"))
+                h = self._as_float(node.get("h"))
+                if x is None:
+                    x = self._as_float(node.get("left"))
+                if y is None:
+                    y = self._as_float(node.get("top"))
+                if w is None:
+                    w = self._as_float(node.get("width"))
+                if h is None:
+                    h = self._as_float(node.get("height"))
+
+                rect = node.get("rect")
+                if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+                    x = self._as_float(rect[0]) if x is None else x
+                    y = self._as_float(rect[1]) if y is None else y
+                    w = self._as_float(rect[2]) if w is None else w
+                    h = self._as_float(rect[3]) if h is None else h
+
+                bbox = node.get("bbox")
+                if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                    x = self._as_float(bbox[0]) if x is None else x
+                    y = self._as_float(bbox[1]) if y is None else y
+                    w = self._as_float(bbox[2]) if w is None else w
+                    h = self._as_float(bbox[3]) if h is None else h
+
+                graphic = node.get("graphic")
+                if isinstance(graphic, dict):
+                    path = graphic.get("path")
+                    if isinstance(path, list) and path:
+                        append_item(
+                            {
+                                "path": path,
+                                "text": text,
+                                "color": graphic.get("borderColor") or node.get("borderColor"),
+                                "border_width": self._as_float(graphic.get("borderWidth")) or self._as_float(node.get("borderWidth"))
+                            },
+                            local_tokens,
+                            local_w,
+                            local_h,
+                            local_page,
+                            local_unit,
+                        )
+                    if x is None:
+                        x = self._as_float(graphic.get("left"))
+                    if y is None:
+                        y = self._as_float(graphic.get("top"))
+                    if w is None:
+                        w = self._as_float(graphic.get("width"))
+                    if h is None:
+                        h = self._as_float(graphic.get("height"))
+
+                if x is not None and y is not None:
+                    append_item(
+                        {
+                            "x": x, "y": y, "w": w, "h": h, "text": text,
+                            "color": node.get("borderColor"), "border_width": self._as_float(node.get("borderWidth"))
+                        },
+                        local_tokens,
+                        local_w,
+                        local_h,
+                        local_page,
+                        local_unit,
+                    )
+
+                for key, value in node.items():
+                    if isinstance(value, list) and key in page_container_keys and local_page is None:
+                        for i, one in enumerate(value):
+                            walk(one, local_tokens, local_w, local_h, i, local_unit, key)
+                    else:
+                        walk(value, local_tokens, local_w, local_h, local_page, local_unit, key)
+                return
+
+            if isinstance(node, list):
+                for i, value in enumerate(node):
+                    page_hint = context_page
+                    if parent_key in page_container_keys and page_hint is None:
+                        page_hint = i
+                    walk(value, inherited_tokens, context_w, context_h, page_hint, context_unit, parent_key)
+
+        walk(payload)
+        return items[:200]
+
+    def _extract_mark_summary_text(self, payload) -> str | None:
+        texts: list[str] = []
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key in ("text", "comment", "content", "remark", "label", "note", "msg", "message"):
+                    value = node.get(key)
+                    if isinstance(value, str):
+                        stripped = value.strip()
+                        if stripped:
+                            texts.append(stripped)
+                for value in node.values():
+                    walk(value)
+                return
+            if isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(payload)
+        if not texts:
+            return None
+        return "\n".join(texts[:10])
+
+    def _parse_mark_attachment_text(self, text: str) -> tuple[str | None, list[dict]]:
+        content = (text or "").strip()
+        if not content:
+            return None, []
+
+        candidates = [content]
+        try:
+            decoded = unquote(content)
+            if decoded and decoded != content:
+                candidates.append(decoded)
+                decoded_twice = unquote(decoded)
+                if decoded_twice and decoded_twice != decoded:
+                    candidates.append(decoded_twice)
+        except Exception:
+            pass
+
+        for one in candidates:
+            try:
+                payload = json.loads(one)
+                items = self._extract_mark_overlay_items(payload)
+                summary = self._extract_mark_summary_text(payload)
+                return summary, items
+            except Exception:
+                continue
+
+        items: list[dict] = []
+        line_re = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*[,，]\s*(-?\d+(?:\.\d+)?)\s*[:：\-]\s*(.+?)\s*$")
+        for line in content.splitlines():
+            match = line_re.match(line)
+            if not match:
+                continue
+            x = self._as_float(match.group(1))
+            y = self._as_float(match.group(2))
+            msg = match.group(3).strip()
+            if x is not None and y is not None:
+                items.append({"x": x, "y": y, "text": msg})
+
+        summary_lines = [one.strip() for one in content.splitlines() if one.strip()][:10]
+        summary = "\n".join(summary_lines) if summary_lines else None
+        return summary, items
+
+    def _get_review_overlay_data(self, uploads: list[dict]) -> tuple[str | None, list[dict], str | None]:
+        mark_file = next((one for one in uploads if isinstance(one, dict) and self._is_mark_attachment_upload(one)), None)
+        if mark_file is None:
+            return None, [], self.tr("未找到批改标注文件 markattachment.txt")
+
+        cache_key = self._preview_key(mark_file)
+        if cache_key in self._mark_overlay_cache:
+            text, items = self._mark_overlay_cache[cache_key]
+            return text, items, None
+
+        raw_text, error_text = self._fetch_text_payload(mark_file)
+        if not raw_text:
+            return None, [], error_text or self.tr("无法读取批改标注文件")
+
+        summary, items = self._parse_mark_attachment_text(raw_text)
+        if summary:
+            overlay_text = summary
+        elif items:
+            overlay_text = self.tr("已加载批改标注（无文字说明）")
+        else:
+            trimmed = raw_text.strip()
+            overlay_text = (trimmed[:800] + "...") if len(trimmed) > 800 else trimmed
+        self._mark_overlay_cache[cache_key] = (overlay_text, items)
+        return overlay_text, items, None
+
+    def _fetch_image_pixmap(self, file_info: dict) -> tuple[QPixmap | None, str | None]:
+        if accounts.current is None:
+            return None, self.tr("请先登录后再预览")
+
+        try:
+            session = accounts.current.session_manager.get_session("lms")
+        except Exception as e:
+            return None, str(e)
+
+        queue = self._resolve_upload_urls(file_info)
+        tried: set[str] = set()
+        errors: list[str] = []
+
+        while queue and len(tried) < 12:
+            url = queue.pop(0)
+            if not isinstance(url, str) or not url or url in tried:
+                continue
+            tried.add(url)
+
+            try:
+                response = session.get(url, timeout=30)
+                response.raise_for_status()
+            except Exception as e:
+                errors.append(str(e))
+                continue
+
+            content = response.content or b""
+            pixmap = QPixmap()
+            if content and pixmap.loadFromData(content):
+                return pixmap, None
+
+            nested_url = None
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+            if "json" in content_type:
+                try:
+                    nested_url = self._extract_nested_url(response.json())
+                except Exception:
+                    nested_url = self._extract_nested_url(content[:4096].decode("utf-8", errors="ignore"))
+            elif content:
+                nested_url = self._extract_nested_url(content[:4096].decode("utf-8", errors="ignore"))
+
+            if nested_url and nested_url not in tried and nested_url not in queue:
+                queue.append(nested_url)
+
+        reason = errors[-1] if errors else self.tr("文件不是可预览图片，或缺少有效图片链接")
+        return None, reason
+
+    def _get_cached_preview_pixmap(self, file_info: dict) -> tuple[QPixmap | None, str | None]:
+        cache_key = self._preview_key(file_info)
+        pixmap = self._preview_pixmap_cache.get(cache_key)
+        if pixmap is not None and not pixmap.isNull():
+            return pixmap, None
+
+        pixmap, error_text = self._fetch_image_pixmap(file_info)
+        if pixmap is not None and not pixmap.isNull():
+            self._preview_pixmap_cache[cache_key] = pixmap
+            return pixmap, None
+        return None, error_text
+
+    def _set_preview_pixmap(self, pixmap: QPixmap | None):
+        self._preview_original_pixmap = pixmap if pixmap and not pixmap.isNull() else None
+        self._apply_preview_scale()
+
+    def _apply_preview_scale(self):
+        if self._preview_original_pixmap is None:
+            self.previewImageLabel.setPixmap(QPixmap())
+            return
+
+        width = max(1, int(self._preview_original_pixmap.width() * self._preview_scale))
+        height = max(1, int(self._preview_original_pixmap.height() * self._preview_scale))
+        scaled = self._preview_original_pixmap.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.previewImageLabel.setText("")
+        self.previewImageLabel.setPixmap(scaled)
+        self.previewImageLabel.resize(scaled.size())
+
+    def set_preview_scale(self, scale: float):
+        bounded = max(0.1, min(float(scale), 8.0))
+        self._preview_scale = bounded
+        self.previewScaleLabel.setText(f"{int(round(self._preview_scale * 100))}%")
+        self._apply_preview_scale()
+
+    def _load_current_preview_image(self):
+        count = len(self._preview_images)
+        if count <= 0:
+            self.previewTitleLabel.setText(self.tr("无可预览图片"))
+            self.previewPrevButton.setEnabled(False)
+            self.previewNextButton.setEnabled(False)
+            self._set_preview_pixmap(None)
+            self.previewImageLabel.setText(self.tr("无可预览图片"))
+            self.previewScaleLabel.setText("-")
+            return
+
+        if self._preview_index < 0:
+            self._preview_index = 0
+        if self._preview_index >= count:
+            self._preview_index = count - 1
+
+        current = self._preview_images[self._preview_index]
+        name = self.safe_text(current.get("name"))
+        self.previewTitleLabel.setText(f"{name} ({self._preview_index + 1}/{count})")
+        self.previewPrevButton.setEnabled(self._preview_index > 0)
+        self.previewNextButton.setEnabled(self._preview_index < count - 1)
+
+        pixmap, error_text = self._get_cached_preview_pixmap(current)
+
+        if pixmap is None or pixmap.isNull():
+            self._set_preview_pixmap(None)
+            self.previewImageLabel.setText(error_text or self.tr("图片加载失败"))
+            self.previewScaleLabel.setText("-")
+            return
+
+        self._preview_scale = 1.0
+        self.previewScaleLabel.setText("100%")
+        self._set_preview_pixmap(pixmap)
+
+    def preview_prev_image(self):
+        if self._preview_index <= 0:
+            return
+        self._preview_index -= 1
+        self._load_current_preview_image()
+
+    def preview_next_image(self):
+        if self._preview_index >= len(self._preview_images) - 1:
+            return
+        self._preview_index += 1
+        self._load_current_preview_image()
+
+    def back_from_preview_page(self):
+        target = self._preview_source_page or self.detailPage
+        self.switchPage(target)
+        if target is self.submissionPage:
+            QTimer.singleShot(0, self._refresh_submission_upload_table_heights)
+        elif target is self.detailPage:
+            self.detailUploadsTable.resizeRowsToContents()
+            self.update_table_height(self.detailUploadsTable, min_rows=0, min_height=38)
+
+    def _preview_image_file(
+            self,
+            file_info: dict,
+            uploads: list[dict] | None = None,
+            review_mode: bool = False,
+            review_uploads: list[dict] | None = None
+    ):
+        if self._is_mark_attachment_upload(file_info):
+            self.error(self.tr("无法预览"), self.tr("标注文件请使用“批改预览”查看"), parent=self)
+            return
+
+        if not self._can_try_preview(file_info):
+            self.error(self.tr("无法预览"), self.tr("该附件没有可用预览链接"), parent=self)
+            return
+
+        if isinstance(uploads, list):
+            image_rows = [
+                one for one in uploads
+                if isinstance(one, dict) and (not self._is_mark_attachment_upload(one)) and self._can_try_preview(one)
+            ]
+        else:
+            image_rows = [file_info]
+
+        if not image_rows:
+            self.error(self.tr("无法预览"), self.tr("当前列表没有可预览图片"), parent=self)
+            return
+
+        selected_key = self._preview_key(file_info)
+        if self._preview_dialog is None:
+            self._preview_dialog = LMSImagePreviewDialog(
+                fetch_pixmap_callback=self._get_cached_preview_pixmap,
+                preview_key_callback=self._preview_key,
+                safe_text_callback=self.safe_text,
+                parent=self.window()
+            )
+
+        overlay_text = None
+        overlay_items: list[dict] | None = None
+        if review_mode:
+            overlay_text, overlay_items, overlay_error = self._get_review_overlay_data(
+                [one for one in review_uploads if isinstance(one, dict)] if isinstance(review_uploads, list)
+                else ([one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else [])
+            )
+            if overlay_error:
+                self.error(self.tr("批改预览不可用"), overlay_error, parent=self)
+                return
+
+        self._preview_dialog.open_images(
+            image_rows,
+            selected_key,
+            overlay_text=overlay_text,
+            overlay_items=overlay_items,
+            review_mode=review_mode
+        )
+
+    def populate_upload_table(self, table: TableWidget, uploads, review_context_uploads: list[dict] | None = None) -> int:
         rows = [one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else []
         table.setRowCount(len(rows))
+        review_source_rows = (
+            [one for one in review_context_uploads if isinstance(one, dict)]
+            if isinstance(review_context_uploads, list) else rows
+        )
+        has_mark_attachment = any(self._is_mark_attachment_upload(one) for one in review_source_rows)
+        table.setColumnWidth(2, 420 if has_mark_attachment else 320)
         for row, upload in enumerate(rows):
             table.setItem(row, 0, QTableWidgetItem(self.safe_text(upload.get("name"))))
             table.setItem(row, 1, QTableWidgetItem(self.format_size(upload.get("size"))))
 
-            save_btn = PushButton(self.tr("另存为"), table)
+            actions = QWidget(table)
+            action_layout = QHBoxLayout(actions)
+            action_layout.setContentsMargins(4, 0, 4, 0)
+            action_layout.setSpacing(8)
+
+            can_preview = (not self._is_mark_attachment_upload(upload)) and self._can_try_preview(upload)
+            if can_preview:
+                if has_mark_attachment:
+                    mark_btn = PushButton(self.tr("批改预览"), actions)
+                    mark_btn.setMinimumWidth(112)
+                    mark_btn.clicked.connect(
+                        lambda _=False, one=upload, all_rows=rows, review_rows=review_source_rows:
+                        self._preview_image_file(one, all_rows, True, review_rows)
+                    )
+                    action_layout.addWidget(mark_btn)
+
+                preview_btn = PushButton(self.tr("预览"), actions)
+                preview_btn.setMinimumWidth(112)
+                preview_btn.clicked.connect(lambda _=False, one=upload, all_rows=rows: self._preview_image_file(one, all_rows))
+                action_layout.addWidget(preview_btn)
+
+            save_btn = PushButton(self.tr("另存为"), actions)
+            save_btn.setMinimumWidth(112)
             save_btn.clicked.connect(lambda _=False, one=upload: self._save_file(one))
-            table.setCellWidget(row, 2, save_btn)
+            action_layout.addWidget(save_btn)
+            action_layout.addStretch(1)
+            table.setCellWidget(row, 2, actions)
 
         if table is self.detailUploadsTable:
             visible = len(rows) > 0
