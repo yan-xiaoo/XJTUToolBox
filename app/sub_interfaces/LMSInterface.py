@@ -293,9 +293,13 @@ class LMSImagePreviewDialog(QDialog):
                 py = int(to_px_y(y))
 
                 if w is not None and h is not None:
-                    pw = int(abs(to_px_x(w)))
-                    ph = int(abs(to_px_y(h)))
-                    painter.drawRect(px, py, max(2, pw), max(2, ph))
+                    px2 = int(to_px_x(x + w))
+                    py2 = int(to_px_y(y + h))
+                    left = min(px, px2)
+                    top = min(py, py2)
+                    pw = abs(px2 - px)
+                    ph = abs(py2 - py)
+                    painter.drawRect(left, top, max(2, pw), max(2, ph))
                 else:
                     painter.drawEllipse(px - 5, py - 5, 10, 10)
 
@@ -377,7 +381,10 @@ class LMSImagePreviewDialog(QDialog):
                     if stem:
                         add_token(stem)
 
-        for key in ("id", "reference_id", "key", "name", "download_url", "preview_url", "url", "href", "src", "link"):
+        for key in (
+                "id", "reference_id", "key", "name", "download_url", "preview_url", "attachment_url",
+                "url", "href", "src", "link"
+        ):
             add_from_value(file_info.get(key))
         return tokens
 
@@ -1405,6 +1412,12 @@ class LMSInterface(ScrollArea):
         correct_uploads = submission_correct.get("uploads", []) if isinstance(submission_correct.get("uploads"), list) else []
         sub_uploads = submission.get("uploads", []) if isinstance(submission.get("uploads"), list) else []
         review_context_uploads = [one for one in correct_uploads if isinstance(one, dict)]
+        if not review_context_uploads:
+            review_context_uploads = [one for one in sub_uploads if isinstance(one, dict)]
+
+        marked_payload = submission.get("marked_attachments")
+        if marked_payload is not None:
+            review_context_uploads = review_context_uploads + [{"marked_attachment_payload": marked_payload}]
 
         sub_upload_count = self.populate_upload_table(
             self.submissionUploadsTable,
@@ -1432,14 +1445,14 @@ class LMSInterface(ScrollArea):
                 self.update_table_height(table, min_rows=0, min_height=38)
 
     def _open_file(self, file_info: dict):
-        url = file_info.get("preview_url") or file_info.get("download_url")
+        url = file_info.get("preview_url") or file_info.get("download_url") or file_info.get("attachment_url")
         if not isinstance(url, str) or not url:
             self.error(self.tr("无法查看"), self.tr("该文件没有可用链接"), parent=self)
             return
         QDesktopServices.openUrl(QUrl(url))
 
     def _save_file(self, file_info: dict):
-        url = file_info.get("download_url") or file_info.get("preview_url")
+        url = file_info.get("download_url") or file_info.get("preview_url") or file_info.get("attachment_url")
         if not isinstance(url, str) or not url:
             self.error(self.tr("无法下载"), self.tr("该文件没有可用下载链接"), parent=self)
             return
@@ -1487,7 +1500,7 @@ class LMSInterface(ScrollArea):
     @staticmethod
     def _is_image_by_url(file_info: dict) -> bool:
         image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg", ".heic", ".heif")
-        for key in ("download_url", "preview_url", "url", "href"):
+        for key in ("download_url", "preview_url", "attachment_url", "url", "href"):
             value = file_info.get(key)
             if not isinstance(value, str) or not value:
                 continue
@@ -1499,12 +1512,14 @@ class LMSInterface(ScrollArea):
     def _can_try_preview(self, file_info: dict) -> bool:
         if self._is_image_upload(file_info) or self._is_image_by_url(file_info):
             return True
-        return bool(file_info.get("preview_url") or file_info.get("download_url"))
+        return bool(file_info.get("preview_url") or file_info.get("download_url") or file_info.get("attachment_url"))
 
     @staticmethod
     def _is_mark_attachment_upload(file_info: dict) -> bool:
         name = str(file_info.get("name") or "").strip().lower()
-        return name in {"markattachment.txt", "markattatchment.txt"}
+        if name in {"markattachment.txt", "markattatchment.txt"}:
+            return True
+        return bool(re.search(r"(markattachment|markattatchment|mark_attachment|annotation|markup).*\.(txt|json)$", name))
 
     @staticmethod
     def _as_float(value) -> float | None:
@@ -1518,9 +1533,10 @@ class LMSInterface(ScrollArea):
     def _preview_key(self, file_info: dict) -> str:
         download_url = str(file_info.get("download_url") or "")
         preview_url = str(file_info.get("preview_url") or "")
+        attachment_url = str(file_info.get("attachment_url") or "")
         reference_id = str(file_info.get("reference_id") or "")
         upload_id = str(file_info.get("id") or "")
-        return f"{upload_id}|{reference_id}|{download_url}|{preview_url}"
+        return f"{upload_id}|{reference_id}|{download_url}|{preview_url}|{attachment_url}"
 
     def _extract_nested_url(self, payload) -> str | None:
         if isinstance(payload, str):
@@ -1536,7 +1552,7 @@ class LMSInterface(ScrollArea):
             return None
 
         if isinstance(payload, dict):
-            for key in ("url", "download_url", "preview_url", "signed_url", "src", "href", "link"):
+            for key in ("url", "download_url", "preview_url", "attachment_url", "signed_url", "src", "href", "link"):
                 result = self._extract_nested_url(payload.get(key))
                 if result:
                     return result
@@ -1555,7 +1571,7 @@ class LMSInterface(ScrollArea):
 
     def _resolve_upload_urls(self, file_info: dict) -> list[str]:
         urls: list[str] = []
-        for key in ("download_url", "preview_url", "url", "href"):
+        for key in ("download_url", "preview_url", "attachment_url", "url", "href"):
             value = file_info.get(key)
             if isinstance(value, str) and value.startswith(("http://", "https://")) and value not in urls:
                 urls.append(value)
@@ -1604,8 +1620,19 @@ class LMSInterface(ScrollArea):
                 except Exception:
                     text = None
 
+            binary_like = (
+                content_type.startswith("image/")
+                or content_type.startswith("video/")
+                or content_type.startswith("audio/")
+                or "octet-stream" in content_type
+                or "application/pdf" in content_type
+            )
+
             if text is None and data:
-                for encoding in ("utf-8-sig", "utf-8", "gb18030", "latin-1"):
+                encodings = ["utf-8-sig", "utf-8", "gb18030"]
+                if content_type.startswith("text/"):
+                    encodings.append("latin-1")
+                for encoding in encodings:
                     try:
                         text = data.decode(encoding)
                         break
@@ -1619,7 +1646,7 @@ class LMSInterface(ScrollArea):
                 if text and len(text.strip()) < 2048 and text.strip().startswith(("http://", "https://", "{", "[")):
                     continue
 
-            if text and text.strip():
+            if (not binary_like) and text and text.strip():
                 return text, None
 
         reason = errors[-1] if errors else self.tr("无法读取批改标注文件")
@@ -1666,7 +1693,7 @@ class LMSInterface(ScrollArea):
                         "id", "upload_id", "uploadId", "reference_id", "referenceId", "file_id", "fileId",
                         "target_id", "targetId", "image_id", "imageId", "key", "upload_key", "file_key",
                         "name", "file_name", "fileName", "image_name", "imageName",
-                        "url", "download_url", "preview_url", "src", "href", "link"
+                        "url", "download_url", "preview_url", "attachment_url", "src", "href", "link"
                 ):
                     add_tokens_from_value(raw.get(key), tokens)
                 return
@@ -1682,7 +1709,7 @@ class LMSInterface(ScrollArea):
                     "id", "upload_id", "uploadId", "reference_id", "referenceId", "file_id", "fileId",
                     "target_id", "targetId", "image_id", "imageId", "key", "upload_key", "file_key",
                     "name", "file_name", "fileName", "image_name", "imageName",
-                    "url", "download_url", "preview_url", "src", "href", "link"
+                    "url", "download_url", "preview_url", "attachment_url", "src", "href", "link"
             ):
                 add_tokens_from_value(node.get(key), tokens)
             return {one for one in tokens if one}
@@ -1729,6 +1756,7 @@ class LMSInterface(ScrollArea):
                     ("natural_width", "natural_height"),
                     ("canvas_width", "canvas_height"),
                     ("page_width", "page_height"),
+                    ("display_width", "display_height"),
             ):
                 w = self._as_float(node.get(w_key))
                 h = self._as_float(node.get(h_key))
@@ -1793,6 +1821,10 @@ class LMSInterface(ScrollArea):
                 w = self._as_float(node.get("w"))
                 h = self._as_float(node.get("h"))
                 if x is None:
+                    x = self._as_float(node.get("x1"))
+                if y is None:
+                    y = self._as_float(node.get("y1"))
+                if x is None:
                     x = self._as_float(node.get("left"))
                 if y is None:
                     y = self._as_float(node.get("top"))
@@ -1801,12 +1833,34 @@ class LMSInterface(ScrollArea):
                 if h is None:
                     h = self._as_float(node.get("height"))
 
+                right = self._as_float(node.get("right"))
+                bottom = self._as_float(node.get("bottom"))
+                x2 = self._as_float(node.get("x2"))
+                y2 = self._as_float(node.get("y2"))
+                if right is not None:
+                    x2 = right if x2 is None else x2
+                if bottom is not None:
+                    y2 = bottom if y2 is None else y2
+                if x is not None and w is None and x2 is not None:
+                    w = x2 - x
+                if y is not None and h is None and y2 is not None:
+                    h = y2 - y
+                if x is None and x2 is not None and w is not None:
+                    x = x2 - w
+                if y is None and y2 is not None and h is not None:
+                    y = y2 - h
+
                 rect = node.get("rect")
                 if isinstance(rect, (list, tuple)) and len(rect) >= 4:
                     x = self._as_float(rect[0]) if x is None else x
                     y = self._as_float(rect[1]) if y is None else y
                     w = self._as_float(rect[2]) if w is None else w
                     h = self._as_float(rect[3]) if h is None else h
+                elif isinstance(rect, dict):
+                    x = self._as_float(rect.get("x")) if x is None else x
+                    y = self._as_float(rect.get("y")) if y is None else y
+                    w = self._as_float(rect.get("w")) if w is None else w
+                    h = self._as_float(rect.get("h")) if h is None else h
 
                 bbox = node.get("bbox")
                 if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
@@ -1814,6 +1868,21 @@ class LMSInterface(ScrollArea):
                     y = self._as_float(bbox[1]) if y is None else y
                     w = self._as_float(bbox[2]) if w is None else w
                     h = self._as_float(bbox[3]) if h is None else h
+                elif isinstance(bbox, dict):
+                    bbox_x1 = self._as_float(bbox.get("x1"))
+                    bbox_y1 = self._as_float(bbox.get("y1"))
+                    bbox_x2 = self._as_float(bbox.get("x2"))
+                    bbox_y2 = self._as_float(bbox.get("y2"))
+                    x = bbox_x1 if x is None else x
+                    y = bbox_y1 if y is None else y
+                    if w is None:
+                        w = self._as_float(bbox.get("w"))
+                    if h is None:
+                        h = self._as_float(bbox.get("h"))
+                    if x is not None and w is None and bbox_x2 is not None:
+                        w = bbox_x2 - x
+                    if y is not None and h is None and bbox_y2 is not None:
+                        h = bbox_y2 - y
 
                 graphic = node.get("graphic")
                 if isinstance(graphic, dict):
@@ -1960,6 +2029,173 @@ class LMSInterface(ScrollArea):
             overlay_text = (trimmed[:800] + "...") if len(trimmed) > 800 else trimmed
         self._mark_overlay_cache[cache_key] = (overlay_text, items)
         return overlay_text, items, None
+
+    @staticmethod
+    def _extract_inline_mark_payload(upload: dict):
+        for key in (
+                "marked_attachment_payload",
+                "marked_attachments_payload",
+                "marked_attachments",
+                "mark_overlay_payload",
+                "overlay_payload",
+                "annotation_payload",
+                "annotations",
+                "annotation",
+                "mark_data",
+                "markup",
+                "payload",
+                "data",
+        ):
+            if key in upload:
+                value = upload.get(key)
+                if value is not None:
+                    return value
+        return None
+
+    @staticmethod
+    def _overlay_items_match_file(items: list[dict], file_info: dict | None) -> bool:
+        if not isinstance(file_info, dict) or not items:
+            return False
+        file_tokens = LMSImagePreviewDialog._collect_file_tokens(file_info)
+        if not file_tokens:
+            return False
+        for item in items[:300]:
+            if not isinstance(item, dict):
+                continue
+            item_tokens = LMSImagePreviewDialog._collect_overlay_item_tokens(item)
+            if item_tokens and (not file_tokens.isdisjoint(item_tokens)):
+                return True
+        return False
+
+    def _parse_mark_attachment_payload(self, payload) -> tuple[str | None, list[dict]]:
+        if payload is None:
+            return None, []
+        if isinstance(payload, (dict, list)):
+            return self._extract_mark_summary_text(payload), self._extract_mark_overlay_items(payload)
+        if isinstance(payload, str):
+            return self._parse_mark_attachment_text(payload)
+        try:
+            dumped = json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            return None, []
+        return self._parse_mark_attachment_text(dumped)
+
+    def _format_overlay_text(
+            self, summary: str | None, items: list[dict], raw_text: str | None = None
+    ) -> str | None:
+        if summary:
+            return summary
+        if items:
+            return self.tr("已加载批改标注（无文字说明）")
+        if raw_text:
+            trimmed = raw_text.strip()
+            if trimmed:
+                return (trimmed[:800] + "...") if len(trimmed) > 800 else trimmed
+        return None
+
+    def _has_review_overlay_source(self, uploads: list[dict]) -> bool:
+        for one in uploads:
+            if not isinstance(one, dict):
+                continue
+            if self._is_mark_attachment_upload(one):
+                return True
+            if self._extract_inline_mark_payload(one) is not None:
+                return True
+            attachment_url = one.get("attachment_url")
+            if isinstance(attachment_url, str) and attachment_url.startswith(("http://", "https://")):
+                return True
+        return False
+
+    def _get_review_overlay_data_v2(
+            self, uploads: list[dict], current_file: dict | None = None
+    ) -> tuple[str | None, list[dict], str | None]:
+        rows = [one for one in uploads if isinstance(one, dict)]
+        if not rows:
+            return None, [], self.tr("未找到可用批改数据")
+
+        fallback: tuple[str | None, list[dict]] | None = None
+        errors: list[str] = []
+
+        for row in rows:
+            payload = self._extract_inline_mark_payload(row)
+            if payload is None:
+                continue
+
+            cache_key = f"payload|{self._preview_key(row)}"
+            if cache_key in self._mark_overlay_cache:
+                overlay_text, items = self._mark_overlay_cache[cache_key]
+            else:
+                summary, items = self._parse_mark_attachment_payload(payload)
+                overlay_text = self._format_overlay_text(summary, items)
+                self._mark_overlay_cache[cache_key] = (overlay_text, items)
+
+            if not overlay_text and not items:
+                continue
+            if self._overlay_items_match_file(items, current_file):
+                return overlay_text, items, None
+            if fallback is None:
+                fallback = (overlay_text, items)
+
+        mark_file = next((one for one in rows if self._is_mark_attachment_upload(one)), None)
+        if mark_file is not None:
+            cache_key = self._preview_key(mark_file)
+            if cache_key in self._mark_overlay_cache:
+                overlay_text, items = self._mark_overlay_cache[cache_key]
+            else:
+                raw_text, error_text = self._fetch_text_payload(mark_file)
+                if not raw_text:
+                    errors.append(error_text or self.tr("无法读取批改标注文件"))
+                    overlay_text, items = None, []
+                else:
+                    summary, items = self._parse_mark_attachment_text(raw_text)
+                    overlay_text = self._format_overlay_text(summary, items, raw_text)
+                    self._mark_overlay_cache[cache_key] = (overlay_text, items)
+
+            if overlay_text or items:
+                if self._overlay_items_match_file(items, current_file):
+                    return overlay_text, items, None
+                if fallback is None:
+                    fallback = (overlay_text, items)
+        else:
+            errors.append(self.tr("未找到批改标注文件 markattachment.txt"))
+
+        tried_attachment_urls: set[str] = set()
+        for row in rows:
+            attachment_url = row.get("attachment_url")
+            if not isinstance(attachment_url, str) or not attachment_url:
+                continue
+            if attachment_url in tried_attachment_urls:
+                continue
+            tried_attachment_urls.add(attachment_url)
+
+            text_source = dict(row)
+            text_source.setdefault("download_url", attachment_url)
+            text_source.setdefault("preview_url", attachment_url)
+            text_source["attachment_url"] = attachment_url
+
+            cache_key = f"attachment|{self._preview_key(text_source)}"
+            if cache_key in self._mark_overlay_cache:
+                overlay_text, items = self._mark_overlay_cache[cache_key]
+            else:
+                raw_text, error_text = self._fetch_text_payload(text_source)
+                if not raw_text:
+                    if error_text:
+                        errors.append(error_text)
+                    continue
+                summary, items = self._parse_mark_attachment_text(raw_text)
+                overlay_text = self._format_overlay_text(summary, items, raw_text)
+                self._mark_overlay_cache[cache_key] = (overlay_text, items)
+
+            if not overlay_text and not items:
+                continue
+            if self._overlay_items_match_file(items, current_file):
+                return overlay_text, items, None
+            if fallback is None:
+                fallback = (overlay_text, items)
+
+        if fallback is not None:
+            return fallback[0], fallback[1], None
+        return None, [], (errors[-1] if errors else self.tr("未找到可用批改标注数据"))
 
     def _fetch_image_pixmap(self, file_info: dict) -> tuple[QPixmap | None, str | None]:
         if accounts.current is None:
@@ -2136,9 +2372,10 @@ class LMSInterface(ScrollArea):
         overlay_text = None
         overlay_items: list[dict] | None = None
         if review_mode:
-            overlay_text, overlay_items, overlay_error = self._get_review_overlay_data(
+            overlay_text, overlay_items, overlay_error = self._get_review_overlay_data_v2(
                 [one for one in review_uploads if isinstance(one, dict)] if isinstance(review_uploads, list)
-                else ([one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else [])
+                else ([one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else []),
+                current_file=file_info
             )
             if overlay_error:
                 self.error(self.tr("批改预览不可用"), overlay_error, parent=self)
@@ -2159,7 +2396,7 @@ class LMSInterface(ScrollArea):
             [one for one in review_context_uploads if isinstance(one, dict)]
             if isinstance(review_context_uploads, list) else rows
         )
-        has_mark_attachment = any(self._is_mark_attachment_upload(one) for one in review_source_rows)
+        has_mark_attachment = self._has_review_overlay_source(review_source_rows)
         table.setColumnWidth(2, 420 if has_mark_attachment else 320)
         for row, upload in enumerate(rows):
             table.setItem(row, 0, QTableWidgetItem(self.safe_text(upload.get("name"))))
