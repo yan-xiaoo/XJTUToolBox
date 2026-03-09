@@ -3,7 +3,7 @@
 import json
 import re
 from typing import Any, Mapping, cast, Optional, List
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from requests import Session
 
@@ -207,11 +207,29 @@ class LMSUtil:
                 # 标注附件仅用于增强显示，不应影响作业详情主流程。
                 continue
 
-            if not isinstance(marked_data, Mapping):
+            if not isinstance(marked_data, (Mapping, list)):
                 continue
 
-            marked_infos = marked_data.get("marked_attachment_infos", [])
-            if not isinstance(marked_infos, list) or not marked_infos:
+            upload_groups: list[list[dict[str, Any]]] = []
+            sub_uploads = submission.get("uploads", [])
+            if isinstance(sub_uploads, list):
+                upload_groups.append([one for one in sub_uploads if isinstance(one, dict)])
+
+            submission_correct = submission.get("submission_correct")
+            if isinstance(submission_correct, Mapping):
+                correct_uploads = submission_correct.get("uploads", [])
+                if isinstance(correct_uploads, list):
+                    upload_groups.append([one for one in correct_uploads if isinstance(one, dict)])
+
+            # 将原始批注 payload 透传给 UI，便于兼容新旧批注接口格式。
+            for one_group in upload_groups:
+                for upload in one_group:
+                    upload.setdefault("marked_attachment_payload", marked_data)
+
+            submission["marked_attachments"] = marked_data
+
+            marked_infos = self._iter_marked_attachment_entries(marked_data)
+            if not marked_infos:
                 continue
 
             attachment_map: dict[tuple[str, str], str] = {}
@@ -219,39 +237,28 @@ class LMSUtil:
                 if not isinstance(info, Mapping):
                     continue
 
-                marked_attachment = info.get("marked_attachment")
-                if not isinstance(marked_attachment, Mapping):
-                    continue
-
-                attachment_url = marked_attachment.get("url")
+                attachment_url = self._extract_marked_attachment_url(info)
                 if not isinstance(attachment_url, str) or not attachment_url:
                     continue
 
-                origin_upload = info.get("origin_upload")
-                if not isinstance(origin_upload, Mapping):
+                origin_candidates = self._collect_marked_origin_candidates(info)
+                if not origin_candidates:
                     continue
-
-                origin_candidates: list[Mapping[str, Any]] = [origin_upload]
-                nested_origin_upload = origin_upload.get("upload")
-                if isinstance(nested_origin_upload, Mapping):
-                    origin_candidates.insert(0, nested_origin_upload)
 
                 for origin_candidate in origin_candidates:
                     for key in self._build_upload_match_keys(origin_candidate):
                         attachment_map.setdefault(key, attachment_url)
 
-            uploads = submission.get("uploads", [])
-            if not isinstance(uploads, list):
+            if not attachment_map:
                 continue
 
-            for upload in uploads:
-                if not isinstance(upload, dict):
-                    continue
-                for key in self._build_upload_match_keys(upload):
-                    resolved_attachment_url = attachment_map.get(key)
-                    if isinstance(resolved_attachment_url, str) and resolved_attachment_url:
-                        upload["attachment_url"] = resolved_attachment_url
-                        break
+            for one_group in upload_groups:
+                for upload in one_group:
+                    for key in self._build_upload_match_keys(upload):
+                        resolved_attachment_url = attachment_map.get(key)
+                        if isinstance(resolved_attachment_url, str) and resolved_attachment_url:
+                            upload["attachment_url"] = resolved_attachment_url
+                            break
 
         return submission_list
 
@@ -920,24 +927,143 @@ class LMSUtil:
     @staticmethod
     def _build_upload_match_keys(upload: Mapping[str, Any]) -> list[tuple[str, str]]:
         keys: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_key(kind: str, raw_value: Any):
+            if raw_value is None:
+                return
+            value_text = str(raw_value).strip()
+            if not value_text:
+                return
+            pair = (kind, value_text.lower())
+            if pair in seen:
+                return
+            seen.add(pair)
+            keys.append(pair)
 
         upload_id = LMSUtil._coerce_int(upload.get("id"))
         if upload_id is not None and upload_id > 0:
-            keys.append(("id", str(upload_id)))
+            add_key("id", upload_id)
 
         upload_key = upload.get("key")
         if isinstance(upload_key, str) and upload_key:
-            keys.append(("key", upload_key))
+            add_key("key", upload_key)
 
         reference_id = LMSUtil._coerce_int(upload.get("reference_id"))
         if reference_id is not None and reference_id > 0:
-            keys.append(("reference_id", str(reference_id)))
+            add_key("reference_id", reference_id)
 
         name = upload.get("name")
         if isinstance(name, str) and name:
-            keys.append(("name", name))
+            add_key("name", name)
+
+        for url_key in ("url", "download_url", "preview_url", "attachment_url", "href", "link"):
+            raw_url = upload.get(url_key)
+            if not isinstance(raw_url, str) or not raw_url:
+                continue
+            parsed_path = unquote(urlparse(raw_url).path or "").strip()
+            if not parsed_path:
+                continue
+            add_key("path", parsed_path)
+            base_name = parsed_path.rsplit("/", 1)[-1]
+            if base_name:
+                add_key("name", base_name)
 
         return keys
+
+    @staticmethod
+    def _iter_marked_attachment_entries(marked_data: Any) -> list[Mapping[str, Any]]:
+        candidate_lists: list[list[Any]] = []
+
+        if isinstance(marked_data, list):
+            candidate_lists.append(marked_data)
+        elif isinstance(marked_data, Mapping):
+            for key in (
+                "marked_attachment_infos",
+                "marked_attachments",
+                "attachments",
+                "items",
+                "list",
+                "data",
+                "records",
+                "results",
+            ):
+                value = marked_data.get(key)
+                if isinstance(value, list):
+                    candidate_lists.append(value)
+
+            if not candidate_lists:
+                if any(key in marked_data for key in ("marked_attachment", "origin_upload", "origin_attachment")):
+                    candidate_lists.append([marked_data])
+                else:
+                    for value in marked_data.values():
+                        if isinstance(value, list):
+                            candidate_lists.append(value)
+
+        result: list[Mapping[str, Any]] = []
+        for one_list in candidate_lists:
+            for one in one_list:
+                if isinstance(one, Mapping):
+                    result.append(one)
+        return result[:300]
+
+    @staticmethod
+    def _extract_marked_attachment_url(info: Mapping[str, Any]) -> str | None:
+        containers: list[Mapping[str, Any]] = [info]
+        for key in ("marked_attachment", "markedAttachment", "marked_upload", "markedUpload", "attachment"):
+            value = info.get(key)
+            if isinstance(value, Mapping):
+                containers.insert(0, value)
+
+        for container in containers:
+            for key in (
+                "url",
+                "download_url",
+                "preview_url",
+                "attachment_url",
+                "signed_url",
+                "file_url",
+                "blob_url",
+                "href",
+                "link",
+            ):
+                value = container.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        return None
+
+    @staticmethod
+    def _collect_marked_origin_candidates(info: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+        candidates: list[Mapping[str, Any]] = []
+
+        for key in (
+            "origin_upload",
+            "originUpload",
+            "origin_attachment",
+            "originAttachment",
+            "upload",
+            "source_upload",
+            "sourceUpload",
+            "source_attachment",
+            "sourceAttachment",
+            "attachment",
+            "origin",
+            "source",
+        ):
+            value = info.get(key)
+            if isinstance(value, Mapping):
+                candidates.append(value)
+
+        expanded: list[Mapping[str, Any]] = []
+        for candidate in candidates:
+            nested_upload = candidate.get("upload")
+            if isinstance(nested_upload, Mapping):
+                expanded.append(nested_upload)
+            expanded.append(candidate)
+
+        if expanded:
+            return expanded
+        return []
 
     @staticmethod
     def _extract_url_query_param(url: str, key: str) -> str | None:
