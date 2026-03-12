@@ -13,6 +13,7 @@ from ..components.ProgressInfoBar import ProgressInfoBar, ProgressBarThread
 from ..threads.LMSThread import LMSThread, LMSAction
 from ..threads.ProcessWidget import ProcessWidget
 from ..utils import StyleSheet, accounts
+from lms.models import ActivityType
 
 
 class LMSFileDownloadThread(ProgressBarThread):
@@ -85,7 +86,7 @@ class LMSInterface(ScrollArea):
         self._current_detail_uploads: list[dict] = []
         self._current_submission: dict | None = None
         self._download_jobs: list[tuple[ProgressInfoBar, LMSFileDownloadThread]] = []
-        self.activity_type_filter = "homework"
+        self.activity_type_filter = ActivityType.HOMEWORK.value
 
         self.view = QWidget(self)
         self.setObjectName("LMSInterface")
@@ -202,10 +203,10 @@ class LMSInterface(ScrollArea):
         commandLayout.addStretch(1)
 
         self.activityTypePivot = Pivot(self.activityPage)
-        self.activityTypePivot.addItem("homework", self.tr("作业"), onClick=lambda: self.onActivityTypeChanged("homework"))
-        self.activityTypePivot.addItem("material", self.tr("资料"), onClick=lambda: self.onActivityTypeChanged("material"))
-        self.activityTypePivot.addItem("lesson", self.tr("课程回放"), onClick=lambda: self.onActivityTypeChanged("lesson"))
-        self.activityTypePivot.addItem("lecture_live", self.tr("直播"), onClick=lambda: self.onActivityTypeChanged("lecture_live"))
+        self.activityTypePivot.addItem(ActivityType.HOMEWORK.value, self.tr("作业"), onClick=lambda: self.onActivityTypeChanged(ActivityType.HOMEWORK.value))
+        self.activityTypePivot.addItem(ActivityType.MATERIAL.value, self.tr("资料"), onClick=lambda: self.onActivityTypeChanged(ActivityType.MATERIAL.value))
+        self.activityTypePivot.addItem(ActivityType.LESSON.value, self.tr("课程回放"), onClick=lambda: self.onActivityTypeChanged(ActivityType.LESSON.value))
+        self.activityTypePivot.addItem(ActivityType.LECTURE_LIVE.value, self.tr("直播"), onClick=lambda: self.onActivityTypeChanged(ActivityType.LECTURE_LIVE.value))
         self.activityTypePivot.setCurrentItem(self.activity_type_filter)
 
         self.activityTable = TableWidget(self.activityPage)
@@ -582,7 +583,7 @@ class LMSInterface(ScrollArea):
 
         self.selected_course_id = course_id
         self.selected_course_name = str(course.get("name") or "-")
-        self.activity_type_filter = "homework"
+        self.activity_type_filter = ActivityType.HOMEWORK.value
         self.activityTypePivot.setCurrentItem(self.activity_type_filter)
         self.activityTable.setRowCount(0)
         self.refreshActivities()
@@ -662,7 +663,7 @@ class LMSInterface(ScrollArea):
         self._set_submission_rows(submission_rows)
 
         replay_rows = detail.get("replay_videos", []) if isinstance(detail.get("replay_videos"), list) else []
-        if str(detail.get("type") or "") == "lesson":
+        if str(detail.get("type") or "") == ActivityType.LESSON.value:
             replay_rows = [one for one in replay_rows if isinstance(one, dict) and str(one.get("label") or "") in {"ENCODER", "INSTRUCTOR"}]
         else:
             replay_rows = []
@@ -843,14 +844,14 @@ class LMSInterface(ScrollArea):
 
     def build_detail_rows(self, detail: dict) -> tuple[list[tuple[str, object]], str | None]:
         type_name = str(detail.get("type") or "")
-        if type_name == "lesson":
+        if type_name == ActivityType.LESSON.value:
             return [
                 (self.tr("标题"), detail.get("title")),
                 (self.tr("课程开始时间"), self.time_text(detail.get("lesson_start"))),
                 (self.tr("课程结束时间"), self.time_text(detail.get("lesson_end"))),
             ], None
 
-        if type_name == "homework":
+        if type_name == ActivityType.HOMEWORK.value:
             return [
                 (self.tr("标题"), detail.get("title")),
                 (self.tr("开始时间"), self.time_text(detail.get("start_time"))),
@@ -861,14 +862,14 @@ class LMSInterface(ScrollArea):
                 (self.tr("平均分"), detail.get("average_score")),
             ], self.safe_text(detail.get("description"))
 
-        if type_name == "material":
+        if type_name == ActivityType.MATERIAL.value:
             return [
                 (self.tr("标题"), detail.get("title")),
                 (self.tr("开始时间"), self.time_text(detail.get("start_time"))),
                 (self.tr("结束时间"), self.time_text(detail.get("end_time"))),
             ], self.safe_text(detail.get("description"))
 
-        if type_name == "lecture_live":
+        if type_name == ActivityType.LECTURE_LIVE.value:
             return [
                 (self.tr("标题"), detail.get("title")),
                 (self.tr("开始时间"), self.time_text(detail.get("start_time"))),

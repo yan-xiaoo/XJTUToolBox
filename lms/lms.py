@@ -2,261 +2,37 @@
 
 import json
 import re
-from typing import Any, Literal, Mapping, NotRequired, TypedDict, cast, Optional
+from typing import Any, Mapping, cast, Optional, List
 from urllib.parse import parse_qs, urlparse
 
 from requests import Session
 
-
-class LMSDepartment(TypedDict, total=False):
-    id: int
-    name: str
-    code: str
-
-
-class LMSUserInfo(TypedDict, total=False):
-    id: int
-    name: str
-    userNo: str
-    orgId: int
-    mobile: str
-    orgName: str
-    orgCode: str
-    role: str
-    hasAiAbility: bool
-    dept: LMSDepartment
-
-
-class LMSAcademicYear(TypedDict, total=False):
-    id: int
-    code: str
-    name: str
-    sort: int
-
-
-class LMSSemester(TypedDict, total=False):
-    id: int
-    code: str
-    name: str | None
-    real_name: str | None
-    sort: int
-
-
-class LMSInstructor(TypedDict, total=False):
-    id: int
-    name: str
-    avatar_big_url: NotRequired[str]
-
-
-class LMSCourseAttributes(TypedDict, total=False):
-    published: bool
-    student_count: int
-    teaching_class_name: str
-
-
-class LMSCourseSummary(TypedDict, total=False):
-    id: int
-    name: str
-    course_code: str
-    subject_code: NotRequired[str]
-    course_type: int
-    credit: str
-    compulsory: bool
-    grade: str | None
-    klass: str | None
-    is_mute: bool
-    start_date: str | None
-    end_date: str | None
-    org_id: int
-    study_completeness: Any
-    academic_year: LMSAcademicYear
-    semester: LMSSemester
-    department: LMSDepartment
-    instructors: list[LMSInstructor]
-    course_attributes: LMSCourseAttributes
-    course_outline: NotRequired[dict[str, Any]]
-    data: NotRequired[dict[str, Any]]
-
-
-class LMSCourseListResponse(TypedDict):
-    courses: list[LMSCourseSummary]
-
-
-class LMSCourseDetail(LMSCourseSummary, total=False):
-    display_name: str
-    cover: str
-    public_scope: str
-    modules: list[dict[str, Any]]
-    allow_update_basic_info: bool
-    allow_admin_update_basic_info: bool
-    allowed_to_invite_assistant: bool
-    allowed_to_invite_student: bool
-    allowed_to_join_course: bool
-    has_ai_ability: bool
-    created_user: dict[str, Any]
-    updated_user: dict[str, Any]
-    credit_state: dict[str, Any]
-    classroom_schedule: Any
-    course_outline: dict[str, Any]
-
-
-class LMSUpload(TypedDict, total=False):
-    id: int
-    name: str
-    key: str
-    type: str
-    source: str
-    status: str
-    size: int
-    link: str
-    reference_id: int
-    created_by_id: int
-    owner_id: int
-    allow_download: bool
-    origin_allow_download: bool
-    allow_aliyun_office_view: bool
-    allow_private_wps_office_view: bool
-    enable_set_h5_courseware_completion: bool
-    video_src_type: str
-    videos: list[dict[str, Any]]
-    audio: list[dict[str, Any]]
-    thumbnail: str | None
-    scorm: Any
-    is_cc_video: bool
-    third_part_referrer_id: Any
-    deleted: bool
-    referenced_at: str | None
-    created_at: str
-    updated_at: str
-    download_url: str
-    preview_url: str
-
-
-ActivityType = Literal["homework", "material", "lesson", "lecture_live", "unknown"]
-
-
-class LMSActivity(TypedDict, total=False):
-    id: int
-    course_id: int
-    type: ActivityType | str
-    title: str
-    unique_key: str
-    teaching_model: str
-    using_phase: str
-    sort: int
-    module_id: int | None
-    syllabus_id: int | None
-    start_time: str | None
-    end_time: str | None
-    created_at: str
-    updated_at: str
-    published: bool
-    is_started: bool
-    is_closed: bool
-    is_in_progress: bool
-    submit_by_group: bool
-    submit_times: int | None
-    non_submit_times: int | None
-    group_id: NotRequired[int]
-    group_set_id: int
-    group_set_name: str | None
-    assign_group_ids: list[int]
-    assign_student_ids: list[int]
-    has_assign_group: bool
-    has_assign_student: bool
-    is_assigned_to_all: bool
-    uploads: list[LMSUpload]
-    data: dict[str, Any]
-    lesson_resource: dict[str, Any]
-    video_suite: dict[str, Any]
-    replay_code: NotRequired[str]
-    replay_videos: NotRequired[list["LMSReplayVideo"]]
-    replay_download_urls: NotRequired[list[str]]
-    replay_video_count: NotRequired[int]
-    submission_list: NotRequired["LMSSubmissionListResponse"]
-
-
-class LMSActivitiesResponse(TypedDict):
-    activities: list[LMSActivity]
-
-
-class LMSSubmissionItem(TypedDict, total=False):
-    id: int
-    activity_id: int
-    student_id: int
-    group_id: int
-    can_retract: bool
-    comment: str
-    created_at: str | None
-    created_by: dict[str, Any]
-    instructor_comment: str
-    is_latest_version: bool
-    is_resubmitted: bool
-    is_redo: bool
-    mode: str
-    rubric_id: int | None
-    rubric_score: list[Any]
-    score: float | int | None
-    score_at: str | None
-    status: str
-    submitted_at: str | None
-    submit_by_instructor: bool
-    submission_correct: dict[str, Any]
-    updated_at: str | None
-    content: str
-    uploads: list[LMSUpload]
-
-
-class LMSSubmissionListResponse(TypedDict, total=False):
-    list: list[LMSSubmissionItem]
-    uploads: list[LMSUpload]
-
-
-class LMSLessonPlayerURLResponse(TypedDict, total=False):
-    url: str
-
-
-class LMSReplayError(TypedDict, total=False):
-    code: int
-    message: str
-    status: str
-    details: dict[str, Any]
-
-
-class LMSReplayScheduleResponse(TypedDict, total=False):
-    code: str
-    error: LMSReplayError
-    schedule: dict[str, Any]
-
-
-class LMSReplayVideosResponse(TypedDict, total=False):
-    lesson_videos: list["LMSReplayVideo"]
-    error: LMSReplayError
-
-
-class LMSReplayVideo(TypedDict, total=False):
-    id: int
-    label: str
-    mute: bool
-    is_best_audio: bool
-    play_type: str
-    download_url: str
-    file_key: str
-    size: int
+from .models import (LMSActivity, LMSActivityBrief, LMSUpload, LMSGrade, LMSInstructor, LMSDepartment, LMSReplayVideo,
+                     LMSReplayError, LMSReplayVideosResponse, LMSSubmissionListResponse,
+                     LMSUserInfo, LMSCourseSummary, LMSCourseDetail, ActivityType)
 
 
 class LMSUtil:
     """
     思源学堂 API 封装。
 
-    传入的 `session` 应使用 `app.sessions.lms_session.LMSSession`
-    或其他已经完成 LMS 认证的 `requests.Session`。
+    所有调用接口和上方定义的数据结构具有如下约定：
+    1. 和 Python 语义一致，所有数据结构中标记为 Optional 的字段在服务器返回缺失时会被标注为 None。
+    2. 如果服务器返回结果缺少了一个必需（没有被标为 Optional）的字段：
+     - 如果接口返回一个数据结构的列表，那么返回列表中不会包含这个数据
+     - 如果接口返回类型为 Optional[xxx]，那么会返回 None
+     - 其他情况下会抛出 ValueError 异常，表示服务器返回了一个不符合预期格式的结果
     """
 
     BASE_URL = "https://lms.xjtu.edu.cn"
     RMS_BASE_URL = "https://rms-v5.xjtu.edu.cn"
 
     def __init__(self, session: Session):
+        """
+        创建一个 LMSUtil 实例。
+        传入的 `session` 应使用 `app.sessions.lms_session.LMSSession`
+        或其他已经完成思源学堂登录认证的 `requests.Session`。
+        """
         self.session = session
         self._cached_user_info: LMSUserInfo | None = None
         self._replay_video_cache: dict[str, list[LMSReplayVideo]] = {}
@@ -272,35 +48,50 @@ class LMSUtil:
     def get_user_info(self, refresh: bool = False) -> LMSUserInfo:
         """
         获取当前登录用户基本信息。
-
         返回值来自 `/user/index` 页面中的 `globalData.user`。
+
+        :param refresh: 是否强制刷新缓存（默认 `False`）。如果为 `True`，将重新请求用户主页并解析用户信息，而不是使用之前缓存的结果。
         """
         if self._cached_user_info is not None and not refresh:
             return self._cached_user_info
 
         page = self._get_user_index_page()
-        user_block = self._extract_js_block(page, "user", "dept")
-        dept_block = self._extract_js_block(page, "dept", "locale")
+        user_dict = self._parse_js_object(page, "user", "dept")
+        dept_dict = self._parse_js_object(page, "dept", "locale")
 
-        info: LMSUserInfo = {}
-        for key in ("id", "name", "userNo", "orgId", "mobile", "orgName", "orgCode", "role", "hasAiAbility"):
-            value = self._extract_js_key_value(user_block, key)
-            if value is not None:
-                info[key] = value
+        info: LMSUserInfo = {
+            "id": user_dict.get("id"),
+            "name": user_dict.get("name"),
+            "userNo": user_dict.get("userNo"),
+            "orgId": user_dict.get("orgId"),
+            "mobile": user_dict.get("mobile"),
+            "orgName": user_dict.get("orgName"),
+            "orgCode": user_dict.get("orgCode"),
+            "role": user_dict.get("role"),
+            "hasAiAbility": user_dict.get("hasAiAbility"),
+            "dept": None
+        }
 
-        dept: LMSDepartment = {}
-        for key in ("id", "name", "code"):
-            value = self._extract_js_key_value(dept_block, key)
-            if value is not None:
-                dept[key] = value
+        dept: LMSDepartment = {
+            "id": dept_dict.get("id"),
+            "name": dept_dict.get("name"),
+            "code": dept_dict.get("code"),
+        }
+
+        # 如果存在学院信息，则添加到用户信息中
         if dept:
             info["dept"] = dept
 
         self._cached_user_info = info
         return info
 
-    def _get_my_courses_response(self) -> LMSCourseListResponse:
-        """获取课程列表原始结构：`{\"courses\": [...]}`。"""
+    def get_my_courses(self) -> list[LMSCourseSummary]:
+        """获取课程列表原始结构：`{\"courses\": [...]}`。
+
+        :raises: JSONDecodeError: 无法解析响应中的 JSON 数据
+        :raises: ValueError: 响应数据格式不符合预期，例如缺少 "courses" 字段或 "courses" 不是列表
+        :raises: requests.HTTPError: HTTP 请求失败，例如返回非 200 状态码
+        """
         data = self._post_json(f"{self.BASE_URL}/api/my-courses")
         if not isinstance(data, dict):
             raise ValueError("Unexpected response from /api/my-courses: expected object.")
@@ -316,21 +107,17 @@ class LMSUtil:
                 if result is not None:
                     extracted_courses.append(result)
 
-        return cast(LMSCourseListResponse, {"courses": extracted_courses})
+        return extracted_courses
 
-    def get_my_courses(self) -> list[LMSCourseSummary]:
-        """获取课程列表。"""
-        return self._get_my_courses_response()["courses"]
-
-    def get_course_detail(self, course_id: int) -> LMSCourseDetail:
+    def get_course_detail(self, course_id: int) -> Optional[LMSCourseDetail]:
         """获取课程详细信息。"""
         data = self._get_json(f"{self.BASE_URL}/api/courses/{course_id}")
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from /api/courses/{course_id}: expected object.")
-        return cast(LMSCourseDetail, self._extract_course_detail(data))
+        return self._extract_course_detail(data)
 
-    def _get_course_activities_response(self, course_id: int) -> LMSActivitiesResponse:
-        """获取课程活动原始结构：`{\"activities\": [...]}`。"""
+    def get_course_activities(self, course_id: int) -> list[LMSActivityBrief]:
+        """获取课程活动列表。这里返回的内容是活动的简要信息，只包含在 LMSActivityBrief 中定义的字段。"""
         data = self._get_json(f"{self.BASE_URL}/api/courses/{course_id}/activities")
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from /api/courses/{course_id}/activities: expected object.")
@@ -342,19 +129,15 @@ class LMSUtil:
             )
 
         extracted_activities = [self._extract_activity_brief(one) for one in activities if isinstance(one, dict)]
-        return cast(LMSActivitiesResponse, {"activities": extracted_activities})
-
-    def get_course_activities(self, course_id: int) -> list[LMSActivity]:
-        """获取课程活动列表。"""
-        return self._get_course_activities_response(course_id)["activities"]
+        return extracted_activities
 
     def get_activity_detail(self, activity_id: int) -> LMSActivity:
         """获取活动详细信息。"""
         data = self._get_json(f"{self.BASE_URL}/api/activities/{activity_id}")
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from /api/activities/{activity_id}: expected object.")
-        detail = cast(LMSActivity, self._extract_activity_detail(data))
-        if str(detail.get("type")) == "homework":
+        detail = self._extract_activity_detail(data)
+        if str(detail.get("type")) == ActivityType.HOMEWORK.value:
             detail["submission_list"] = self._get_submission_list(activity_id, activity_detail=data)
         return detail
 
@@ -400,7 +183,7 @@ class LMSUtil:
         data = self._get_json(url)
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from {url}: expected object.")
-        return cast(LMSSubmissionListResponse, self._extract_submission_list(data))
+        return self._extract_submission_list(data)
 
     def _get_lesson_player_url_response(
         self,
@@ -408,7 +191,7 @@ class LMSUtil:
         *,
         from_page: str = "course",
         timeout: float | tuple[float, float] | None = None,
-    ) -> LMSLessonPlayerURLResponse:
+    ) -> str:
         data = self._get_json(
             f"{self.BASE_URL}/api/lessons/{lesson_activity_id}/player-url",
             params={"from_page": from_page},
@@ -416,7 +199,7 @@ class LMSUtil:
         )
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from /api/lessons/{lesson_activity_id}/player-url: expected object.")
-        return cast(LMSLessonPlayerURLResponse, {"url": data.get("url")})
+        return data.get("url")
 
     def _get_lesson_player_url(
         self,
@@ -425,8 +208,7 @@ class LMSUtil:
         from_page: str = "course",
         timeout: float | tuple[float, float] | None = None,
     ) -> str:
-        payload = self._get_lesson_player_url_response(lesson_activity_id, from_page=from_page, timeout=timeout)
-        player_url = payload.get("url")
+        player_url = self._get_lesson_player_url_response(lesson_activity_id, from_page=from_page, timeout=timeout)
         if isinstance(player_url, str) and player_url:
             return player_url
         raise ValueError(f"Missing player url for lesson activity {lesson_activity_id}.")
@@ -515,7 +297,7 @@ class LMSUtil:
         )
         if not isinstance(data, dict):
             raise ValueError("Unexpected replay videos response: expected object.")
-        return cast(LMSReplayVideosResponse, self._extract_replay_videos(data))
+        return self._extract_replay_videos(data)
 
     def _get_replay_video_list(
         self,
@@ -528,6 +310,7 @@ class LMSUtil:
         """
         获取回放视频列表（`lesson_videos`）。
         """
+        # 如果可以，则使用缓存信息，避免重复请求和解析
         cached = self._replay_video_cache.get(replay_code)
         if cached is not None:
             return list(cached)
@@ -545,69 +328,105 @@ class LMSUtil:
         if not isinstance(videos, list):
             return []
 
-        result = [cast(LMSReplayVideo, one) for one in videos if isinstance(one, dict)]
+        result = []
+        for one in videos:
+            if isinstance(one, dict):
+                result.append(one)
+
         self._replay_video_cache[replay_code] = list(result)
         return result
 
-    def _extract_course_summary(self, course: Mapping[str, Any]) -> Optional[LMSCourseSummary]:
+    @staticmethod
+    def _extract_course_summary(course: Mapping[str, Any]) -> Optional[LMSCourseSummary]:
         instructors_raw = course.get("instructors", [])
-        instructors = [
-            {
-                "id": one.get("id"),
-                "name": one.get("name"),
-            }
-            for one in instructors_raw
-            if isinstance(one, Mapping)
-        ]
+        # 教师的信息
+        instructors: List[LMSInstructor] = []
+        for one in instructors_raw:
+            if not isinstance(one, Mapping):
+                continue
+            try:
+                instructor = LMSInstructor(
+                    id=int(one["id"]),
+                    name=one["name"],
+                    avatar_big_url=one.get("avatar_big_url"),
+                )
+                instructors.append(instructor)
+            except (KeyError, ValueError):
+                continue
 
         academic_year = course.get("academic_year", {})
         semester = course.get("semester", {})
         department = course.get("department", {})
         course_attributes = course.get("course_attributes", {})
 
-        # 有一些不完整课程的 academic_year 或 semester 可能是 None。我们忽略这些课程。
+        # 课程针对的年级信息。注意有些课程可能没有这个字段，我们用 None 表示缺失。
+        grade: Optional[LMSGrade] = course.get("grade", None)
+        if grade is not None:
+            try:
+                grade: LMSGrade = {
+                    "id": int(grade["id"]),
+                    "name": grade["name"],
+                }
+            except (KeyError, ValueError):
+                grade = None
+
+        # 有一些不完整课程的 academic_year 或 semester 可能是 None（而不是不存在）。我们忽略这些课程。
         if academic_year is None or semester is None or department is None or course_attributes is None:
             return None
 
-        return cast(
-            LMSCourseSummary,
-            {
-                "id": course.get("id"),
-                "name": course.get("name"),
-                "course_code": course.get("course_code"),
-                "course_type": course.get("course_type"),
+        try:
+            result: LMSCourseSummary = {
+                "id": course["id"],
+                "name": course["name"],
+                "course_code": course["course_code"],
+                "course_type": course["course_type"],
                 "credit": course.get("credit"),
                 "compulsory": course.get("compulsory"),
                 "start_date": course.get("start_date"),
                 "end_date": course.get("end_date"),
+                "subject_code": course.get("subject_code"),
+                "grade": grade,
                 "academic_year": {
-                    "id": academic_year.get("id"),
-                    "code": academic_year.get("code"),
-                    "name": academic_year.get("name"),
+                    "id": academic_year["id"],
+                    "code": academic_year["code"],
+                    "name": academic_year["name"],
                     "sort": academic_year.get("sort"),
                 },
                 "semester": {
-                    "id": semester.get("id"),
-                    "code": semester.get("code"),
-                    "name": semester.get("name"),
-                    "real_name": semester.get("real_name"),
+                    "id": semester["id"],
+                    "code": semester["code"],
+                    "name": semester["name"],
+                    "real_name": semester["real_name"],
                     "sort": semester.get("sort"),
                 },
                 "department": {
                     "id": department.get("id"),
                     "name": department.get("name"),
+                    "code": department.get("code"),
                 },
                 "instructors": instructors,
+                "klass": course.get("klass"),
+                "is_mute": bool(course.get("is_mute")),
+                "org_id": course.get("org_id"),
+                "study_completeness": course.get("study_completeness"),
                 "course_attributes": {
-                    "published": course_attributes.get("published"),
-                    "student_count": course_attributes.get("student_count"),
+                    "published": course_attributes["published"],
+                    "student_count": course_attributes["student_count"],
                     "teaching_class_name": course_attributes.get("teaching_class_name"),
                 },
-            },
-        )
+            }
 
-    def _extract_course_detail(self, course_detail: Mapping[str, Any]) -> LMSCourseDetail:
-        summary = dict(self._extract_course_summary(course_detail))
+        except KeyError:
+            raise ValueError(f"Invalid course summary data: {course!r}")
+
+        return result
+
+    def _extract_course_detail(self, course_detail: Mapping[str, Any]) -> Optional[LMSCourseDetail]:
+        summary: Optional[LMSCourseDetail] = self._extract_course_summary(course_detail)
+
+        if summary is None:
+            return None
+
         summary.update(
             {
                 "subject_code": course_detail.get("subject_code"),
@@ -620,98 +439,143 @@ class LMSUtil:
                 "course_outline": course_detail.get("course_outline"),
             }
         )
-        return cast(LMSCourseDetail, summary)
 
-    def _extract_activity_brief(self, activity: Mapping[str, Any]) -> LMSActivity:
-        return cast(
-            LMSActivity,
-            {
-                "id": activity.get("id"),
-                "course_id": activity.get("course_id"),
-                "type": activity.get("type"),
-                "title": activity.get("title"),
-                "module_id": activity.get("module_id"),
-                "start_time": activity.get("start_time"),
-                "end_time": activity.get("end_time"),
-                "submit_by_group": activity.get("submit_by_group"),
-                "published": activity.get("published"),
-                "created_at": activity.get("created_at"),
-                "updated_at": activity.get("updated_at"),
-            },
-        )
+        return summary
+
+    @staticmethod
+    def _extract_activity_brief(activity: Mapping[str, Any]) -> LMSActivityBrief:
+        """
+        从返回的活动列表中的单个活动数据中提取出 LMSActivityBrief 的简要信息。
+        """
+
+        result: LMSActivityBrief = {
+            "id": activity.get("id"),
+            "course_id": activity.get("course_id"),
+            "type": activity.get("type"),
+            "title": activity.get("title"),
+            "module_id": activity.get("module_id"),
+            "start_time": activity.get("start_time"),
+            "end_time": activity.get("end_time"),
+            "submit_by_group": activity.get("submit_by_group"),
+            "published": activity.get("published"),
+            "created_at": activity.get("created_at"),
+            "updated_at": activity.get("updated_at"),
+        }
+
+        return result
 
     def _extract_upload(self, upload: Mapping[str, Any]) -> LMSUpload:
         upload_id = self._coerce_int(upload.get("id"))
         reference_id = self._coerce_int(upload.get("reference_id"))
 
-        result: LMSUpload = {
-            "id": upload.get("id"),
-            "name": upload.get("name"),
-            "type": upload.get("type"),
-            "size": upload.get("size"),
-            "reference_id": upload.get("reference_id"),
-            "status": upload.get("status"),
-            "created_at": upload.get("created_at"),
-            "updated_at": upload.get("updated_at"),
-        }
+        try:
+            result: LMSUpload = {
+                "id": upload["id"],
+                "name": upload["name"],
+                "key": upload["key"],
+                "type": upload["type"],
+                "source": upload.get("source"),
+                "status": upload.get("status"),
+                "size": upload["size"],
+                "link": upload.get("link"),
+                "reference_id": upload.get("reference_id"),
+                "created_by_id": upload.get("created_by_id"),
+                "owner_id": upload["owner_id"],
+                "allow_download": upload["allow_download"],
+                "origin_allow_download": upload.get("origin_allow_download"),
+                "allow_aliyun_office_view": upload["allow_aliyun_office_view"],
+                "allow_private_wps_office_view": upload["allow_private_wps_office_view"],
+                "enable_set_h5_courseware_completion": upload["enable_set_h5_courseware_completion"],
+                "video_src_type": upload.get("video_src_type"),
+                "videos": upload["videos"] or [],
+                "audio": upload["audio"] or [],
+                "thumbnail": upload.get("thumbnail"),
+                "scorm": upload["scorm"],
+                "is_cc_video": upload["is_cc_video"],
+                "third_part_referrer_id": upload["third_part_referrer_id"],
+                "deleted": upload["deleted"],
+                "referenced_at": upload.get("referenced_at"),
+                "created_at": upload.get("created_at"),
+                "updated_at": upload.get("updated_at"),
+                "download_url": "",
+                "preview_url": "",
+            }
+        except KeyError:
+            raise ValueError(f"Missing required upload fields in: {upload!r}")
+
         if upload_id is not None and upload_id > 0:
             result["download_url"] = f"{self.BASE_URL}/api/uploads/{upload_id}/blob"
         if reference_id is not None and reference_id > 0:
             result["preview_url"] = f"{self.BASE_URL}/api/uploads/reference/document/{reference_id}/url"
-        return cast(LMSUpload, result)
+
+        return result
 
     def _extract_activity_detail(self, activity_detail: Mapping[str, Any]) -> LMSActivity:
+        """
+        从活动详情接口返回的活动数据中提取出 LMSActivity 的详细信息。
+
+        :raises ValueError: 如果活动详情数据缺少了必需的字段，或者字段类型不符合预期，将抛出 ValueError 异常。
+        """
         detail_type = str(activity_detail.get("type", ""))
         data = activity_detail.get("data", {})
+        # 课程（lesson）特有的数据
         lesson_resource = activity_detail.get("lesson_resource", {})
         lesson_properties = lesson_resource.get("properties", {}) if isinstance(lesson_resource, Mapping) else {}
 
+        # 作业（homework）特有的数据
         uploads_raw = activity_detail.get("uploads", [])
         uploads = [self._extract_upload(one) for one in uploads_raw if isinstance(one, Mapping)]
 
-        common = {
-            "id": activity_detail.get("id"),
-            "course_id": activity_detail.get("course_id"),
-            "type": activity_detail.get("type"),
-            "title": activity_detail.get("title"),
-            "module_id": activity_detail.get("module_id"),
-            "start_time": activity_detail.get("start_time"),
-            "end_time": activity_detail.get("end_time"),
-            "published": activity_detail.get("published"),
-            "created_at": activity_detail.get("created_at"),
-            "updated_at": activity_detail.get("updated_at"),
-            "uploads": uploads,
-        }
+        try:
+            common = {
+                "id": activity_detail["id"],
+                "course_id": activity_detail["course_id"],
+                "type": activity_detail["type"],
+                "title": activity_detail["title"],
+                "module_id": activity_detail.get("module_id"),
+                "start_time": activity_detail.get("start_time"),
+                "end_time": activity_detail.get("end_time"),
+                "published": bool(activity_detail["published"]),
+                "created_at": activity_detail.get("created_at"),
+                "updated_at": activity_detail.get("updated_at"),
+                "uploads": uploads,
+            }
+        except ValueError:
+            raise ValueError(f"Missing required activity detail fields in: {activity_detail!r}")
 
-        if detail_type == "homework":
+        if detail_type == ActivityType.HOMEWORK.value:
+            try:
+                return cast(
+                    LMSActivity,
+                    cast(object, {
+                        **common,
+                        "submit_by_group": activity_detail["submit_by_group"],
+                        "group_set_id": activity_detail.get("group_set_id"),
+                        "group_set_name": activity_detail.get("group_set_name"),
+                        "user_submit_count": activity_detail.get("user_submit_count"),
+                        "description": data.get("description") if isinstance(data, Mapping) else None,
+                        "average_score": activity_detail.get("average_score"),
+                        "highest_score": activity_detail.get("highest_score"),
+                        "lowest_score": activity_detail.get("lowest_score"),
+                    }),
+                )
+            except KeyError:
+                raise ValueError(f"Missing required homework activity detail fields in: {activity_detail!r}")
+
+        if detail_type == ActivityType.MATERIAL.value:
             return cast(
                 LMSActivity,
-                {
-                    **common,
-                    "submit_by_group": activity_detail.get("submit_by_group"),
-                    "group_id": activity_detail.get("group_id"),
-                    "group_set_name": activity_detail.get("group_set_name"),
-                    "user_submit_count": activity_detail.get("user_submit_count"),
-                    "description": data.get("description") if isinstance(data, Mapping) else None,
-                    "average_score": activity_detail.get("average_score"),
-                    "highest_score": activity_detail.get("highest_score"),
-                    "lowest_score": activity_detail.get("lowest_score"),
-                },
-            )
-
-        if detail_type == "material":
-            return cast(
-                LMSActivity,
-                {
+                cast(object, {
                     **common,
                     "description": data.get("description") if isinstance(data, Mapping) else None,
-                },
+                }),
             )
 
-        if detail_type == "lesson":
+        if detail_type == ActivityType.LESSON.value:
             replay_code: str | None = None
+            # 先尝试从最高层级提取 replay_code，再依次尝试从 lesson_resource.properties.replay_code 和 data.external_live_detail.replay_id 提取
             if isinstance(activity_detail.get("replay_code"), str) and activity_detail.get("replay_code"):
-                replay_code = cast(str, activity_detail.get("replay_code"))
+                replay_code = activity_detail.get("replay_code")
             if replay_code is None and isinstance(lesson_properties, Mapping):
                 candidate = lesson_properties.get("replay_code")
                 if isinstance(candidate, str) and candidate:
@@ -737,7 +601,7 @@ class LMSUtil:
 
             return cast(
                 LMSActivity,
-                {
+                cast(object, {
                     **common,
                     "replay_code": replay_code,
                     "lesson_start": data.get("lesson_start") if isinstance(data, Mapping) else None,
@@ -745,10 +609,10 @@ class LMSUtil:
                     "replay_videos": replay_videos,
                     "replay_download_urls": replay_download_urls,
                     "replay_video_count": len(replay_videos),
-                },
+                }),
             )
 
-        if detail_type == "lecture_live":
+        if detail_type == ActivityType.LECTURE_LIVE.value:
             external = {}
             if isinstance(data, Mapping):
                 maybe_external = data.get("external_live_detail", {})
@@ -756,16 +620,16 @@ class LMSUtil:
                     external = maybe_external
             return cast(
                 LMSActivity,
-                {
+                cast(object, {
                     **common,
                     "replay_code": external.get("replay_id"),
                     "live_room": external.get("room"),
                     "view_live": external.get("view_live"),
                     "view_record": external.get("view_record"),
-                },
+                }),
             )
 
-        return cast(LMSActivity, common)
+        return cast(LMSActivity, cast(object, common))
 
     def _extract_submission_list(self, submission_data: Mapping[str, Any]) -> LMSSubmissionListResponse:
         submission_items = submission_data.get("list", [])
@@ -835,26 +699,31 @@ class LMSUtil:
 
         return cast(
             LMSSubmissionListResponse,
-            {
+            cast(object, {
                 "list": extracted_list,
                 "uploads": top_uploads,
-            },
+            }),
         )
 
-    def _extract_replay_video(self, video: Mapping[str, Any]) -> LMSReplayVideo:
-        return cast(
-            LMSReplayVideo,
-            {
-                "id": video.get("id"),
-                "label": video.get("label"),
-                "mute": video.get("mute"),
-                "is_best_audio": video.get("is_best_audio"),
-                "play_type": video.get("play_type"),
-                "download_url": video.get("download_url"),
-                "file_key": video.get("file_key"),
-                "size": video.get("size"),
-            },
-        )
+    @staticmethod
+    def _extract_replay_video(video: Mapping[str, Any]) -> LMSReplayVideo:
+        try:
+            result: LMSReplayVideo = \
+                {
+                    "id": video["id"],
+                    "label": video["label"],
+                    "mute": video["mute"],
+                    "is_best_audio": video["is_best_audio"],
+                    "play_type": video["play_type"],
+                    "download_url": video["download_url"],
+                    "file_key": video["file_key"],
+                    "play_url": video["play_url"],
+                    "size": video["size"],
+                }
+        except KeyError:
+            raise ValueError(f"Missing required replay video fields in: {video!r}")
+
+        return result
 
     def _extract_replay_videos(self, replay_videos_data: Mapping[str, Any]) -> LMSReplayVideosResponse:
         error_obj: Mapping[str, Any] | None = None
@@ -869,24 +738,23 @@ class LMSUtil:
                     error_obj = nested_error
 
         if error_obj is not None:
+            # 出现错误，此时汇报错误信息并返回空视频列表。
             code_raw = error_obj.get("code")
-            code: int | None = None
-            if isinstance(code_raw, int):
-                code = code_raw
-            elif isinstance(code_raw, str) and code_raw.isdigit():
-                code = int(code_raw)
+            code: Optional[int] = self._coerce_int(code_raw)
 
-            if code != 0:
-                return cast(
-                    LMSReplayVideosResponse,
-                    {
-                        "error": {
-                            "code": error_obj.get("code"),
-                            "message": error_obj.get("message"),
-                            "status": error_obj.get("status"),
-                        }
-                    },
-                )
+            if code is not None and code != 0:
+                error: LMSReplayError = {
+                    "code": code,
+                    "message": error_obj.get("message", ""),
+                    "status": error_obj.get("status", ""),
+                    "details": error_obj.get("details", {}),
+                }
+                result: LMSReplayVideosResponse = \
+                {
+                    "error": error,
+                    "lesson_videos": []
+                }
+                return result
 
         lesson_videos_raw = replay_videos_data.get("lesson_videos", [])
         if not isinstance(lesson_videos_raw, list):
@@ -900,59 +768,57 @@ class LMSUtil:
                     lesson_videos_raw = nested
 
         lesson_videos = [self._extract_replay_video(one) for one in lesson_videos_raw if isinstance(one, Mapping)]
-        return cast(LMSReplayVideosResponse, {"lesson_videos": lesson_videos})
+        result: LMSReplayVideosResponse = {"lesson_videos": lesson_videos, "error": None}
+        return result
 
     def _get_json(self, url: str, **kwargs: Any) -> dict[str, Any] | list[Any]:
+        """
+        请求某个网址，返回其响应的 JSON 内容。如果响应状态码不是 2xx，将抛出 `requests.HTTPError`。如果响应不是有效的 JSON，将抛出 `json.JSONDecodeError`。
+        """
         response = self.session.get(url, **kwargs)
         response.raise_for_status()
-        return cast(dict[str, Any] | list[Any], response.json())
+        return response.json()
 
     def _post_json(self, url: str, **kwargs: Any) -> dict[str, Any] | list[Any]:
+        """
+        请求某个网址，返回其响应的 JSON 内容。与 `_get_json` 类似，但使用 POST 方法。
+        """
         response = self.session.post(url, **kwargs)
         response.raise_for_status()
-        return cast(dict[str, Any] | list[Any], response.json())
+        return response.json()
 
     @staticmethod
-    def _extract_js_block(page: str, key: str, next_key: str) -> str:
+    def _parse_js_object(page: str, key: str, next_key: str) -> dict[str, Any]:
+        """
+        从 JavaScript 代码块中提取以 `key` 为键、以 `{...}` 包裹的对象文本，直至 `next_key`。
+        由于其语法可能不完全符合严格的 JSON（如键名不带双引号、包含尾随逗号、使用 None 等），
+        这里通过正则预处理将其转为标准 JSON 字符串后解析，避免手写解释器解析各独立字段。
+        """
         pattern = rf"{re.escape(key)}\s*:\s*\{{(?P<body>.*?)\}}\s*,\s*{re.escape(next_key)}\s*:"
         match = re.search(pattern, page, flags=re.S)
         if not match:
-            return ""
-        return match.group("body")
-
-    @staticmethod
-    def _extract_js_key_value(block: str, key: str) -> Any:
-        if not block:
-            return None
-        pattern = rf"{re.escape(key)}\s*:\s*(?P<value>\"(?:\\.|[^\"])*\"|true|false|null|None|-?\d+(?:\.\d+)?)"
-        match = re.search(pattern, block)
-        if not match:
-            return None
-        return LMSUtil._parse_js_scalar(match.group("value"))
-
-    @staticmethod
-    def _parse_js_scalar(raw: str) -> Any:
-        value = raw.strip()
-        if value.startswith("\"") and value.endswith("\""):
-            return json.loads(value)
-        if value == "true":
-            return True
-        if value == "false":
-            return False
-        if value in {"null", "None"}:
-            return None
-        if "." in value:
-            try:
-                return float(value)
-            except ValueError:
-                return value
+            return {}
+        
+        body = match.group("body")
+        # 1. 给没有双引号的合法的键名加上双引号 (例如 id: 602 -> "id": 602)
+        json_str = re.sub(r'([a-zA-Z_$][\w$]*)\s*:', r'"\1":', body)
+        # 2. 将非标准字面量 (例如 None) 转换为合法的 JSON null
+        json_str = re.sub(r':\s*None\b', ': null', json_str)
+        # 3. 补齐大括号，并移除最后一个键值对末尾可能存在的逗号
+        json_str = "{" + json_str + "}"
+        json_str = re.sub(r',\s*}', '}', json_str)
+        
         try:
-            return int(value)
-        except ValueError:
-            return value
+            result = json.loads(json_str)
+            return result if isinstance(result, dict) else {}
+        except json.JSONDecodeError:
+            return {}
 
     @staticmethod
     def _coerce_int(value: Any) -> int | None:
+        """
+        尝试将一个值转换为整数。如果值已经是整数类型，直接返回；如果值是一个只包含数字的字符串，则转换为整数后返回；否则返回 None。
+        """
         if isinstance(value, int):
             return value
         if isinstance(value, str) and value.isdigit():
