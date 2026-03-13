@@ -32,7 +32,7 @@ from .sessions.lms_session import LMSSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.EmptyRoomInterface import EmptyRoomInterface
-from .sub_interfaces.LMSInterface import LMSInterface
+from app.LMSInterface import LMSInterface
 from .sub_interfaces.NoticeInterface import NoticeInterface
 from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
