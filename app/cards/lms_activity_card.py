@@ -49,7 +49,7 @@ class LMSActivityCard(CardWidget):
             ActivityType.HOMEWORK.value: FluentIcon.DICTIONARY,
             ActivityType.MATERIAL.value: FluentIcon.FOLDER,
             ActivityType.LESSON.value: FluentIcon.PLAY,
-            ActivityType.LECTURE_LIVE.value: FluentIcon.TILES,
+            ActivityType.LECTURE_LIVE.value: FluentIcon.RINGER,
         }
         return mapping.get(activity_type, FluentIcon.DOCUMENT)
 
