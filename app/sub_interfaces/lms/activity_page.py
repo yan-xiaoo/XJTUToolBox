@@ -1,9 +1,10 @@
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QFrame, QVBoxLayout, QSizePolicy, QTableWidgetItem
-from qfluentwidgets import Pivot, TableWidget
+from PyQt5.QtWidgets import QFrame, QVBoxLayout, QWidget
+from qfluentwidgets import Pivot, FlowLayout, BodyLabel
 
 from lms.models import ActivityType
-from .common import PageStatus, create_loading_frame, create_retry_frame, apply_full_width_column_width, update_table_height, bool_text, time_text, activity_status_text
+from app.cards.lms_activity_card import LMSActivityCard
+from .common import PageStatus, create_loading_frame, create_retry_frame
 
 
 class LMSActivityPage(QFrame):
@@ -21,6 +22,7 @@ class LMSActivityPage(QFrame):
         self.activity_type_filter = ActivityType.HOMEWORK.value
         self._activities: list[dict] = []
         self._filtered_activities: list[dict] = []
+        self._activity_cards: list[QWidget] = []
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignTop)
@@ -32,20 +34,11 @@ class LMSActivityPage(QFrame):
         self.activityTypePivot.addItem(ActivityType.LECTURE_LIVE.value, self.tr("直播"), onClick=lambda: self._onActivityTypeChanged(ActivityType.LECTURE_LIVE.value))
         self.activityTypePivot.setCurrentItem(self.activity_type_filter)
 
-        self.activityTable = TableWidget(self)
-        self.activityTable.setRowCount(0)
-        self.activityTable.setColumnCount(5)
-        self.activityTable.setHorizontalHeaderLabels([
-            self.tr("活动"), self.tr("开始时间"), self.tr("结束时间"), self.tr("发布"), self.tr("状态")
-        ])
-        apply_full_width_column_width(self.activityTable)
-        self.activityTable.verticalHeader().setVisible(False)
-        self.activityTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.activityTable.setMinimumHeight(0)
-        self.activityTable.setEditTriggers(TableWidget.NoEditTriggers)
-        self.activityTable.setSelectionMode(TableWidget.SelectionMode.SingleSelection)
-        self.activityTable.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.activityTable.cellClicked.connect(self._onActivityClicked)
+        self.cardHost = QWidget(self)
+        self.flowLayout = FlowLayout(self.cardHost, needAni=False)
+        self.flowLayout.setContentsMargins(0, 0, 0, 0)
+        self.flowLayout.setVerticalSpacing(16)
+        self.flowLayout.setHorizontalSpacing(16)
 
         self.loadingFrame = create_loading_frame(self)
         self.loadingFrame.setVisible(False)
@@ -55,11 +48,9 @@ class LMSActivityPage(QFrame):
         retry_button.clicked.connect(self.retryRequested.emit)
 
         layout.addWidget(self.activityTypePivot)
-        layout.addWidget(self.activityTable)
+        layout.addWidget(self.cardHost)
         layout.addWidget(self.loadingFrame)
         layout.addWidget(self.failFrame)
-
-        update_table_height(self.activityTable, min_rows=1, min_height=140)
 
     def setPageStatus(self, status: PageStatus):
         """设置页面状态并切换显示区域。
@@ -69,17 +60,17 @@ class LMSActivityPage(QFrame):
         """
         if status == PageStatus.LOADING:
             self.loadingFrame.setVisible(True)
-            self.activityTable.setVisible(False)
+            self.cardHost.setVisible(False)
             self.failFrame.setVisible(False)
             return
         if status == PageStatus.ERROR:
             self.loadingFrame.setVisible(False)
-            self.activityTable.setVisible(False)
+            self.cardHost.setVisible(False)
             self.failFrame.setVisible(True)
             return
 
         self.loadingFrame.setVisible(False)
-        self.activityTable.setVisible(True)
+        self.cardHost.setVisible(True)
         self.failFrame.setVisible(False)
 
     def setActivities(self, activities: list[dict]):
@@ -98,17 +89,7 @@ class LMSActivityPage(QFrame):
         :return: 无返回值。
         """
         self._filtered_activities = [one for one in self._activities if str(one.get("type") or "") == key]
-        self.activityTable.setRowCount(len(self._filtered_activities))
-
-        for row, activity in enumerate(self._filtered_activities):
-            self.activityTable.setItem(row, 0, QTableWidgetItem(str(activity.get("title") or "-")))
-            self.activityTable.setItem(row, 1, QTableWidgetItem(time_text(activity.get("start_time"))))
-            self.activityTable.setItem(row, 2, QTableWidgetItem(time_text(activity.get("end_time"))))
-            self.activityTable.setItem(row, 3, QTableWidgetItem(bool_text(activity.get("published"))))
-            self.activityTable.setItem(row, 4, QTableWidgetItem(activity_status_text(activity)))
-
-        self.activityTable.resizeRowsToContents()
-        update_table_height(self.activityTable, min_rows=1, min_height=140)
+        self._rebuildActivityCards()
 
     def setCurrentActivityType(self, key: str):
         """设置当前活动类型并同步筛选视图。
@@ -127,8 +108,7 @@ class LMSActivityPage(QFrame):
         """
         self._activities = []
         self._filtered_activities = []
-        self.activityTable.setRowCount(0)
-        update_table_height(self.activityTable, min_rows=1, min_height=140)
+        self._clearActivityCards()
 
     def reset(self):
         """重置活动页到默认状态（默认类型为作业）。
@@ -146,7 +126,7 @@ class LMSActivityPage(QFrame):
         :param enabled: 为 True 时允许点击活动；为 False 时禁用表格操作。
         :return: 无返回值。
         """
-        self.activityTable.setEnabled(enabled)
+        self.cardHost.setEnabled(enabled)
 
     def _onActivityTypeChanged(self, key: str):
         """处理 Pivot 类型切换并发出类型变化信号。"""
@@ -154,11 +134,36 @@ class LMSActivityPage(QFrame):
         self.filterActivities(key)
         self.activityTypeChanged.emit(key)
 
-    def _onActivityClicked(self, row: int, _column: int):
+    def _clearActivityCards(self):
+        """清理已渲染的活动卡片。"""
+        for card in self._activity_cards:
+            self.flowLayout.removeWidget(card)
+            card.deleteLater()
+        self._activity_cards.clear()
+
+    def _rebuildActivityCards(self):
+        """根据当前过滤结果重建活动卡片。"""
+        self._clearActivityCards()
+
+        # 在没有活动时，显示一个简单的提示
+        if not self._filtered_activities:
+            label = BodyLabel(self.tr("当前分类下暂无内容"), self.cardHost)
+            # 将这个 label 加到 activity_card 中，这样就可以跟随活动切换而消失了
+            self.flowLayout.addWidget(label)
+            self._activity_cards.append(label)
+
+        for activity in self._filtered_activities:
+            card = LMSActivityCard(activity, self.cardHost)
+            card.clicked.connect(lambda _=False, one=activity: self._onActivityClicked(one))
+            self.flowLayout.addWidget(card)
+            self._activity_cards.append(card)
+
+        self.cardHost.adjustSize()
+
+    def _onActivityClicked(self, activity: dict):
         """处理活动点击事件并发出活动选择信号。"""
-        if row < 0 or row >= len(self._filtered_activities):
+        if not isinstance(activity, dict):
             return
-        activity = self._filtered_activities[row]
         activity_id = activity.get("id")
         if not isinstance(activity_id, int):
             return

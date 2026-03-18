@@ -73,7 +73,7 @@ class LMSCoursePage(QFrame):
         self.filterFrame.setVisible(False)
 
         self.cardHost = QWidget(self)
-        self.flowLayout = FlowLayout(self.cardHost, needAni=True)
+        self.flowLayout = FlowLayout(self.cardHost, needAni=False)
         self.flowLayout.setContentsMargins(0, 0, 0, 0)
         self.flowLayout.setVerticalSpacing(16)
         self.flowLayout.setHorizontalSpacing(16)

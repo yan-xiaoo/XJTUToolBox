@@ -89,8 +89,8 @@ def safe_text(value):
 def time_text(value):
     """格式化时间文本（T 替换为空格）。"""
     if isinstance(value, str) and value:
-        return value.replace("T", " ")
-    return "-"
+        return value.replace("T", " ").strip("Z")
+    return "-".strip("Z")
 
 
 def bool_text(value):

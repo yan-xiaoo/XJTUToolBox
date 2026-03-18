@@ -7,25 +7,6 @@ from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout
 from qfluentwidgets import ElevatedCardWidget, SubtitleLabel, CaptionLabel, IconWidget, FluentIcon, isDarkTheme, \
     BodyLabel
 
-class NoiseCache:
-    """Cache for generated noise texture to prevent re-generating every paint cycle."""
-    _noise_pixmap = None
-
-    @classmethod
-    def get_noise_pixmap(cls, width: int, height: int) -> QPixmap:
-        if cls._noise_pixmap is None or cls._noise_pixmap.width() < width or cls._noise_pixmap.height() < height:
-            w, h = max(width, 512), max(height, 512)
-            img = QImage(w, h, QImage.Format_ARGB32)
-            img.fill(Qt.transparent)
-            for x in range(w):
-                for y in range(h):
-                    noise_val = random.randint(0, 255)
-                    alpha = random.randint(5, 12)
-                    color = QColor(noise_val, noise_val, noise_val, alpha)
-                    img.setPixelColor(x, y, color)
-            cls._noise_pixmap = QPixmap.fromImage(img)
-        return cls._noise_pixmap
-
 
 class LMSCourseCard(ElevatedCardWidget):
     """LMS Course Card with pseudo-glassmorphism."""
@@ -92,50 +73,6 @@ class LMSCourseCard(ElevatedCardWidget):
         self.verticalLayout.addLayout(self.hBoxLayout)
 
         self.setCursor(Qt.PointingHandCursor)
-
-    def paintEvent(self, e):
-        painter = QPainter(self)
-        painter.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-
-        w, h = self.width(), self.height()
-        r = self.borderRadius
-        rect = self.rect().adjusted(1, 1, -1, -1)
-        isDark = isDarkTheme()
-
-        if isDark:
-            base_color = QColor(40, 40, 40, 160)
-            hover_color = QColor(60, 60, 60, 180)
-            pressed_color = QColor(30, 30, 30, 160)
-            border_color = QColor(255, 255, 255, 30)
-        else:
-            base_color = QColor(255, 255, 255, 180)
-            hover_color = QColor(255, 255, 255, 220)
-            pressed_color = QColor(240, 240, 240, 180)
-            border_color = QColor(0, 0, 0, 20)
-
-        color = base_color
-        if self.isPressed:
-            color = pressed_color
-        elif self.isHover:
-            color = hover_color
-
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(color)
-        painter.drawRoundedRect(rect, r, r)
-
-        painter.setClipPath(self._getRoundedPath(rect, r, r))
-        noise_pixmap = NoiseCache.get_noise_pixmap(w, h)
-        painter.drawPixmap(0, 0, noise_pixmap)
-        painter.setClipping(False)
-
-        painter.setPen(QPen(border_color, 1))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(rect, r, r)
-
-    def _getRoundedPath(self, rect, rx, ry):
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(rect.left(), rect.top(), rect.width(), rect.height()), rx, ry)
-        return path
 
 
 class CourseSkeletonCard(ElevatedCardWidget):
