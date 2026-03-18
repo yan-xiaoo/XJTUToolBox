@@ -22,7 +22,6 @@ from lms.models import ActivityType
 from .common import (
     PageStatus,
     activity_type_text,
-    apply_default_column_width,
     create_loading_frame,
     create_retry_frame,
     create_section_title,
@@ -31,7 +30,8 @@ from .common import (
     is_html_text,
     safe_text,
     time_text,
-    update_table_height,
+    update_table_height, apply_stretch_and_fixed_column_width,
+    apply_stretch_on_first_column,
 )
 
 MetaItem = tuple[FluentIcon, str, str]
@@ -187,7 +187,7 @@ class LMSDetailPage(QFrame):
         self.detailSubmissionTable.setHorizontalHeaderLabels([
             self.tr("得分"), self.tr("提交时间"), self.tr("更新时间"), self.tr("详情")
         ])
-        apply_default_column_width(self.detailSubmissionTable)
+        apply_stretch_and_fixed_column_width(self.detailSubmissionTable)
         self.detailSubmissionTable.verticalHeader().setVisible(False)
         self.detailSubmissionTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.detailSubmissionTable.setSelectionMode(TableWidget.SelectionMode.NoSelection)
@@ -200,7 +200,7 @@ class LMSDetailPage(QFrame):
         self.detailReplayTable.setHorizontalHeaderLabels([
             self.tr("视频"), self.tr("文件大小"), self.tr("另存为")
         ])
-        apply_default_column_width(self.detailReplayTable)
+        apply_stretch_on_first_column(self.detailReplayTable)
         self.detailReplayTable.verticalHeader().setVisible(False)
         self.detailReplayTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.detailReplayTable.setSelectionMode(TableWidget.SelectionMode.NoSelection)
@@ -231,7 +231,7 @@ class LMSDetailPage(QFrame):
         table = TableWidget(self)
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels([self.tr("名称"), self.tr("大小"), self.tr("另存为")])
-        apply_default_column_width(table)
+        apply_stretch_on_first_column(table)
         table.verticalHeader().setVisible(False)
         table.setWordWrap(True)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

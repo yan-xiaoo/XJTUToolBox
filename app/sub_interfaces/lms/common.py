@@ -67,6 +67,29 @@ def apply_full_width_column_width(table: TableWidget):
     header.setStretchLastSection(True)
 
 
+def apply_stretch_and_fixed_column_width(table: TableWidget):
+    """
+    设置表格除了最后一个列以外的列宽为占满剩余空间，最后一列为固定大小。
+    """
+    width = table.columnCount()
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(header.ResizeMode.Stretch)
+    header.setSectionResizeMode(width - 1, header.ResizeMode.Fixed)
+    header.setStretchLastSection(False)
+
+
+def apply_stretch_on_first_column(table: TableWidget):
+    """
+    设置表格第一列为占满空间，最后一列固定大小，其他列均适合内容。
+    """
+    header = table.horizontalHeader()
+    width = table.columnCount()
+    header.setSectionResizeMode(header.ResizeMode.ResizeToContents)
+    header.setSectionResizeMode(width - 1, header.ResizeMode.Fixed)
+    header.setSectionResizeMode(0, header.ResizeMode.Stretch)
+    header.setStretchLastSection(False)
+
+
 def update_table_height(table: TableWidget, min_rows: int = 0, min_height: int = 38):
     """根据当前内容动态更新表格高度。"""
     header_h = table.horizontalHeader().height() if table.horizontalHeader().isVisible() else 0

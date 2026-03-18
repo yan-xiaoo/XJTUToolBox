@@ -2,7 +2,8 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QSizePolicy, QTableWidgetItem
 from qfluentwidgets import PushButton, TableWidget, TitleLabel
 
-from .common import create_section_title, apply_default_column_width, update_table_height, set_html_label, safe_text, format_size
+from .common import create_section_title, update_table_height, set_html_label, safe_text, \
+    format_size, apply_stretch_on_first_column
 
 
 class LMSSubmissionPage(QFrame):
@@ -15,8 +16,8 @@ class LMSSubmissionPage(QFrame):
         self.setObjectName("submissionPage")
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(4)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(20)
+        layout.setContentsMargins(12, 8, 12, 20)
         layout.setAlignment(Qt.AlignTop)
 
         self.submissionTitleLabel = TitleLabel("-", self)
@@ -63,7 +64,7 @@ class LMSSubmissionPage(QFrame):
         table = TableWidget(self)
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels([self.tr("名称"), self.tr("大小"), self.tr("另存为")])
-        apply_default_column_width(table)
+        apply_stretch_on_first_column(table)
         table.verticalHeader().setVisible(False)
         table.setWordWrap(True)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -80,7 +81,7 @@ class LMSSubmissionPage(QFrame):
         :param activity_name: 当前活动名称，用于标题展示。
         :return: 无返回值。
         """
-        self.submissionTitleLabel.setText(f"{course_name} / {activity_name}")
+        self.submissionTitleLabel.setText(f"{activity_name}")
 
         has_comment = set_html_label(self.submissionCommentLabel, submission.get("comment"))
         self.submissionCommentTitle.setVisible(has_comment)
