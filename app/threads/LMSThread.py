@@ -21,6 +21,11 @@ class LMSThread(ProcessThread):
     activityDetailLoaded = pyqtSignal(int, dict)
 
     def __init__(self, parent=None):
+        """初始化 LMS 后台线程。
+
+        :param parent: 父级对象，用于 Qt 生命周期管理。
+        :return: 无返回值。
+        """
         super().__init__(parent)
         self.util: LMSUtil | None = None
         self.action = LMSAction.LOAD_COURSES
@@ -50,6 +55,12 @@ class LMSThread(ProcessThread):
         return self.login()
 
     def run(self):
+        """根据当前动作执行 LMS 相关后台任务。
+
+        该方法会统一处理课程加载、活动加载和活动详情加载。
+
+        :return: 无返回值。结果通过 Qt 信号异步发回 UI 层。
+        """
         self.can_run = True
         if accounts.current is None:
             self.error.emit(self.tr("未登录"), self.tr("请先添加一个账户"))

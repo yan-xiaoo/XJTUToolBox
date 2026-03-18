@@ -9,6 +9,8 @@
 from enum import Enum
 from typing import Any, List, NotRequired, TypedDict, Optional, Union
 
+LMSReplayCode = Union[str, int]
+
 
 class LMSDepartment(TypedDict):
     """
@@ -325,8 +327,9 @@ class LMSActivity(TypedDict, total=False):
 
     # ---- lesson / lecture_live 共有的字段 ----
     # 回放标识码。lesson 从 lesson_resource.properties.replay_code 取；
-    # lecture_live 从 data.external_live_detail.replay_id 取
-    replay_code: NotRequired[Optional[str]]
+    # lecture_live 从 data.external_live_detail.replay_id 取。
+    # 实际服务器返回既可能是字符串，也可能是整数。
+    replay_code: NotRequired[Optional[LMSReplayCode]]
     # 回放视频列表（通过 replay_code 进一步请求获取）
     replay_videos: NotRequired[List["LMSReplayVideo"]]
     # 回放视频的下载链接列表
@@ -338,6 +341,14 @@ class LMSActivity(TypedDict, total=False):
     # 直播教室信息（包含 id、room_name、room_code、location 等），
     # 从 data.external_live_detail.room 提取
     live_room: NotRequired[Optional[Any]]
+    # 直播系统中的外部直播 ID，对应 data.external_live_id
+    external_live_id: NotRequired[Optional[str]]
+    # 直播详情中的开始时间，对应 data.external_live_detail.start_time
+    external_live_start_time: NotRequired[Optional[str]]
+    # 直播详情中的结束时间，对应 data.external_live_detail.end_time
+    external_live_end_time: NotRequired[Optional[str]]
+    # 直播详情中的名称，对应 data.external_live_detail.name
+    external_live_name: NotRequired[Optional[str]]
     # 是否可以观看直播
     view_live: NotRequired[Optional[bool]]
     # 是否可以观看回放

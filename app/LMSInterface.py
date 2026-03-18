@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse, unquote
 
@@ -38,6 +39,7 @@ class LMSInterface(ScrollArea):
         self.selected_activity_name = ""
         self._current_submission: Optional[dict] = None
         self._download_jobs: list[tuple[ProgressInfoBar, LMSFileDownloadThread]] = []
+        self._current_activities: list[dict] = []
 
         self.view = QWidget(self)
         self.setObjectName("LMSInterface")
@@ -136,6 +138,7 @@ class LMSInterface(ScrollArea):
         self.detailPage.retryRequested.connect(self.refreshActivityDetail)
         self.detailPage.submissionRequested.connect(self.show_submission_page)
         self.detailPage.downloadRequested.connect(self._save_file)
+        self.detailPage.relatedLessonRequested.connect(self.openRelatedLesson)
         self.submissionPage.downloadRequested.connect(self._save_file)
 
     def _initNavigationModel(self):
@@ -380,6 +383,30 @@ class LMSInterface(ScrollArea):
         self.thread_.activity_id = self.selected_activity_id
         self.thread_.start()
 
+    @pyqtSlot(str)
+    def openRelatedLesson(self, lesson_start_time: str):
+        """根据直播详情中的开始时间直接跳转到对应回放活动。
+
+        :param lesson_start_time: 直播详情中提取出的对应回放开始时间。
+        :return: 无返回值。
+        """
+        lesson = self._findRelatedLessonActivity(lesson_start_time)
+        lesson_id = lesson.get("id")
+        lesson_name = str(lesson.get("title") or "-") if isinstance(lesson, dict) else "-"
+        if not isinstance(lesson_id, int):
+            self.error(
+                self.tr("未找到对应回放"),
+                self.tr("当前直播开始时间为 {0}，但课程中没有匹配的回放活动。").format(lesson_start_time),
+                parent=self,
+            )
+            return
+
+        self.selected_activity_id = lesson_id
+        self.selected_activity_name = lesson_name
+        self.activityPage.setCurrentActivityType(ActivityType.LESSON.value)
+        self._updateDetailBreadcrumbLabel(lesson_name)
+        self.refreshActivityDetail()
+
     @pyqtSlot(int, str)
     def onCourseSelected(self, course_id: int, course_name: str):
         """处理课程选择事件并进入活动页。
@@ -392,6 +419,7 @@ class LMSInterface(ScrollArea):
         self.selected_course_name = course_name
         self.selected_activity_id = None
         self.selected_activity_name = ""
+        self._current_activities = []
 
         self.activityPage.setCurrentActivityType(ActivityType.HOMEWORK.value)
         self.activityPage.clearData()
@@ -427,6 +455,7 @@ class LMSInterface(ScrollArea):
         self.selected_course_name = ""
         self.selected_activity_name = ""
         self._current_submission = None
+        self._current_activities = []
 
         self.activityPage.reset()
         self.detailPage.reset()
@@ -450,6 +479,7 @@ class LMSInterface(ScrollArea):
         self.setPageStatus(self.activityPage, PageStatus.NORMAL)
         if self.selected_course_id != course_id:
             return
+        self._current_activities = activities if isinstance(activities, list) else []
         self.activityPage.setActivities(activities)
         self.switchPage(self.activityPage)
         if not activities:
@@ -490,6 +520,7 @@ class LMSInterface(ScrollArea):
         self.selected_course_name = ""
         self.selected_activity_name = ""
         self._current_submission = None
+        self._current_activities = []
 
         self.coursePage.reset()
         self.activityPage.reset()
@@ -549,6 +580,40 @@ class LMSInterface(ScrollArea):
     def _cleanup_download_job(self, bar: ProgressInfoBar, thread: LMSFileDownloadThread):
         """清理已结束或取消的下载任务引用。"""
         self._download_jobs = [one for one in self._download_jobs if one != (bar, thread)]
+
+    def _updateDetailBreadcrumbLabel(self, label: str):
+        """更新详情页所在面包屑节点的文本。"""
+        display_text = self._truncateBreadcrumbLabel(label)
+        self.breadcrumbBar.setItemText(self.ROUTE_DETAIL, display_text)
+        self.breadcrumbBar.updateGeometry()
+
+    def _findRelatedLessonActivity(self, lesson_start_time: str) -> dict:
+        """在当前课程已加载活动中根据开始时间查找对应回放 lesson。"""
+        target_time_key = self._normalizeActivityTimeKey(lesson_start_time)
+        for activity in self._current_activities:
+            if not isinstance(activity, dict):
+                continue
+            if str(activity.get("type") or "") != ActivityType.LESSON.value:
+                continue
+            activity_time_key = self._normalizeActivityTimeKey(activity.get("start_time"))
+            if activity_time_key == target_time_key:
+                return activity
+        return {}
+
+    @staticmethod
+    def _normalizeActivityTimeKey(value: object) -> str:
+        """将活动时间标准化为稳定的比较键。"""
+        if not isinstance(value, str) or not value:
+            return ""
+
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc)
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @staticmethod
     def format_size(size) -> str:

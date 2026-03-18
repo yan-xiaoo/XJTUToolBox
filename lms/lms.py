@@ -9,7 +9,7 @@ from requests import Session
 
 from .models import (LMSActivity, LMSActivityBrief, LMSUpload, LMSGrade, LMSInstructor, LMSDepartment, LMSReplayVideo,
                      LMSReplayError, LMSReplayVideosResponse, LMSSubmissionListResponse,
-                     LMSUserInfo, LMSCourseSummary, LMSCourseDetail, ActivityType)
+                     LMSUserInfo, LMSCourseSummary, LMSCourseDetail, ActivityType, LMSReplayCode)
 
 
 class LMSUtil:
@@ -274,13 +274,17 @@ class LMSUtil:
 
     def _get_replay_videos(
         self,
-        replay_code: str,
+        replay_code: LMSReplayCode,
         *,
         lesson_activity_id: int | None = None,
         token: str | None = None,
         timeout: float | tuple[float, float] | None = None,
     ) -> LMSReplayVideosResponse:
         """获取回放视频信息。"""
+        normalized_replay_code = self._normalize_replay_code(replay_code)
+        if normalized_replay_code is None:
+            raise ValueError("Missing replay code for replay video request.")
+
         auth_token = token
         if auth_token is None and lesson_activity_id is not None:
             auth_token = self._get_lesson_player_rms_token(lesson_activity_id, timeout=timeout)
@@ -292,7 +296,7 @@ class LMSUtil:
             request_kwargs["timeout"] = timeout
 
         data = self._get_json(
-            f"{self.RMS_BASE_URL}/api/embed/lesson-activities/captures/{replay_code}",
+            f"{self.RMS_BASE_URL}/api/embed/lesson-activities/captures/{normalized_replay_code}",
             **request_kwargs,
         )
         if not isinstance(data, dict):
@@ -301,7 +305,7 @@ class LMSUtil:
 
     def _get_replay_video_list(
         self,
-        replay_code: str,
+        replay_code: LMSReplayCode,
         *,
         lesson_activity_id: int | None = None,
         token: str | None = None,
@@ -310,13 +314,17 @@ class LMSUtil:
         """
         获取回放视频列表（`lesson_videos`）。
         """
+        normalized_replay_code = self._normalize_replay_code(replay_code)
+        if normalized_replay_code is None:
+            return []
+
         # 如果可以，则使用缓存信息，避免重复请求和解析
-        cached = self._replay_video_cache.get(replay_code)
+        cached = self._replay_video_cache.get(normalized_replay_code)
         if cached is not None:
             return list(cached)
 
         data = self._get_replay_videos(
-            replay_code,
+            normalized_replay_code,
             lesson_activity_id=lesson_activity_id,
             token=token,
             timeout=timeout,
@@ -333,7 +341,7 @@ class LMSUtil:
             if isinstance(one, dict):
                 result.append(one)
 
-        self._replay_video_cache[replay_code] = list(result)
+        self._replay_video_cache[normalized_replay_code] = list(result)
         return result
 
     @staticmethod
@@ -572,19 +580,20 @@ class LMSUtil:
             )
 
         if detail_type == ActivityType.LESSON.value:
-            replay_code: str | None = None
+            replay_code: LMSReplayCode | None = None
             # 先尝试从最高层级提取 replay_code，再依次尝试从 lesson_resource.properties.replay_code 和 data.external_live_detail.replay_id 提取
-            if isinstance(activity_detail.get("replay_code"), str) and activity_detail.get("replay_code"):
-                replay_code = activity_detail.get("replay_code")
+            candidate = activity_detail.get("replay_code")
+            if self._normalize_replay_code(candidate) is not None:
+                replay_code = candidate
             if replay_code is None and isinstance(lesson_properties, Mapping):
                 candidate = lesson_properties.get("replay_code")
-                if isinstance(candidate, str) and candidate:
+                if self._normalize_replay_code(candidate) is not None:
                     replay_code = candidate
             if replay_code is None and isinstance(data, Mapping):
                 external = data.get("external_live_detail")
                 if isinstance(external, Mapping):
                     candidate = external.get("replay_id")
-                    if isinstance(candidate, str) and candidate:
+                    if self._normalize_replay_code(candidate) is not None:
                         replay_code = candidate
 
             replay_videos: list[LMSReplayVideo] = []
@@ -623,6 +632,10 @@ class LMSUtil:
                 cast(object, {
                     **common,
                     "replay_code": external.get("replay_id"),
+                    "external_live_id": data.get("external_live_id") if isinstance(data, Mapping) else None,
+                    "external_live_start_time": external.get("start_time"),
+                    "external_live_end_time": external.get("end_time"),
+                    "external_live_name": external.get("name"),
                     "live_room": external.get("room"),
                     "view_live": external.get("view_live"),
                     "view_record": external.get("view_record"),
@@ -630,6 +643,16 @@ class LMSUtil:
             )
 
         return cast(LMSActivity, cast(object, common))
+
+    @staticmethod
+    def _normalize_replay_code(value: Any) -> Optional[str]:
+        """将回放标识规范化为字符串，便于比较、缓存与接口请求。"""
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, str):
+            text = value.strip()
+            return text or None
+        return None
 
     def _extract_submission_list(self, submission_data: Mapping[str, Any]) -> LMSSubmissionListResponse:
         submission_items = submission_data.get("list", [])
@@ -839,4 +862,3 @@ class LMSUtil:
         if isinstance(first, str) and first:
             return first
         return None
-

@@ -15,7 +15,7 @@ from qfluentwidgets import (
     SimpleCardWidget,
     TableWidget,
     TextBrowser,
-    TitleLabel,
+    TitleLabel, PrimaryPushButton,
 )
 
 from lms.models import ActivityType
@@ -134,6 +134,8 @@ class LMSDetailPage(QFrame):
     submissionRequested = pyqtSignal(dict)
     # 用户点击下载按钮后，通知主容器执行下载。
     downloadRequested = pyqtSignal(dict)
+    # 用户点击“打开对应回放”后，请求主容器按开始时间跳转到对应 lesson。
+    relatedLessonRequested = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         """初始化活动详情页组件。
@@ -144,6 +146,7 @@ class LMSDetailPage(QFrame):
         super().__init__(parent)
         self.setObjectName("detailPage")
         self._metaCards: list[QWidget] = []
+        self._relatedLessonStartTime: Optional[str] = None
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -159,6 +162,10 @@ class LMSDetailPage(QFrame):
         self.detailMetaLayout.setContentsMargins(0, 0, 0, 0)
         self.detailMetaLayout.setHorizontalSpacing(12)
         self.detailMetaLayout.setVerticalSpacing(12)
+
+        self.openRelatedLessonButton = PrimaryPushButton(self.tr("打开对应回放"), self)
+        self.openRelatedLessonButton.setVisible(False)
+        self.openRelatedLessonButton.clicked.connect(self._onOpenRelatedLessonClicked)
 
         self.detailDescriptionCard = HeaderCardWidget(self.tr("活动说明"), self)
         self.detailDescriptionCard.viewLayout.setContentsMargins(20, 15, 20, 15)
@@ -207,6 +214,7 @@ class LMSDetailPage(QFrame):
 
         layout.addWidget(self.detailTitleLabel)
         layout.addWidget(self.detailMetaHost)
+        layout.addWidget(self.openRelatedLessonButton, alignment=Qt.AlignLeft)
         layout.addWidget(self.detailDescriptionCard)
         layout.addSpacing(4)
         layout.addWidget(self.detailUploadsTitle)
@@ -256,6 +264,7 @@ class LMSDetailPage(QFrame):
         for one in self._normalWidgets():
             one.setVisible(True)
         self.detailMetaHost.setVisible(bool(self._metaCards))
+        self.openRelatedLessonButton.setVisible(self._relatedLessonStartTime is not None)
         self.detailDescriptionCard.setVisible(not self.detailDescriptionBrowser.document().isEmpty())
         self.failFrame.setVisible(False)
 
@@ -263,6 +272,7 @@ class LMSDetailPage(QFrame):
         """返回详情页常规显示控件集合。"""
         return [
             self.detailMetaHost,
+            self.openRelatedLessonButton,
             self.detailDescriptionCard,
             self.detailUploadsTitle,
             self.detailUploadsTable,
@@ -284,6 +294,7 @@ class LMSDetailPage(QFrame):
         self.detailTitleLabel.setText(activity_name)
 
         self._setMetaItems(self._buildDetailMetaItems(detail))
+        self._setRelatedLessonButton(detail)
         self._setDescriptionContent(self._extractRichText(detail))
 
         uploads = detail.get("uploads", []) if isinstance(detail.get("uploads"), list) else []
@@ -316,6 +327,8 @@ class LMSDetailPage(QFrame):
         """
         self.detailTitleLabel.setText("-")
         self._setMetaItems([(FluentIcon.INFO, self.tr("提示"), self.tr("请选择一个活动查看详情"))])
+        self._relatedLessonStartTime = None
+        self.openRelatedLessonButton.setVisible(False)
         self._setDescriptionContent(None)
         self.detailUploadsTitle.setVisible(False)
         self._populateUploadTable(self.detailUploadsTable, [])
@@ -385,6 +398,18 @@ class LMSDetailPage(QFrame):
             self._metaCards.append(card)
         self.detailMetaHost.setVisible(bool(items))
         self.detailMetaHost.adjustSize()
+
+    def _setRelatedLessonButton(self, detail: dict) -> None:
+        """根据当前详情决定是否显示“打开对应回放”按钮。"""
+        lesson_start_time = detail.get("external_live_start_time") or detail.get("start_time")
+        is_lecture_live = str(detail.get("type") or "") == ActivityType.LECTURE_LIVE.value
+        if is_lecture_live and isinstance(lesson_start_time, str) and lesson_start_time:
+            self._relatedLessonStartTime = lesson_start_time
+            self.openRelatedLessonButton.setVisible(True)
+            return
+
+        self._relatedLessonStartTime = None
+        self.openRelatedLessonButton.setVisible(False)
 
     def _clearMetaItems(self) -> None:
         """清理已渲染的信息卡片。"""
@@ -503,3 +528,8 @@ class LMSDetailPage(QFrame):
         if start_text != "-":
             return self.tr("开始"), start_text
         return None
+
+    def _onOpenRelatedLessonClicked(self) -> None:
+        """在用户点击按钮时请求主容器查找对应回放。"""
+        if isinstance(self._relatedLessonStartTime, str) and self._relatedLessonStartTime:
+            self.relatedLessonRequested.emit(self._relatedLessonStartTime)
