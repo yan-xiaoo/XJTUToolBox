@@ -654,7 +654,18 @@ class LMSInterface(ScrollArea):
             if "." in base:
                 ext = "." + base.split(".")[-1]
 
-        base_name = raw_name if raw_name else "file"
+        base_name = raw_name
+        # 对于下载回放做特殊命名
+        if file_info.get("label"):
+            label = file_info.get("label")
+            if label == "INSTRUCTOR":
+                base_name += "教室录像"
+            elif label == "ENCODER":
+                base_name += "电脑内录"
+
+        if not base_name:
+            base_name = "file"
+
         base_name = self.sanitize_filename(base_name)
         title_name = self.sanitize_filename(activity_title)
 

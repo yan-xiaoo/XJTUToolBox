@@ -360,7 +360,15 @@ class LMSDetailPage(QFrame):
         rows = [one for one in replay_videos if isinstance(one, dict)]
         self.detailReplayTable.setRowCount(len(rows))
         for row, video in enumerate(rows):
-            self.detailReplayTable.setItem(row, 0, QTableWidgetItem(safe_text(video.get("label"))))
+
+            text = safe_text(video.get("label"))
+            # 将 Label 转化为人类能看懂的含义
+            if text == "INSTRUCTOR":
+                text = self.tr("教室录像")
+            elif text == "ENCODER":
+                text = self.tr("电脑内录")
+
+            self.detailReplayTable.setItem(row, 0, QTableWidgetItem(text))
             self.detailReplayTable.setItem(row, 1, QTableWidgetItem(format_size(video.get("size"))))
 
             save_btn = PushButton(self.tr("另存为"), self.detailReplayTable)

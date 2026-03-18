@@ -222,7 +222,33 @@ class ProgressInfoBar(QFrame):
 
         return super().eventFilter(obj, e)
 
-    def closeEvent(self, e):
+    def _detachFromInfoBarManager(self) -> None:
+        """将当前进度提示条从 InfoBar 管理器与父级事件过滤器中安全移除。"""
+        if self.position != InfoBarPosition.NONE:
+            manager = InfoBarManager.make(self.position)
+            try:
+                manager.remove(self)
+            except RuntimeError:
+                pass
+
+        if self.parent():
+            try:
+                self.parent().removeEventFilter(self)
+            except RuntimeError:
+                pass
+
+    def closeEvent(self, e) -> None:
+        """关闭进度提示条并清理其在管理器中的残留引用。
+
+        需要在真正销毁控件前先将其从 `InfoBarManager` 中移除，否则下一个
+        `ProgressInfoBar` 显示时，管理器仍可能遍历到已被删除的旧对象并触发异常。
+
+        :param e: Qt 关闭事件对象。
+        :return: 无返回值。
+        """
+        self.timer.stop()
+        self._detachFromInfoBarManager()
+        self.closedSignal.emit()
         self.deleteLater()
         e.ignore()
 
