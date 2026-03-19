@@ -15,8 +15,8 @@ from .threads.LMSFileDownloadThread import LMSFileDownloadThread
 from .threads.LMSThread import LMSThread, LMSAction
 from .threads.ProcessWidget import ProcessWidget
 from .utils import StyleSheet, accounts
-from .sub_interfaces.lms import PageStatus, LMSStartPage, LMSCoursePage, LMSActivityPage, LMSDetailPage, LMSSubmissionPage
-from .sub_interfaces.lms.common import format_size as common_format_size
+from .sub_interfaces.lms import PageStatus, LMSStartPage, LMSCoursePage, LMSActivityPage, LMSDetailPage, LMSSubmissionPage, LMSVideoPage
+from .sub_interfaces.lms.common import format_size as common_format_size, format_replay_video_label
 from lms.models import ActivityType
 
 
@@ -27,6 +27,7 @@ class LMSInterface(ScrollArea):
     ROUTE_ACTIVITY = "activityPage"
     ROUTE_DETAIL = "detailPage"
     ROUTE_SUBMISSION = "submissionPage"
+    ROUTE_VIDEO = "videoPage"
 
     def __init__(self, parent=None):
         """初始化 LMS 主容器、导航区、页面区与线程协作组件。"""
@@ -109,18 +110,20 @@ class LMSInterface(ScrollArea):
         self.setWidgetResizable(True)
 
     def _initPages(self):
-        """创建并挂载五个子页面。"""
+        """创建并挂载六个子页面。"""
         self.startPage = LMSStartPage(self)
         self.coursePage = LMSCoursePage(self)
         self.activityPage = LMSActivityPage(self)
         self.detailPage = LMSDetailPage(self)
         self.submissionPage = LMSSubmissionPage(self)
+        self.videoPage = LMSVideoPage(self)
 
         self.pageLayout.addWidget(self.startPage)
         self.pageLayout.addWidget(self.coursePage)
         self.pageLayout.addWidget(self.activityPage)
         self.pageLayout.addWidget(self.detailPage)
         self.pageLayout.addWidget(self.submissionPage)
+        self.pageLayout.addWidget(self.videoPage)
 
     def _connectSignals(self):
         """连接线程信号与子页面信号。"""
@@ -138,6 +141,7 @@ class LMSInterface(ScrollArea):
         self.detailPage.retryRequested.connect(self.refreshActivityDetail)
         self.detailPage.submissionRequested.connect(self.show_submission_page)
         self.detailPage.downloadRequested.connect(self._save_file)
+        self.detailPage.replayVideoViewRequested.connect(self.show_video_page)
         self.detailPage.relatedLessonRequested.connect(self.openRelatedLesson)
         self.submissionPage.downloadRequested.connect(self._save_file)
 
@@ -149,17 +153,22 @@ class LMSInterface(ScrollArea):
             self.activityPage: self.ROUTE_ACTIVITY,
             self.detailPage: self.ROUTE_DETAIL,
             self.submissionPage: self.ROUTE_SUBMISSION,
+            self.videoPage: self.ROUTE_VIDEO,
         }
         self._route_page_map = {route: page for page, route in self._page_route_map.items()}
 
     def switchPage(self, page: QWidget):
         """切换当前显示页面并滚动回顶部。
 
-        :param page: 目标页面对象（start/course/activity/detail/submission 之一）。
+        :param page: 目标页面对象（start/course/activity/detail/submission/video 之一）。
         :return: 无返回值。
         """
+        # 如果从视频播放页面切换出去，那么需要停止视频的播放。
+        if getattr(self, "_current_page", None) is self.videoPage and page is not self.videoPage:
+            self.videoPage.stopPlayback()
+
         self._current_page = page
-        pages = (self.startPage, self.coursePage, self.activityPage, self.detailPage, self.submissionPage)
+        pages = (self.startPage, self.coursePage, self.activityPage, self.detailPage, self.submissionPage, self.videoPage)
         for one in pages:
             one.setVisible(one is page)
 
@@ -460,6 +469,7 @@ class LMSInterface(ScrollArea):
         self.activityPage.reset()
         self.detailPage.reset()
         self.submissionPage.reset()
+        self.videoPage.reset()
 
         self.coursePage.setCourses(courses)
 
@@ -509,6 +519,19 @@ class LMSInterface(ScrollArea):
         self.submissionPage.setSubmission(submission, self.selected_course_name, self.selected_activity_name)
         self.navigate_to(self.submissionPage, self.tr("提交详情"))
 
+    @pyqtSlot(dict)
+    def show_video_page(self, video_info: dict):
+        """展示课程回放视频播放页。"""
+        play_url = str(video_info.get("download_url") or "").strip() if isinstance(video_info, dict) else ""
+        if not play_url:
+            self.error(self.tr("无法播放"), self.tr("该回放没有可用的在线播放链接"), parent=self)
+            return
+
+        video_label = format_replay_video_label(video_info.get("label"))
+        breadcrumb_label = video_label if video_label != "-" else self.tr("在线查看")
+        self.videoPage.setReplayVideo(video_info, self.selected_activity_name)
+        self.navigate_to(self.videoPage, breadcrumb_label)
+
     @pyqtSlot()
     def onCurrentAccountChanged(self):
         """处理账号切换，清空状态并回到起始页。
@@ -526,6 +549,7 @@ class LMSInterface(ScrollArea):
         self.activityPage.reset()
         self.detailPage.reset()
         self.submissionPage.reset()
+        self.videoPage.reset()
         self.startPage.reset()
 
         self._initBreadcrumbRoot(switch_page=False)

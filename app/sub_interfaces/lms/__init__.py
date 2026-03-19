@@ -4,6 +4,7 @@ from .course_page import LMSCoursePage
 from .activity_page import LMSActivityPage
 from .detail_page import LMSDetailPage
 from .submission_page import LMSSubmissionPage
+from .video_page import LMSVideoPage
 
 __all__ = [
     "PageStatus",
@@ -12,4 +13,5 @@ __all__ = [
     "LMSActivityPage",
     "LMSDetailPage",
     "LMSSubmissionPage",
+    "LMSVideoPage",
 ]

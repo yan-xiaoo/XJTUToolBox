@@ -26,6 +26,7 @@ from .common import (
     create_retry_frame,
     create_section_title,
     format_live_room,
+    format_replay_video_label,
     format_size,
     is_html_text,
     safe_text,
@@ -134,6 +135,8 @@ class LMSDetailPage(QFrame):
     submissionRequested = pyqtSignal(dict)
     # 用户点击下载按钮后，通知主容器执行下载。
     downloadRequested = pyqtSignal(dict)
+    # 用户点击“在线查看”后，请求主容器切换到视频播放页。
+    replayVideoViewRequested = pyqtSignal(dict)
     # 用户点击“打开对应回放”后，请求主容器按开始时间跳转到对应 lesson。
     relatedLessonRequested = pyqtSignal(str)
 
@@ -196,14 +199,16 @@ class LMSDetailPage(QFrame):
         self.detailReplayLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.detailReplayTable = TableWidget(self)
         self.detailReplayTable.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.detailReplayTable.setColumnCount(3)
+        self.detailReplayTable.setColumnCount(4)
         self.detailReplayTable.setHorizontalHeaderLabels([
-            self.tr("视频"), self.tr("文件大小"), self.tr("另存为")
+            self.tr("视频"), self.tr("文件大小"), self.tr("在线播放"), self.tr("另存为")
         ])
         apply_stretch_on_first_column(self.detailReplayTable)
         self.detailReplayTable.verticalHeader().setVisible(False)
         self.detailReplayTable.setEditTriggers(TableWidget.NoEditTriggers)
         self.detailReplayTable.setSelectionMode(TableWidget.SelectionMode.NoSelection)
+
+        self.detailReplayWarning = CaptionLabel(self.tr("警告：在线播放视频会消耗大量流量，请确保你连接了 WLAN 网络。"), self)
 
         self.loadingFrame = create_loading_frame(self)
         self.loadingFrame.setVisible(False)
@@ -223,6 +228,8 @@ class LMSDetailPage(QFrame):
         layout.addWidget(self.detailSubmissionTable)
         layout.addWidget(self.detailReplayLabel)
         layout.addWidget(self.detailReplayTable)
+        layout.addSpacing(4)
+        layout.addWidget(self.detailReplayWarning)
         layout.addWidget(self.loadingFrame)
         layout.addWidget(self.failFrame)
 
@@ -280,6 +287,7 @@ class LMSDetailPage(QFrame):
             self.detailSubmissionTable,
             self.detailReplayLabel,
             self.detailReplayTable,
+            self.detailReplayWarning
         ]
 
     def setDetail(self, detail: dict, course_name: str, activity_name: str) -> None:
@@ -360,25 +368,23 @@ class LMSDetailPage(QFrame):
         rows = [one for one in replay_videos if isinstance(one, dict)]
         self.detailReplayTable.setRowCount(len(rows))
         for row, video in enumerate(rows):
-
-            text = safe_text(video.get("label"))
-            # 将 Label 转化为人类能看懂的含义
-            if text == "INSTRUCTOR":
-                text = self.tr("教室录像")
-            elif text == "ENCODER":
-                text = self.tr("电脑内录")
-
+            text = format_replay_video_label(video.get("label"))
             self.detailReplayTable.setItem(row, 0, QTableWidgetItem(text))
             self.detailReplayTable.setItem(row, 1, QTableWidgetItem(format_size(video.get("size"))))
 
+            view_btn = PushButton(self.tr("在线播放"), self.detailReplayTable)
+            view_btn.clicked.connect(lambda _=False, one=video: self.replayVideoViewRequested.emit(one))
+            self.detailReplayTable.setCellWidget(row, 2, view_btn)
+
             save_btn = PushButton(self.tr("另存为"), self.detailReplayTable)
             save_btn.clicked.connect(lambda _=False, one=video: self.downloadRequested.emit(one))
-            self.detailReplayTable.setCellWidget(row, 2, save_btn)
+            self.detailReplayTable.setCellWidget(row, 3, save_btn)
 
         visible = len(rows) > 0
         self.detailReplayLabel.setVisible(visible)
         self.detailReplayTable.setVisible(visible)
         self.detailReplayTable.resizeRowsToContents()
+        self.detailReplayWarning.setVisible(visible)
         update_table_height(self.detailReplayTable, min_rows=0, min_height=38)
 
     def _populateUploadTable(self, table: TableWidget, uploads: list[dict]) -> int:

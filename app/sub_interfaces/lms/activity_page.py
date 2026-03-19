@@ -1,6 +1,9 @@
+from datetime import datetime
+
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QFrame, QVBoxLayout, QWidget
-from qfluentwidgets import Pivot, FlowLayout, BodyLabel
+from PyQt5.QtWidgets import QActionGroup, QFrame, QHBoxLayout, QVBoxLayout, QWidget, QSizePolicy
+from qfluentwidgets import Action, BodyLabel, CheckableMenu, FlowLayout, FluentIcon, MenuIndicatorType, Pivot, \
+    TransparentDropDownPushButton
 
 from lms.models import ActivityType
 from app.cards.lms_activity_card import LMSActivityCard
@@ -27,12 +30,38 @@ class LMSActivityPage(QFrame):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignTop)
 
+        self.topBar = QFrame(self)
+        self.topBarLayout = QHBoxLayout(self.topBar)
+        self.topBarLayout.setContentsMargins(0, 0, 0, 0)
+        self.topBarLayout.setSpacing(12)
+
         self.activityTypePivot = Pivot(self)
         self.activityTypePivot.addItem(ActivityType.HOMEWORK.value, self.tr("作业"), onClick=lambda: self._onActivityTypeChanged(ActivityType.HOMEWORK.value))
         self.activityTypePivot.addItem(ActivityType.MATERIAL.value, self.tr("资料"), onClick=lambda: self._onActivityTypeChanged(ActivityType.MATERIAL.value))
         self.activityTypePivot.addItem(ActivityType.LESSON.value, self.tr("课程回放"), onClick=lambda: self._onActivityTypeChanged(ActivityType.LESSON.value))
         self.activityTypePivot.addItem(ActivityType.LECTURE_LIVE.value, self.tr("直播"), onClick=lambda: self._onActivityTypeChanged(ActivityType.LECTURE_LIVE.value))
         self.activityTypePivot.setCurrentItem(self.activity_type_filter)
+
+        self.sortButton = TransparentDropDownPushButton(FluentIcon.SYNC, self.tr("排序方式"), self.topBar)
+        self.sortButton.setFixedHeight(34)
+        self.sortButton.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.sortButton.setVisible(False)
+
+        self.lessonSortGroup = QActionGroup(self)
+        self.lessonTimeAscAction = Action(FluentIcon.UP, self.tr("时间 前→后"), self, checkable=True)
+        self.lessonTimeDescAction = Action(FluentIcon.DOWN, self.tr("时间 后→前"), self, checkable=True)
+        self.lessonSortGroup.addAction(self.lessonTimeAscAction)
+        self.lessonSortGroup.addAction(self.lessonTimeDescAction)
+        self.lessonTimeDescAction.setChecked(True)
+
+        self.lessonTimeAscAction.triggered.connect(self._onSortChanged)
+        self.lessonTimeDescAction.triggered.connect(self._onSortChanged)
+
+        self.sortMenu = CheckableMenu(parent=self, indicatorType=MenuIndicatorType.RADIO)
+        self.sortMenu.addActions([self.lessonTimeAscAction, self.lessonTimeDescAction])
+        self.sortButton.setMenu(self.sortMenu)
+
+        self.topBarLayout.addWidget(self.activityTypePivot, stretch=1)
 
         self.cardHost = QWidget(self)
         self.flowLayout = FlowLayout(self.cardHost, needAni=False)
@@ -47,7 +76,8 @@ class LMSActivityPage(QFrame):
         self.failFrame.setVisible(False)
         retry_button.clicked.connect(self.retryRequested.emit)
 
-        layout.addWidget(self.activityTypePivot)
+        layout.addWidget(self.topBar)
+        layout.addWidget(self.sortButton, alignment=Qt.AlignHCenter)
         layout.addWidget(self.cardHost)
         layout.addWidget(self.loadingFrame)
         layout.addWidget(self.failFrame)
@@ -88,7 +118,9 @@ class LMSActivityPage(QFrame):
         :param key: 活动类型键（如 homework/material/lesson/lecture_live）。
         :return: 无返回值。
         """
-        self._filtered_activities = [one for one in self._activities if str(one.get("type") or "") == key]
+        filtered = [one for one in self._activities if str(one.get("type") or "") == key]
+        self._filtered_activities = self._sortActivities(filtered, key)
+        self._updateSortButtonVisibility(key)
         self._rebuildActivityCards()
 
     def setCurrentActivityType(self, key: str):
@@ -109,6 +141,7 @@ class LMSActivityPage(QFrame):
         self._activities = []
         self._filtered_activities = []
         self._clearActivityCards()
+        self._updateSortButtonVisibility(self.activity_type_filter)
 
     def reset(self):
         """重置活动页到默认状态（默认类型为作业）。
@@ -117,6 +150,7 @@ class LMSActivityPage(QFrame):
         """
         self.activity_type_filter = ActivityType.HOMEWORK.value
         self.activityTypePivot.setCurrentItem(self.activity_type_filter)
+        self.lessonTimeDescAction.setChecked(True)
         self.clearData()
         self.setPageStatus(PageStatus.NORMAL)
 
@@ -133,6 +167,43 @@ class LMSActivityPage(QFrame):
         self.activity_type_filter = key
         self.filterActivities(key)
         self.activityTypeChanged.emit(key)
+
+    def _onSortChanged(self):
+        """处理课程回放排序方式切换。"""
+        self.filterActivities(self.activity_type_filter)
+
+    def _updateSortButtonVisibility(self, key: str):
+        """仅在课程回放分类下显示排序按钮。"""
+        self.sortButton.setVisible(key == ActivityType.LESSON.value)
+
+    def _sortActivities(self, activities: list[dict], key: str) -> list[dict]:
+        """按当前筛选类型返回排序后的活动列表。"""
+        if key != ActivityType.LESSON.value:
+            return list(activities)
+
+        valid_items: list[tuple[datetime, dict]] = []
+        invalid_items: list[dict] = []
+        for activity in activities:
+            sort_time = self._activitySortTime(activity)
+            if sort_time is None:
+                invalid_items.append(activity)
+                continue
+            valid_items.append((sort_time, activity))
+
+        valid_items.sort(key=lambda item: item[0], reverse=self.lessonTimeDescAction.isChecked())
+        return [activity for _, activity in valid_items] + invalid_items
+
+    @staticmethod
+    def _activitySortTime(activity: dict) -> datetime | None:
+        """提取活动排序使用的时间字段。"""
+        for value in (activity.get("start_time"), activity.get("created_at"), activity.get("updated_at")):
+            if not isinstance(value, str) or not value:
+                continue
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+        return None
 
     def _clearActivityCards(self):
         """清理已渲染的活动卡片。"""

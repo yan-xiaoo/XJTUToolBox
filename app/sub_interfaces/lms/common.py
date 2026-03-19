@@ -136,6 +136,18 @@ def activity_type_text(value):
     return mapping.get(str(value), str(value) if value else "-")
 
 
+def format_replay_video_label(value) -> str:
+    """将回放视频标签转换为易读的中文文本。"""
+    mapping = {
+        "INSTRUCTOR": "教室录像",
+        "ENCODER": "电脑内录",
+    }
+    text = safe_text(value)
+    if text == "-":
+        return text
+    return mapping.get(text, text)
+
+
 def activity_status_text(activity: dict):
     """根据活动状态字段生成展示文本。"""
     if activity.get("is_closed") is True:
