@@ -73,19 +73,32 @@ class LMSFileDownloadThread(ProgressBarThread):
 
 
 class LMSImagePreviewDialog(QDialog):
+    OVERLAY_HORIZONTAL_OFFSET_FACTOR = 0.2
+    OVERLAY_VERTICAL_OFFSET_FACTOR = 0.18
+    OVERLAY_CENTER_SCALE_FACTOR = 0.9
+
     def __init__(self, fetch_pixmap_callback, preview_key_callback, safe_text_callback, parent=None):
         super().__init__(parent)
         self._fetch_pixmap = fetch_pixmap_callback
         self._preview_key = preview_key_callback
         self._safe_text = safe_text_callback
+        self._overlay_loader_callback = None
 
         self._preview_images: list[dict] = []
         self._preview_index = 0
         self._preview_scale = 1.0
         self._preview_original_pixmap: QPixmap | None = None
+        self._preview_render_pixmap: QPixmap | None = None
         self._current_preview_file: dict | None = None
+        self._overlay_reference_w: float | None = None
+        self._overlay_reference_h: float | None = None
+        # Fine-tune mark overlay scale in code, anchored at image center.
+        self._overlay_coordinate_scale = self.OVERLAY_CENTER_SCALE_FACTOR
+        self._overlay_coordinate_offset_x = 0.0
+        self._overlay_coordinate_offset_y = 0.0
         self._overlay_text: str | None = None
         self._overlay_items: list[dict] = []
+        self._review_mode = False
         self._dragging = False
         self._drag_start = QPoint()
         self._drag_h_value = 0
@@ -185,36 +198,44 @@ class LMSImagePreviewDialog(QDialog):
         self._apply_preview_scale()
 
     def _apply_preview_scale(self):
-        if self._preview_original_pixmap is None or self._preview_original_pixmap.isNull():
+        source = self._preview_render_pixmap
+        if source is None or source.isNull():
+            source = self._preview_original_pixmap
+        if source is None or source.isNull():
             self.previewImageLabel.setPixmap(QPixmap())
             return
 
-        width = max(1, int(self._preview_original_pixmap.width() * self._preview_scale))
-        height = max(1, int(self._preview_original_pixmap.height() * self._preview_scale))
-        scaled = self._preview_original_pixmap.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        scaled = self._draw_overlay(scaled)
+        width = max(1, int(source.width() * self._preview_scale))
+        height = max(1, int(source.height() * self._preview_scale))
+        scaled = source.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = self._draw_overlay_summary(scaled)
         self.previewImageLabel.setText("")
         self.previewImageLabel.setPixmap(scaled)
         self.previewImageLabel.resize(scaled.size())
 
-    def _draw_overlay(self, scaled: QPixmap) -> QPixmap:
+    def _draw_overlay(
+            self,
+            source: QPixmap,
+            include_summary: bool = True,
+            coordinate_base_w: float | None = None,
+            coordinate_base_h: float | None = None,
+    ) -> QPixmap:
         if (not self._overlay_items) and (not self._overlay_text):
-            return scaled
+            return QPixmap(source)
 
-        rendered = QPixmap(scaled)
+        rendered = QPixmap(source)
         painter = QPainter(rendered)
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        if self._overlay_items and self._preview_original_pixmap is not None:
-            base_w = max(1.0, float(self._preview_original_pixmap.width()))
-            base_h = max(1.0, float(self._preview_original_pixmap.height()))
-            scale_x = rendered.width() / base_w
-            scale_y = rendered.height() / base_h
+        if self._overlay_items:
+            base_w = max(1.0, float(coordinate_base_w or self._overlay_reference_w or rendered.width()))
+            base_h = max(1.0, float(coordinate_base_h or self._overlay_reference_h or rendered.height()))
+            strict_target_filter = self._overlay_has_current_file_match()
 
             painter.setBrush(Qt.NoBrush)
 
             for item in self._overlay_items[:300]:
-                if not self._overlay_item_matches_current(item):
+                if not self._overlay_item_matches_current(item, strict_target_filter):
                     continue
 
                 color = QColor(str(item.get("color") or "#FFC800"))
@@ -223,18 +244,25 @@ class LMSImagePreviewDialog(QDialog):
                 color.setAlpha(230)
                 pen = QPen(color)
                 border_width = self._to_float(item.get("border_width")) or 2.0
-                pen.setWidth(max(1, int(round(border_width * (scale_x + scale_y) / 2))))
+                pen.setWidth(max(1, int(round(border_width))))
                 painter.setPen(pen)
 
                 unit = str(item.get("coord_unit") or "").strip().lower()
                 item_base_w = self._to_float(item.get("base_w")) or self._to_float(item.get("source_width"))
                 item_base_h = self._to_float(item.get("base_h")) or self._to_float(item.get("source_height"))
+                coordinate_scale = max(0.01, float(self._overlay_coordinate_scale or 1.0))
+                coordinate_offset_x = float(self._overlay_coordinate_offset_x or 0.0)
+                coordinate_offset_y = float(self._overlay_coordinate_offset_y or 0.0)
 
                 def to_px_x(value: float) -> float:
-                    return self._coordinate_to_pixel(value, rendered.width(), base_w, item_base_w, unit)
+                    px = self._coordinate_to_pixel(value, rendered.width(), base_w, item_base_w, unit)
+                    px = self._scale_coordinate_from_center(px, rendered.width(), coordinate_scale)
+                    return px + coordinate_offset_x
 
                 def to_px_y(value: float) -> float:
-                    return self._coordinate_to_pixel(value, rendered.height(), base_h, item_base_h, unit)
+                    py = self._coordinate_to_pixel(value, rendered.height(), base_h, item_base_h, unit)
+                    py = self._scale_coordinate_from_center(py, rendered.height(), coordinate_scale)
+                    return py + coordinate_offset_y
 
                 path_cmds = item.get("path")
                 if isinstance(path_cmds, list) and path_cmds:
@@ -300,13 +328,13 @@ class LMSImagePreviewDialog(QDialog):
                     pw = abs(px2 - px)
                     ph = abs(py2 - py)
                     painter.drawRect(left, top, max(2, pw), max(2, ph))
-                else:
+                elif str(item.get("shape") or "").lower() == "point":
                     painter.drawEllipse(px - 5, py - 5, 10, 10)
 
                 if text:
                     painter.drawText(px + 8, py - 8, text[:120])
 
-        if self._overlay_text:
+        if include_summary and self._overlay_text:
             overlay = self._overlay_text.strip()
             if overlay:
                 if len(overlay) > 1600:
@@ -332,6 +360,38 @@ class LMSImagePreviewDialog(QDialog):
         painter.end()
         return rendered
 
+    def _draw_overlay_summary(self, pixmap: QPixmap) -> QPixmap:
+        if not self._overlay_text:
+            return pixmap
+        rendered = QPixmap(pixmap)
+        painter = QPainter(rendered)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        overlay = self._overlay_text.strip()
+        if overlay:
+            if len(overlay) > 1600:
+                overlay = overlay[:1600] + "..."
+            lines = [line.strip() for line in overlay.splitlines() if line.strip()]
+            if not lines:
+                lines = [overlay]
+            lines = lines[:10]
+            panel_w = min(int(rendered.width() * 0.72), 560)
+            line_h = 20
+            panel_h = line_h * len(lines) + 16
+            panel_x = 12
+            panel_y = 12
+
+            panel_color = QColor(0, 0, 0, 128) if not isDarkTheme() else QColor(20, 20, 20, 170)
+            painter.fillRect(panel_x, panel_y, panel_w, panel_h, panel_color)
+            painter.setPen(QColor(255, 255, 255, 235))
+            y = panel_y + 22
+            for line in lines:
+                painter.drawText(panel_x + 10, y, line[:84])
+                y += line_h
+
+        painter.end()
+        return rendered
+
     @staticmethod
     def _to_float(value) -> float | None:
         try:
@@ -343,6 +403,8 @@ class LMSImagePreviewDialog(QDialog):
 
     @staticmethod
     def _normalize_token(value) -> str:
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
         text = str(value or "").strip().lower()
         return text
 
@@ -353,39 +415,20 @@ class LMSImagePreviewDialog(QDialog):
 
         tokens: set[str] = set()
 
-        def add_token(raw):
-            token = cls._normalize_token(raw)
+        def add_token(kind: str, raw):
+            token_value = cls._normalize_token(raw)
+            if not token_value:
+                return
+            token = f"{kind}:{token_value}"
             if token:
                 tokens.add(token)
 
-        def add_from_value(value):
-            if value is None:
-                return
-            if isinstance(value, (int, float)):
-                add_token(str(int(value)) if isinstance(value, float) and value.is_integer() else str(value))
-                return
-            if not isinstance(value, str):
-                return
-            text = value.strip()
-            if not text:
-                return
-            add_token(text)
-            parsed = urlparse(text)
-            path = unquote(parsed.path or "").strip()
-            if path:
-                add_token(path)
-                base = os.path.basename(path)
-                if base:
-                    add_token(base)
-                    stem, _ = os.path.splitext(base)
-                    if stem:
-                        add_token(stem)
-
-        for key in (
-                "id", "reference_id", "key", "name", "download_url", "preview_url", "attachment_url",
-                "url", "href", "src", "link"
-        ):
-            add_from_value(file_info.get(key))
+        for key in ("id", "upload_id", "uploadId", "target_id", "targetId", "image_id", "imageId"):
+            add_token("id", file_info.get(key))
+        for key in ("reference_id", "referenceId", "file_id", "fileId"):
+            add_token("reference_id", file_info.get(key))
+        for key in ("key", "upload_key", "uploadKey", "file_key", "fileKey"):
+            add_token("key", file_info.get(key))
         return tokens
 
     @classmethod
@@ -399,21 +442,43 @@ class LMSImagePreviewDialog(QDialog):
                 tokens.add(token)
         return tokens
 
-    def _overlay_item_matches_current(self, item: dict) -> bool:
-        page_hint = self._to_float(item.get("page_index"))
-        if page_hint is not None:
-            page_index = int(round(page_hint))
-            if page_index not in {self._preview_index, self._preview_index + 1}:
-                return False
-
-        item_tokens = self._collect_overlay_item_tokens(item)
-        if not item_tokens:
-            return True
-
+    def _overlay_has_current_file_match(self) -> bool:
         file_tokens = self._collect_file_tokens(self._current_preview_file)
         if not file_tokens:
+            return False
+
+        for item in self._overlay_items[:300]:
+            if not isinstance(item, dict):
+                continue
+            item_tokens = self._collect_overlay_item_tokens(item)
+            if item_tokens and (not file_tokens.isdisjoint(item_tokens)):
+                return True
+        return False
+
+    def _overlay_item_matches_current(self, item: dict, strict_target_filter: bool = True) -> bool:
+        item_tokens = self._collect_overlay_item_tokens(item)
+        file_tokens = self._collect_file_tokens(self._current_preview_file)
+        matched_current_target = False
+
+        if item_tokens and strict_target_filter and file_tokens:
+            if file_tokens.isdisjoint(item_tokens):
+                return False
+            matched_current_target = True
+
+        if not matched_current_target:
+            page_hint = self._to_float(item.get("page_index"))
+            if page_hint is not None:
+                page_index = int(round(page_hint))
+                if page_index not in {self._preview_index, self._preview_index + 1}:
+                    return False
+
+        if not item_tokens:
             return True
-        return not file_tokens.isdisjoint(item_tokens)
+        if not strict_target_filter:
+            return True
+        if not file_tokens:
+            return True
+        return True
 
     @staticmethod
     def _coordinate_to_pixel(
@@ -440,20 +505,192 @@ class LMSImagePreviewDialog(QDialog):
 
         return value * rendered_size / max(1.0, default_base_size)
 
-    def _fit_width_scale(self) -> float:
-        if self._preview_original_pixmap is None or self._preview_original_pixmap.isNull():
-            return 1.0
-        viewport_w = self.previewScrollArea.viewport().width()
-        target_w = max(1, viewport_w - 40)
-        return max(0.1, min(target_w / max(1, self._preview_original_pixmap.width()), 8.0))
+    @staticmethod
+    def _scale_coordinate_from_center(value: float, rendered_size: int, scale: float) -> float:
+        center = rendered_size / 2.0
+        return center + (value - center) * scale
 
-    def _zoom_at(self, cursor_pos: QPoint, factor: float):
+    def _current_render_source_pixmap(self) -> QPixmap | None:
+        if self._preview_render_pixmap is not None and not self._preview_render_pixmap.isNull():
+            return self._preview_render_pixmap
+        if self._preview_original_pixmap is not None and not self._preview_original_pixmap.isNull():
+            return self._preview_original_pixmap
+        return None
+
+    def _fit_scale_for_pixmap(self, pixmap: QPixmap | None, axis: str) -> float:
+        if pixmap is None or pixmap.isNull():
+            return 1.0
+        if axis == "width":
+            viewport_size = self.previewScrollArea.viewport().width()
+            target_size = max(1, viewport_size - 40)
+            source_size = pixmap.width()
+        else:
+            viewport_size = self.previewScrollArea.viewport().height()
+            target_size = max(1, viewport_size - 24)
+            source_size = pixmap.height()
+        return max(0.1, min(target_size / max(1, source_size), 8.0))
+
+    def _fit_width_scale(self) -> float:
+        return self._fit_scale_for_pixmap(self._current_render_source_pixmap(), "width")
+
+    def _fit_height_scale(self) -> float:
+        return self._fit_scale_for_pixmap(self._current_render_source_pixmap(), "height")
+
+    def _item_uses_inferred_overlay_base(self, item: dict) -> bool:
+        if not isinstance(item, dict):
+            return False
+        if item.get("coord_unit"):
+            return False
+        if self._to_float(item.get("base_w")) or self._to_float(item.get("source_width")):
+            return False
+        if self._to_float(item.get("base_h")) or self._to_float(item.get("source_height")):
+            return False
+        return bool(item.get("path")) or (self._to_float(item.get("x")) is not None and self._to_float(item.get("y")) is not None)
+
+    @classmethod
+    def _iter_overlay_item_points(cls, item: dict):
+        if not isinstance(item, dict):
+            return
+
+        path_cmds = item.get("path")
+        if isinstance(path_cmds, list):
+            for cmd in path_cmds:
+                if not isinstance(cmd, (list, tuple)) or len(cmd) < 3:
+                    continue
+                nums = [cls._to_float(one) for one in cmd[1:]]
+                for i in range(0, len(nums) - 1, 2):
+                    x = nums[i]
+                    y = nums[i + 1]
+                    if x is not None and y is not None:
+                        yield x, y
+
+        x = cls._to_float(item.get("x"))
+        y = cls._to_float(item.get("y"))
+        w = cls._to_float(item.get("w"))
+        h = cls._to_float(item.get("h"))
+        if x is None or y is None:
+            return
+
+        yield x, y
+        if w is not None:
+            yield x + w, y
+        if h is not None:
+            yield x, y + h
+        if w is not None and h is not None:
+            yield x + w, y + h
+
+    def _collect_inferred_overlay_bounds(self) -> tuple[float, float, float, float] | None:
+        strict_target_filter = self._overlay_has_current_file_match()
+        xs: list[float] = []
+        ys: list[float] = []
+
+        for item in self._overlay_items[:300]:
+            if not self._item_uses_inferred_overlay_base(item):
+                continue
+            if not self._overlay_item_matches_current(item, strict_target_filter):
+                continue
+            for x, y in self._iter_overlay_item_points(item):
+                if x >= 0:
+                    xs.append(x)
+                if y >= 0:
+                    ys.append(y)
+
+        if not xs or not ys:
+            return None
+        return min(xs), max(xs), min(ys), max(ys)
+
+    @staticmethod
+    def _estimate_inferred_overlay_scale(
+            image_w: float,
+            image_h: float,
+            fit_scale: float,
+            bounds: tuple[float, float, float, float] | None,
+    ) -> float:
+        scale = max(0.1, float(fit_scale or 1.0))
+        if image_w <= 0 or image_h <= 0 or bounds is None:
+            return scale
+
+        _, max_x, _, max_y = bounds
+        coverage_x = max_x / image_w if max_x > 0 else 0.0
+        coverage_y = max_y / image_h if max_y > 0 else 0.0
+        dominant_coverage = max(coverage_x, coverage_y)
+        if dominant_coverage <= 0:
+            return scale
+        if dominant_coverage >= 0.95:
+            return 1.0
+
+        # Browser-side mark canvases usually leave a small margin around the image.
+        inferred_scale = dominant_coverage / 0.9
+        return max(scale, min(inferred_scale, 1.0))
+
+    def _refresh_overlay_reference_size(self):
+        self._overlay_reference_w = None
+        self._overlay_reference_h = None
+        self._overlay_coordinate_offset_x = 0.0
+        self._overlay_coordinate_offset_y = 0.0
+        if not self._review_mode or not self._overlay_items:
+            return
+        if not any(self._item_uses_inferred_overlay_base(one) for one in self._overlay_items):
+            return
         if self._preview_original_pixmap is None or self._preview_original_pixmap.isNull():
             return
 
+        image_w = float(self._preview_original_pixmap.width())
+        image_h = float(self._preview_original_pixmap.height())
+        bounds = self._collect_inferred_overlay_bounds()
+        fit_scale = self._fit_scale_for_pixmap(self._preview_original_pixmap, "height")
+        inferred_scale = self._estimate_inferred_overlay_scale(image_w, image_h, fit_scale, bounds)
+        self._overlay_reference_w = image_w * inferred_scale
+        self._overlay_reference_h = image_h * inferred_scale
+
+        if self._overlay_reference_w and self._overlay_reference_w < image_w:
+            # Use a conservative horizontal correction. The browser-side preview is
+            # close to center-aligned, but the recorded coordinates are not offset
+            # by the full side padding.
+            horizontal_padding = (image_w - self._overlay_reference_w) / 2.0
+            self._overlay_coordinate_offset_x = (
+                    -horizontal_padding
+                    * (self._overlay_reference_w / image_w)
+                    * self.OVERLAY_HORIZONTAL_OFFSET_FACTOR
+            )
+
+        if self._overlay_reference_h and self._overlay_reference_h < image_h:
+            # Vertical drift is smaller than the horizontal one, so apply a lighter
+            # upward correction.
+            vertical_padding = (image_h - self._overlay_reference_h) / 2.0
+            self._overlay_coordinate_offset_y = (
+                    -vertical_padding
+                    * (self._overlay_reference_h / image_h)
+                    * self.OVERLAY_VERTICAL_OFFSET_FACTOR
+            )
+
+    def _rebuild_preview_render_pixmap(self):
+        self._preview_render_pixmap = None
+        if self._preview_original_pixmap is None or self._preview_original_pixmap.isNull():
+            return
+
+        source = QPixmap(self._preview_original_pixmap)
+        if self._overlay_items:
+            base_w = max(1, int(round(self._overlay_reference_w or source.width())))
+            base_h = max(1, int(round(self._overlay_reference_h or source.height())))
+            if base_w != source.width() or base_h != source.height():
+                source = source.scaled(base_w, base_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            source = self._draw_overlay(
+                source,
+                include_summary=False,
+                coordinate_base_w=float(source.width()),
+                coordinate_base_h=float(source.height()),
+            )
+        self._preview_render_pixmap = source
+
+    def _zoom_at(self, cursor_pos: QPoint, factor: float):
+        source = self._current_render_source_pixmap()
+        if source is None or source.isNull():
+            return
+
         old_scale = self._preview_scale
-        old_w = max(1.0, self._preview_original_pixmap.width() * old_scale)
-        old_h = max(1.0, self._preview_original_pixmap.height() * old_scale)
+        old_w = max(1.0, source.width() * old_scale)
+        old_h = max(1.0, source.height() * old_scale)
         h_bar = self.previewScrollArea.horizontalScrollBar()
         v_bar = self.previewScrollArea.verticalScrollBar()
         rel_x = (h_bar.value() + cursor_pos.x()) / old_w
@@ -461,17 +698,23 @@ class LMSImagePreviewDialog(QDialog):
 
         self.set_preview_scale(old_scale * factor)
 
-        new_w = max(1.0, self._preview_original_pixmap.width() * self._preview_scale)
-        new_h = max(1.0, self._preview_original_pixmap.height() * self._preview_scale)
+        updated_source = self._current_render_source_pixmap()
+        if updated_source is None or updated_source.isNull():
+            return
+        new_w = max(1.0, updated_source.width() * self._preview_scale)
+        new_h = max(1.0, updated_source.height() * self._preview_scale)
         h_bar.setValue(int(rel_x * new_w - cursor_pos.x()))
         v_bar.setValue(int(rel_y * new_h - cursor_pos.y()))
 
     def _set_preview_pixmap(self, pixmap: QPixmap | None):
         self._preview_original_pixmap = pixmap if pixmap and not pixmap.isNull() else None
+        self._preview_render_pixmap = None
         if self._preview_original_pixmap is None:
             self.previewImageLabel.setCursor(Qt.ArrowCursor)
         else:
             self.previewImageLabel.setCursor(Qt.OpenHandCursor)
+            self._refresh_overlay_reference_size()
+            self._rebuild_preview_render_pixmap()
         self._apply_preview_scale()
 
     def _load_current_preview_image(self):
@@ -489,6 +732,11 @@ class LMSImagePreviewDialog(QDialog):
         self._preview_index = max(0, min(self._preview_index, count - 1))
         current = self._preview_images[self._preview_index]
         self._current_preview_file = current
+        if self._review_mode and callable(self._overlay_loader_callback):
+            self._overlay_text = self.tr("正在加载批注...")
+            self._overlay_items = []
+            self._overlay_reference_w = None
+            self._overlay_reference_h = None
         name = self._safe_text(current.get("name"))
         self.previewTitleLabel.setText(f"{name} ({self._preview_index + 1}/{count})")
         self.previewPrevButton.setEnabled(self._preview_index > 0)
@@ -502,9 +750,13 @@ class LMSImagePreviewDialog(QDialog):
             return
 
         self._set_preview_pixmap(pixmap)
-        self.set_preview_scale(self._fit_width_scale())
+        target_scale = self._fit_height_scale() if self._review_mode else self._fit_width_scale()
+        self.set_preview_scale(target_scale)
         self.previewScrollArea.horizontalScrollBar().setValue(0)
         self.previewScrollArea.verticalScrollBar().setValue(0)
+        if self._review_mode and callable(self._overlay_loader_callback):
+            current_file = dict(current)
+            QTimer.singleShot(0, lambda file_info=current_file: self._overlay_loader_callback(file_info))
 
     def eventFilter(self, watched, event):
         if watched is self.previewScrollArea.viewport() and self._preview_original_pixmap is not None:
@@ -538,10 +790,14 @@ class LMSImagePreviewDialog(QDialog):
 
     def open_images(self, images: list[dict], selected_key: str,
                     overlay_text: str | None = None, overlay_items: list[dict] | None = None,
-                    review_mode: bool = False):
+                    review_mode: bool = False, overlay_loader_callback=None):
         self._apply_dialog_theme()
+        self._review_mode = review_mode
+        self._overlay_loader_callback = overlay_loader_callback if review_mode else None
         self._overlay_text = overlay_text
         self._overlay_items = [one for one in (overlay_items or []) if isinstance(one, dict)]
+        self._overlay_reference_w = None
+        self._overlay_reference_h = None
         self._current_preview_file = None
         self.setWindowTitle(self.tr("批改预览") if review_mode else self.tr("图片预览"))
         self._preview_images = [one for one in images if isinstance(one, dict)]
@@ -554,6 +810,14 @@ class LMSImagePreviewDialog(QDialog):
         self.raise_()
         self.activateWindow()
         QTimer.singleShot(0, self._load_current_preview_image)
+
+    def set_overlay_content(self, overlay_text: str | None = None, overlay_items: list[dict] | None = None):
+        self._overlay_text = overlay_text
+        self._overlay_items = [one for one in (overlay_items or []) if isinstance(one, dict)]
+        self._refresh_overlay_reference_size()
+        if self._preview_original_pixmap is not None and not self._preview_original_pixmap.isNull():
+            self._rebuild_preview_render_pixmap()
+            self._apply_preview_scale()
 
     def preview_prev_image(self):
         if self._preview_index <= 0:
@@ -1516,10 +1780,25 @@ class LMSInterface(ScrollArea):
 
     @staticmethod
     def _is_mark_attachment_upload(file_info: dict) -> bool:
+        if not isinstance(file_info, dict):
+            return False
         name = str(file_info.get("name") or "").strip().lower()
         if name in {"markattachment.txt", "markattatchment.txt"}:
             return True
-        return bool(re.search(r"(markattachment|markattatchment|mark_attachment|annotation|markup).*\.(txt|json)$", name))
+        if re.search(r"(markattachment|markattatchment|mark_attachment|annotation|markup).*\.(txt|json)$", name):
+            return True
+        has_payload = any(
+            file_info.get(key) is not None
+            for key in ("marked_attachment_payload", "marked_attachments_payload", "marked_attachments", "mark_overlay_payload")
+        )
+        has_upload_identity = any(
+            file_info.get(key)
+            for key in ("id", "reference_id", "key", "download_url", "preview_url", "attachment_url")
+        )
+        return has_payload and (not has_upload_identity)
+
+    def _can_preview_as_image(self, file_info: dict) -> bool:
+        return self._is_image_upload(file_info) or self._is_image_by_url(file_info)
 
     @staticmethod
     def _as_float(value) -> float | None:
@@ -1571,7 +1850,13 @@ class LMSInterface(ScrollArea):
 
     def _resolve_upload_urls(self, file_info: dict) -> list[str]:
         urls: list[str] = []
-        for key in ("download_url", "preview_url", "attachment_url", "url", "href"):
+        prefer_preview = bool(file_info.get("_prefer_preview_url_first"))
+        ordered_keys = (
+            ("preview_url", "download_url", "attachment_url", "url", "href")
+            if prefer_preview else
+            ("download_url", "preview_url", "attachment_url", "url", "href")
+        )
+        for key in ordered_keys:
             value = file_info.get(key)
             if isinstance(value, str) and value.startswith(("http://", "https://")) and value not in urls:
                 urls.append(value)
@@ -1655,69 +1940,79 @@ class LMSInterface(ScrollArea):
     def _extract_mark_overlay_items(self, payload) -> list[dict]:
         items: list[dict] = []
         page_container_keys = {"pages", "images", "attachments", "files", "canvases", "slides"}
+        id_keys = (
+            "id", "upload_id", "uploadId", "target_id", "targetId", "image_id", "imageId", "origin_upload_id",
+            "originUploadId"
+        )
+        reference_id_keys = ("reference_id", "referenceId", "file_id", "fileId", "origin_reference_id", "originReferenceId")
+        key_keys = ("key", "upload_key", "uploadKey", "file_key", "fileKey")
 
         def normalize_token(value) -> str:
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
             return str(value or "").strip().lower()
 
-        def add_tokens_from_value(raw, tokens: set[str]):
+        def add_prefixed_token(kind: str, raw, tokens: set[str]):
             if raw is None:
                 return
             if isinstance(raw, (int, float)):
-                if isinstance(raw, float) and raw.is_integer():
-                    tokens.add(str(int(raw)))
-                else:
-                    tokens.add(str(raw))
+                token_value = normalize_token(raw)
+                if token_value:
+                    tokens.add(f"{kind}:{token_value}")
                 return
             if isinstance(raw, str):
-                text = raw.strip()
-                if not text:
-                    return
-                token = normalize_token(text)
-                if token:
-                    tokens.add(token)
-                parsed = urlparse(text)
-                path = unquote(parsed.path or "").strip()
-                if path:
-                    path_token = normalize_token(path)
-                    if path_token:
-                        tokens.add(path_token)
-                    base = os.path.basename(path)
-                    if base:
-                        tokens.add(normalize_token(base))
-                        stem, _ = os.path.splitext(base)
-                        if stem:
-                            tokens.add(normalize_token(stem))
+                token_value = normalize_token(raw)
+                if token_value:
+                    tokens.add(f"{kind}:{token_value}")
                 return
             if isinstance(raw, dict):
-                for key in (
-                        "id", "upload_id", "uploadId", "reference_id", "referenceId", "file_id", "fileId",
-                        "target_id", "targetId", "image_id", "imageId", "key", "upload_key", "file_key",
-                        "name", "file_name", "fileName", "image_name", "imageName",
-                        "url", "download_url", "preview_url", "attachment_url", "src", "href", "link"
-                ):
-                    add_tokens_from_value(raw.get(key), tokens)
+                add_tokens_from_mapping(raw, tokens)
                 return
             if isinstance(raw, (list, tuple)):
                 for one in raw[:12]:
-                    add_tokens_from_value(one, tokens)
+                    add_prefixed_token(kind, one, tokens)
+
+        def add_tokens_from_mapping(raw: dict, tokens: set[str]):
+            for key in id_keys:
+                add_prefixed_token("id", raw.get(key), tokens)
+            for key in reference_id_keys:
+                add_prefixed_token("reference_id", raw.get(key), tokens)
+            for key in key_keys:
+                add_prefixed_token("key", raw.get(key), tokens)
+            for nested_key in (
+                    "upload",
+                    "origin_upload", "originUpload",
+                    "origin_attachment", "originAttachment",
+                    "source_upload", "sourceUpload",
+                    "source_attachment", "sourceAttachment",
+                    "attachment",
+                    "origin",
+                    "source",
+                    "file",
+                    "image",
+            ):
+                nested_value = raw.get(nested_key)
+                if isinstance(nested_value, dict):
+                    add_tokens_from_mapping(nested_value, tokens)
+                elif isinstance(nested_value, (list, tuple)):
+                    for one in nested_value[:12]:
+                        if isinstance(one, dict):
+                            add_tokens_from_mapping(one, tokens)
 
         def collect_target_tokens(node) -> set[str]:
             if not isinstance(node, dict):
                 return set()
             tokens: set[str] = set()
-            for key in (
-                    "id", "upload_id", "uploadId", "reference_id", "referenceId", "file_id", "fileId",
-                    "target_id", "targetId", "image_id", "imageId", "key", "upload_key", "file_key",
-                    "name", "file_name", "fileName", "image_name", "imageName",
-                    "url", "download_url", "preview_url", "attachment_url", "src", "href", "link"
-            ):
-                add_tokens_from_value(node.get(key), tokens)
+            add_tokens_from_mapping(node, tokens)
             return {one for one in tokens if one}
 
         def parse_unit_hint(node, inherited: str | None) -> str | None:
             if not isinstance(node, dict):
                 return inherited
-            for key in ("coord_unit", "coordinate_unit", "coordinateUnit", "unit"):
+            for key in (
+                    "coord_unit", "coordUnit", "coordinate_unit", "coordinateUnit",
+                    "coordinate_type", "coordinateType", "coord_type", "coordType", "unit"
+            ):
                 value = node.get(key)
                 if not isinstance(value, str):
                     continue
@@ -1750,27 +2045,86 @@ class LMSInterface(ScrollArea):
 
             for w_key, h_key in (
                     ("image_width", "image_height"),
+                    ("imageWidth", "imageHeight"),
                     ("img_width", "img_height"),
+                    ("imgWidth", "imgHeight"),
                     ("origin_width", "origin_height"),
+                    ("originWidth", "originHeight"),
                     ("original_width", "original_height"),
+                    ("originalWidth", "originalHeight"),
                     ("natural_width", "natural_height"),
+                    ("naturalWidth", "naturalHeight"),
                     ("canvas_width", "canvas_height"),
+                    ("canvasWidth", "canvasHeight"),
                     ("page_width", "page_height"),
+                    ("pageWidth", "pageHeight"),
                     ("display_width", "display_height"),
+                    ("displayWidth", "displayHeight"),
+                    ("source_width", "source_height"),
+                    ("sourceWidth", "sourceHeight"),
+                    ("base_width", "base_height"),
+                    ("baseWidth", "baseHeight"),
             ):
                 w = self._as_float(node.get(w_key))
                 h = self._as_float(node.get(h_key))
                 if w is not None and h is not None and w > 0 and h > 0:
                     return w, h
 
-            size = node.get("size")
-            if isinstance(size, dict):
-                w = self._as_float(size.get("width"))
-                h = self._as_float(size.get("height"))
-                if w is not None and h is not None and w > 0 and h > 0:
-                    return w, h
+            for size_key in (
+                    "size", "image_size", "imageSize", "origin_size", "originSize",
+                    "original_size", "originalSize", "natural_size", "naturalSize",
+                    "canvas_size", "canvasSize", "page_size", "pageSize",
+                    "display_size", "displaySize", "source_size", "sourceSize"
+            ):
+                size = node.get(size_key)
+                if not isinstance(size, dict):
+                    continue
+                for w_key, h_key in (("width", "height"), ("w", "h"), ("imageWidth", "imageHeight")):
+                    w = self._as_float(size.get(w_key))
+                    h = self._as_float(size.get(h_key))
+                    if w is not None and h is not None and w > 0 and h > 0:
+                        return w, h
 
             return width, height
+
+        def apply_box_values(
+                values,
+                *,
+                prefer_xyxy: bool = False,
+                current_x: float | None = None,
+                current_y: float | None = None,
+                current_w: float | None = None,
+                current_h: float | None = None,
+        ) -> tuple[float | None, float | None, float | None, float | None]:
+            if not isinstance(values, (list, tuple)) or len(values) < 4:
+                return current_x, current_y, current_w, current_h
+
+            v1 = self._as_float(values[0])
+            v2 = self._as_float(values[1])
+            v3 = self._as_float(values[2])
+            v4 = self._as_float(values[3])
+
+            x = current_x if current_x is not None else v1
+            y = current_y if current_y is not None else v2
+            w = current_w
+            h = current_h
+
+            treat_as_xyxy = prefer_xyxy
+            if not treat_as_xyxy and None not in (v1, v2, v3, v4):
+                treat_as_xyxy = (v3 >= v1 and v4 >= v2 and (v3 > 1 or v4 > 1))
+
+            if treat_as_xyxy:
+                if x is not None and w is None and v3 is not None:
+                    w = v3 - x
+                if y is not None and h is None and v4 is not None:
+                    h = v4 - y
+            else:
+                if w is None:
+                    w = v3
+                if h is None:
+                    h = v4
+
+            return x, y, w, h
 
         def append_item(
                 item: dict,
@@ -1852,22 +2206,44 @@ class LMSInterface(ScrollArea):
 
                 rect = node.get("rect")
                 if isinstance(rect, (list, tuple)) and len(rect) >= 4:
-                    x = self._as_float(rect[0]) if x is None else x
-                    y = self._as_float(rect[1]) if y is None else y
-                    w = self._as_float(rect[2]) if w is None else w
-                    h = self._as_float(rect[3]) if h is None else h
+                    x, y, w, h = apply_box_values(rect, current_x=x, current_y=y, current_w=w, current_h=h)
                 elif isinstance(rect, dict):
+                    rect_x1 = self._as_float(rect.get("x1"))
+                    rect_y1 = self._as_float(rect.get("y1"))
+                    rect_x2 = self._as_float(rect.get("x2"))
+                    rect_y2 = self._as_float(rect.get("y2"))
                     x = self._as_float(rect.get("x")) if x is None else x
                     y = self._as_float(rect.get("y")) if y is None else y
-                    w = self._as_float(rect.get("w")) if w is None else w
-                    h = self._as_float(rect.get("h")) if h is None else h
+                    if x is None:
+                        x = rect_x1
+                    if y is None:
+                        y = rect_y1
+                    if x is None:
+                        x = self._as_float(rect.get("left"))
+                    if y is None:
+                        y = self._as_float(rect.get("top"))
+                    if w is None:
+                        w = self._as_float(rect.get("w"))
+                    if h is None:
+                        h = self._as_float(rect.get("h"))
+                    if w is None:
+                        w = self._as_float(rect.get("width"))
+                    if h is None:
+                        h = self._as_float(rect.get("height"))
+                    if x is not None and w is None:
+                        right_value = rect_x2 if rect_x2 is not None else self._as_float(rect.get("right"))
+                        if right_value is not None:
+                            w = right_value - x
+                    if y is not None and h is None:
+                        bottom_value = rect_y2 if rect_y2 is not None else self._as_float(rect.get("bottom"))
+                        if bottom_value is not None:
+                            h = bottom_value - y
 
                 bbox = node.get("bbox")
                 if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
-                    x = self._as_float(bbox[0]) if x is None else x
-                    y = self._as_float(bbox[1]) if y is None else y
-                    w = self._as_float(bbox[2]) if w is None else w
-                    h = self._as_float(bbox[3]) if h is None else h
+                    x, y, w, h = apply_box_values(
+                        bbox, prefer_xyxy=True, current_x=x, current_y=y, current_w=w, current_h=h
+                    )
                 elif isinstance(bbox, dict):
                     bbox_x1 = self._as_float(bbox.get("x1"))
                     bbox_y1 = self._as_float(bbox.get("y1"))
@@ -1885,9 +2261,11 @@ class LMSInterface(ScrollArea):
                         h = bbox_y2 - y
 
                 graphic = node.get("graphic")
+                has_graphic_path = False
                 if isinstance(graphic, dict):
                     path = graphic.get("path")
                     if isinstance(path, list) and path:
+                        has_graphic_path = True
                         append_item(
                             {
                                 "path": path,
@@ -1910,7 +2288,11 @@ class LMSInterface(ScrollArea):
                     if h is None:
                         h = self._as_float(graphic.get("height"))
 
-                if x is not None and y is not None:
+                should_append_xy_item = x is not None and y is not None
+                if has_graphic_path and w is None and h is None and not text:
+                    should_append_xy_item = False
+
+                if should_append_xy_item:
                     append_item(
                         {
                             "x": x, "y": y, "w": w, "h": h, "text": text,
@@ -1999,36 +2381,14 @@ class LMSInterface(ScrollArea):
             y = self._as_float(match.group(2))
             msg = match.group(3).strip()
             if x is not None and y is not None:
-                items.append({"x": x, "y": y, "text": msg})
+                items.append({"x": x, "y": y, "text": msg, "shape": "point"})
 
         summary_lines = [one.strip() for one in content.splitlines() if one.strip()][:10]
         summary = "\n".join(summary_lines) if summary_lines else None
         return summary, items
 
     def _get_review_overlay_data(self, uploads: list[dict]) -> tuple[str | None, list[dict], str | None]:
-        mark_file = next((one for one in uploads if isinstance(one, dict) and self._is_mark_attachment_upload(one)), None)
-        if mark_file is None:
-            return None, [], self.tr("未找到批改标注文件 markattachment.txt")
-
-        cache_key = self._preview_key(mark_file)
-        if cache_key in self._mark_overlay_cache:
-            text, items = self._mark_overlay_cache[cache_key]
-            return text, items, None
-
-        raw_text, error_text = self._fetch_text_payload(mark_file)
-        if not raw_text:
-            return None, [], error_text or self.tr("无法读取批改标注文件")
-
-        summary, items = self._parse_mark_attachment_text(raw_text)
-        if summary:
-            overlay_text = summary
-        elif items:
-            overlay_text = self.tr("已加载批改标注（无文字说明）")
-        else:
-            trimmed = raw_text.strip()
-            overlay_text = (trimmed[:800] + "...") if len(trimmed) > 800 else trimmed
-        self._mark_overlay_cache[cache_key] = (overlay_text, items)
-        return overlay_text, items, None
+        return self._get_review_overlay_data_v2(uploads)
 
     @staticmethod
     def _extract_inline_mark_payload(upload: dict):
@@ -2097,8 +2457,6 @@ class LMSInterface(ScrollArea):
         for one in uploads:
             if not isinstance(one, dict):
                 continue
-            if self._is_mark_attachment_upload(one):
-                return True
             if self._extract_inline_mark_payload(one) is not None:
                 return True
             attachment_url = one.get("attachment_url")
@@ -2121,7 +2479,7 @@ class LMSInterface(ScrollArea):
             if payload is None:
                 continue
 
-            cache_key = f"payload|{self._preview_key(row)}"
+            cache_key = f"payload-v2|{self._preview_key(row)}"
             if cache_key in self._mark_overlay_cache:
                 overlay_text, items = self._mark_overlay_cache[cache_key]
             else:
@@ -2138,7 +2496,7 @@ class LMSInterface(ScrollArea):
 
         mark_file = next((one for one in rows if self._is_mark_attachment_upload(one)), None)
         if mark_file is not None:
-            cache_key = self._preview_key(mark_file)
+            cache_key = f"mark-file-v2|{self._preview_key(mark_file)}"
             if cache_key in self._mark_overlay_cache:
                 overlay_text, items = self._mark_overlay_cache[cache_key]
             else:
@@ -2173,7 +2531,7 @@ class LMSInterface(ScrollArea):
             text_source.setdefault("preview_url", attachment_url)
             text_source["attachment_url"] = attachment_url
 
-            cache_key = f"attachment|{self._preview_key(text_source)}"
+            cache_key = f"attachment-v2|{self._preview_key(text_source)}"
             if cache_key in self._mark_overlay_cache:
                 overlay_text, items = self._mark_overlay_cache[cache_key]
             else:
@@ -2196,6 +2554,28 @@ class LMSInterface(ScrollArea):
         if fallback is not None:
             return fallback[0], fallback[1], None
         return None, [], (errors[-1] if errors else self.tr("未找到可用批改标注数据"))
+
+    def _load_review_overlay_into_dialog(
+            self,
+            selected_key: str,
+            review_rows: list[dict],
+            current_file: dict,
+    ):
+        overlay_text, overlay_items, overlay_error = self._get_review_overlay_data_v2(review_rows, current_file=current_file)
+        dialog = self._preview_dialog
+        if dialog is None:
+            return
+
+        active_file = getattr(dialog, "_current_preview_file", None)
+        if self._preview_key(active_file) != selected_key:
+            return
+
+        if overlay_error:
+            dialog.set_overlay_content(None, [])
+            self.error(self.tr("批改预览不可用"), overlay_error, parent=self)
+            return
+
+        dialog.set_overlay_content(overlay_text, overlay_items)
 
     def _fetch_image_pixmap(self, file_info: dict) -> tuple[QPixmap | None, str | None]:
         if accounts.current is None:
@@ -2340,19 +2720,12 @@ class LMSInterface(ScrollArea):
             review_mode: bool = False,
             review_uploads: list[dict] | None = None
     ):
-        if self._is_mark_attachment_upload(file_info):
-            self.error(self.tr("无法预览"), self.tr("标注文件请使用“批改预览”查看"), parent=self)
-            return
-
-        if not self._can_try_preview(file_info):
-            self.error(self.tr("无法预览"), self.tr("该附件没有可用预览链接"), parent=self)
+        if not self._can_preview_as_image(file_info):
+            self.error(self.tr("无法预览"), self.tr("该附件不是可预览图片"), parent=self)
             return
 
         if isinstance(uploads, list):
-            image_rows = [
-                one for one in uploads
-                if isinstance(one, dict) and (not self._is_mark_attachment_upload(one)) and self._can_try_preview(one)
-            ]
+            image_rows = [one for one in uploads if isinstance(one, dict) and self._can_preview_as_image(one)]
         else:
             image_rows = [file_info]
 
@@ -2360,7 +2733,22 @@ class LMSInterface(ScrollArea):
             self.error(self.tr("无法预览"), self.tr("当前列表没有可预览图片"), parent=self)
             return
 
-        selected_key = self._preview_key(file_info)
+        current_preview_file = file_info
+
+        if review_mode:
+            review_image_rows: list[dict] = []
+            for one in image_rows:
+                row = dict(one, _prefer_preview_url_first=True)
+                if row.get("preview_url"):
+                    row.pop("download_url", None)
+                review_image_rows.append(row)
+            image_rows = review_image_rows
+
+            current_preview_file = dict(file_info, _prefer_preview_url_first=True)
+            if current_preview_file.get("preview_url"):
+                current_preview_file.pop("download_url", None)
+
+        selected_key = self._preview_key(current_preview_file)
         if self._preview_dialog is None:
             self._preview_dialog = LMSImagePreviewDialog(
                 fetch_pixmap_callback=self._get_cached_preview_pixmap,
@@ -2371,22 +2759,25 @@ class LMSInterface(ScrollArea):
 
         overlay_text = None
         overlay_items: list[dict] | None = None
+        overlay_loader_callback = None
         if review_mode:
-            overlay_text, overlay_items, overlay_error = self._get_review_overlay_data_v2(
+            overlay_text = self.tr("正在加载批注...")
+            review_rows = (
                 [one for one in review_uploads if isinstance(one, dict)] if isinstance(review_uploads, list)
-                else ([one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else []),
-                current_file=file_info
+                else ([one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else [])
             )
-            if overlay_error:
-                self.error(self.tr("批改预览不可用"), overlay_error, parent=self)
-                return
+            overlay_loader_callback = (
+                lambda current, rows=review_rows:
+                self._load_review_overlay_into_dialog(self._preview_key(current), rows, dict(current))
+            )
 
         self._preview_dialog.open_images(
             image_rows,
             selected_key,
             overlay_text=overlay_text,
             overlay_items=overlay_items,
-            review_mode=review_mode
+            review_mode=review_mode,
+            overlay_loader_callback=overlay_loader_callback
         )
 
     def populate_upload_table(self, table: TableWidget, uploads, review_context_uploads: list[dict] | None = None) -> int:
@@ -2407,7 +2798,7 @@ class LMSInterface(ScrollArea):
             action_layout.setContentsMargins(4, 0, 4, 0)
             action_layout.setSpacing(8)
 
-            can_preview = (not self._is_mark_attachment_upload(upload)) and self._can_try_preview(upload)
+            can_preview = self._can_preview_as_image(upload)
             if can_preview:
                 if has_mark_attachment:
                     mark_btn = PushButton(self.tr("批改预览"), actions)

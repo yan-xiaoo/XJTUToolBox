@@ -3,7 +3,7 @@
 import json
 import re
 from typing import Any, Literal, Mapping, NotRequired, TypedDict, cast, Optional
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from requests import Session
 
@@ -1057,33 +1057,81 @@ class LMSUtil:
             seen.add(pair)
             keys.append(pair)
 
-        upload_id = LMSUtil._coerce_int(upload.get("id"))
-        if upload_id is not None and upload_id > 0:
-            add_key("id", upload_id)
+        def add_int_key(kind: str, raw_value: Any):
+            value = LMSUtil._coerce_int(raw_value)
+            if value is not None and value > 0:
+                add_key(kind, value)
 
-        upload_key = upload.get("key")
-        if isinstance(upload_key, str) and upload_key:
-            add_key("key", upload_key)
+        def add_text_key(kind: str, raw_value: Any):
+            if isinstance(raw_value, str) and raw_value.strip():
+                add_key(kind, raw_value)
 
-        reference_id = LMSUtil._coerce_int(upload.get("reference_id"))
-        if reference_id is not None and reference_id > 0:
-            add_key("reference_id", reference_id)
+        for key_name in (
+            "id",
+            "upload_id",
+            "uploadId",
+            "target_id",
+            "targetId",
+            "image_id",
+            "imageId",
+            "origin_upload_id",
+            "originUploadId",
+        ):
+            add_int_key("id", upload.get(key_name))
 
-        name = upload.get("name")
-        if isinstance(name, str) and name:
-            add_key("name", name)
+        for key_name in (
+            "reference_id",
+            "referenceId",
+            "file_id",
+            "fileId",
+            "origin_reference_id",
+            "originReferenceId",
+        ):
+            add_int_key("reference_id", upload.get(key_name))
+
+        for key_name in ("key", "upload_key", "uploadKey", "file_key", "fileKey"):
+            add_text_key("key", upload.get(key_name))
 
         for url_key in ("url", "download_url", "preview_url", "attachment_url", "href", "link"):
             raw_url = upload.get(url_key)
             if not isinstance(raw_url, str) or not raw_url:
                 continue
-            parsed_path = unquote(urlparse(raw_url).path or "").strip()
-            if not parsed_path:
-                continue
-            add_key("path", parsed_path)
-            base_name = parsed_path.rsplit("/", 1)[-1]
-            if base_name:
-                add_key("name", base_name)
+
+            parsed = urlparse(raw_url)
+            path = parsed.path or ""
+
+            upload_id_match = re.search(r"/api/uploads/(\d+)/blob(?:$|/)", path)
+            if upload_id_match:
+                add_key("id", upload_id_match.group(1))
+
+            reference_id_match = re.search(r"/api/uploads/reference/document/(\d+)/url(?:$|/)", path)
+            if reference_id_match:
+                add_key("reference_id", reference_id_match.group(1))
+
+            for query_key in (
+                "upload_id",
+                "uploadId",
+                "target_id",
+                "targetId",
+                "image_id",
+                "imageId",
+                "origin_upload_id",
+                "originUploadId",
+            ):
+                add_int_key("id", LMSUtil._extract_url_query_param(raw_url, query_key))
+
+            for query_key in (
+                "reference_id",
+                "referenceId",
+                "file_id",
+                "fileId",
+                "origin_reference_id",
+                "originReferenceId",
+            ):
+                add_int_key("reference_id", LMSUtil._extract_url_query_param(raw_url, query_key))
+
+            for query_key in ("key", "upload_key", "uploadKey", "file_key", "fileKey"):
+                add_text_key("key", LMSUtil._extract_url_query_param(raw_url, query_key))
 
         return keys
 
