@@ -16,6 +16,14 @@ XJTUToolBox 提供了丰富的功能，让您的校园生活更加便捷：
 - [**空闲教室**](empty-room.md)：随时查找可用教室，支持导出为图片。
 - [**设置**](setting.md)：设置多个功能的高级选项，满足个性化需求。
 
+### 手机版本
+
+想在手机上使用类似 XJTUToolBox 的功能吗？您可以尝试 [岱宗盒子](https://github.com/yeliqin666/xjtu-toolbox-android)。
+
+该项目采用 XJTUToolBox 同源的数据抓取代码，访问网站不卡顿。
+
+> 注：岱宗盒子项目作者与本项目无关。
+
 ## 下载与安装
 
 您可以随时从项目的 [GitHub Releases](https://github.com/yan-xiaoo/XJTUToolBox/releases) 页面下载最新版本的安装包。

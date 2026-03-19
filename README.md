@@ -18,6 +18,12 @@
 
 如果你解决了某个问题或添加了新的功能，欢迎提出 PR。
 
+> [!NOTE]
+> 想要在手机上使用 XJTUToolBox 的功能？你可以尝试 [岱宗盒子](https://github.com/yeliqin666/xjtu-toolbox-android)。
+> 采用与 XJTUToolBox 一致的数据抓取逻辑，访问各个系统不卡顿！
+> 
+> 注：岱宗盒子的作者与本项目无关
+
 ## 界面展示
 ![sample1](./screenshots/sample_1.png)
 ![sample2](./screenshots/sample_2.png)
