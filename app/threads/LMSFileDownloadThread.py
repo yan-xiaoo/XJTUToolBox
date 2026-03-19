@@ -1,4 +1,10 @@
+import os
+
 from ..components.ProgressInfoBar import ProgressBarThread
+
+
+class _DownloadCanceledError(Exception):
+    """用于在下载线程内部区分主动取消下载。"""
 
 
 class LMSFileDownloadThread(ProgressBarThread):
@@ -9,7 +15,19 @@ class LMSFileDownloadThread(ProgressBarThread):
         self.output_path = output_path
         self.file_label = file_label
 
+    def _remove_partial_file(self):
+        """删除下载过程中残留的部分文件。"""
+        if not self.output_path:
+            return
+        if not os.path.exists(self.output_path):
+            return
+        try:
+            os.remove(self.output_path)
+        except OSError:
+            pass
+
     def run(self):
+        response = None
         try:
             self.titleChanged.emit(self.tr("正在下载附件"))
             self.messageChanged.emit(self.tr("准备下载：{0}").format(self.file_label))
@@ -30,8 +48,7 @@ class LMSFileDownloadThread(ProgressBarThread):
             with open(self.output_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if not self.can_run:
-                        self.canceled.emit()
-                        return
+                        raise _DownloadCanceledError()
                     if not chunk:
                         continue
                     f.write(chunk)
@@ -54,5 +71,13 @@ class LMSFileDownloadThread(ProgressBarThread):
             self.progressChanged.emit(100)
             self.messageChanged.emit(self.tr("下载完成"))
             self.hasFinished.emit()
+        except _DownloadCanceledError:
+            self._remove_partial_file()
+            self.canceled.emit()
         except Exception as e:
+            self._remove_partial_file()
             self.error.emit(self.tr("下载失败"), str(e))
+            self.canceled.emit()
+        finally:
+            if response is not None:
+                response.close()
