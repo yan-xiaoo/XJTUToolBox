@@ -1,6 +1,6 @@
 import re
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QTimer
 from PyQt5.QtWidgets import QActionGroup, QFrame, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import Action, CheckableMenu, ComboBox, FluentIcon, FlowLayout, MenuIndicatorType, TransparentDropDownPushButton
 
@@ -25,6 +25,7 @@ class LMSCoursePage(QFrame):
         self._visible_courses: list[dict] = []
         self._skeleton_cards = []
         self._course_cards = []
+        self._enter_animations: list[QParallelAnimationGroup] = []
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignTop)
@@ -141,6 +142,9 @@ class LMSCoursePage(QFrame):
 
     def _clearCourseCards(self):
         """仅清除课程卡片，不影响原始数据与筛选项。"""
+        for animation in self._enter_animations:
+            animation.stop()
+        self._enter_animations.clear()
         for card in self._course_cards:
             self.flowLayout.removeWidget(card)
             card.deleteLater()
@@ -158,6 +162,42 @@ class LMSCoursePage(QFrame):
             )
             self.flowLayout.addWidget(card)
             self._course_cards.append(card)
+        self._animateCourseCardsIn()
+
+    def _animateCourseCardsIn(self):
+        self._enter_animations.clear()
+        for index, card in enumerate(self._course_cards):
+            card.setMinimumHeight(0)
+            card.setMaximumHeight(0)
+            card.updateGeometry()
+
+            min_height_animation = QPropertyAnimation(card, b"minimumHeight", card)
+            min_height_animation.setDuration(260)
+            min_height_animation.setStartValue(0)
+            min_height_animation.setEndValue(160)
+            min_height_animation.setEasingCurve(QEasingCurve.OutQuad)
+
+            max_height_animation = QPropertyAnimation(card, b"maximumHeight", card)
+            max_height_animation.setDuration(260)
+            max_height_animation.setStartValue(0)
+            max_height_animation.setEndValue(160)
+            max_height_animation.setEasingCurve(QEasingCurve.OutQuad)
+
+            group = QParallelAnimationGroup(self)
+            group.addAnimation(min_height_animation)
+            group.addAnimation(max_height_animation)
+
+            def finalize(target=card):
+                try:
+                    target.setMinimumHeight(160)
+                    target.setMaximumHeight(160)
+                    target.updateGeometry()
+                except RuntimeError:
+                    return
+
+            group.finished.connect(finalize)
+            self._enter_animations.append(group)
+            QTimer.singleShot(index * 45, group.start)
 
     @staticmethod
     def _academicYearFromTermCode(term_code: str) -> str:

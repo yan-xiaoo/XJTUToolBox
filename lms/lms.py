@@ -138,9 +138,72 @@ class LMSUtil:
             raise ValueError(f"Unexpected response from /api/activities/{activity_id}: expected object.")
         detail = cast(LMSActivity, self._extract_activity_detail(data))
         if str(detail.get("type")) == ActivityType.HOMEWORK.value:
-            submission_list = self._get_submission_list(activity_id, activity_detail=data)
-            detail["submission_list"] = self._inject_submission_marked_attachment_urls(submission_list)
+            detail["submission_list"] = self._get_submission_list(activity_id, activity_detail=data)
         return detail
+
+    def get_submission_marked_attachments(self, submission_id: int) -> dict[str, Any]:
+        data = self._get_json(f"{self.BASE_URL}/api/submissions/{submission_id}/marked_attachments")
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Unexpected response from /api/submissions/{submission_id}/marked_attachments: expected object."
+            )
+        return {"rules": self._build_submission_marked_attachment_rules(data)}
+
+    @staticmethod
+    def _build_submission_marked_attachment_rules(marked_data: Mapping[str, Any]) -> list[dict[str, Any]]:
+        raw_rules = marked_data.get("rules")
+        if isinstance(raw_rules, list):
+            normalized_rules: list[dict[str, Any]] = []
+            for index, rule in enumerate(raw_rules):
+                if not isinstance(rule, Mapping):
+                    continue
+                origin_name = rule.get("origin_upload_name") or rule.get("origin_name") or rule.get("name")
+                url = rule.get("marked_attachment_url") or rule.get("attachment_url") or rule.get("url")
+                if not isinstance(origin_name, str) or not origin_name.strip():
+                    continue
+                if not isinstance(url, str) or not url.strip():
+                    continue
+                normalized_rules.append({
+                    "index": index,
+                    "origin_upload_name": origin_name.strip(),
+                    "url": url.strip(),
+                })
+            if normalized_rules:
+                return normalized_rules
+
+        marked_infos = marked_data.get("marked_attachment_infos", [])
+        if not isinstance(marked_infos, list):
+            return []
+
+        rules: list[dict[str, Any]] = []
+        for index, info in enumerate(marked_infos):
+            if not isinstance(info, Mapping):
+                continue
+
+            origin_upload = info.get("origin_upload")
+            if not isinstance(origin_upload, Mapping):
+                continue
+
+            nested_origin_upload = origin_upload.get("upload")
+            nested_origin_name = nested_origin_upload.get("name") if isinstance(nested_origin_upload, Mapping) else None
+            origin_name = nested_origin_name or origin_upload.get("name")
+            if not isinstance(origin_name, str) or not origin_name.strip():
+                continue
+
+            marked_attachment = info.get("marked_attachment")
+            if not isinstance(marked_attachment, Mapping):
+                continue
+            url = marked_attachment.get("url")
+            if not isinstance(url, str) or not url.strip():
+                continue
+
+            rules.append({
+                "index": index,
+                "origin_upload_name": origin_name.strip(),
+                "url": url.strip(),
+            })
+
+        return rules
 
     def _get_submission_list(
         self,
@@ -185,82 +248,6 @@ class LMSUtil:
         if not isinstance(data, dict):
             raise ValueError(f"Unexpected response from {url}: expected object.")
         return self._extract_submission_list(data)
-
-    def _inject_submission_marked_attachment_urls(
-        self, submission_list: LMSSubmissionListResponse
-    ) -> LMSSubmissionListResponse:
-        submissions = submission_list.get("list", [])
-        if not isinstance(submissions, list):
-            return submission_list
-
-        for submission in submissions:
-            if not isinstance(submission, dict):
-                continue
-
-            submission_id = self._coerce_int(submission.get("id"))
-            if submission_id is None:
-                continue
-
-            try:
-                marked_data = self._get_json(f"{self.BASE_URL}/api/submissions/{submission_id}/marked_attachments")
-            except Exception:
-                # 标注附件仅用于增强显示，不应影响作业详情主流程。
-                continue
-
-            if not isinstance(marked_data, (Mapping, list)):
-                continue
-
-            upload_groups: list[list[dict[str, Any]]] = []
-            sub_uploads = submission.get("uploads", [])
-            if isinstance(sub_uploads, list):
-                upload_groups.append([one for one in sub_uploads if isinstance(one, dict)])
-
-            submission_correct = submission.get("submission_correct")
-            if isinstance(submission_correct, Mapping):
-                correct_uploads = submission_correct.get("uploads", [])
-                if isinstance(correct_uploads, list):
-                    upload_groups.append([one for one in correct_uploads if isinstance(one, dict)])
-
-            # 将原始批注 payload 透传给 UI，便于兼容新旧批注接口格式。
-            for one_group in upload_groups:
-                for upload in one_group:
-                    upload.setdefault("marked_attachment_payload", marked_data)
-
-            submission["marked_attachments"] = marked_data
-
-            marked_infos = self._iter_marked_attachment_entries(marked_data)
-            if not marked_infos:
-                continue
-
-            attachment_map: dict[tuple[str, str], str] = {}
-            for info in marked_infos:
-                if not isinstance(info, Mapping):
-                    continue
-
-                attachment_url = self._extract_marked_attachment_url(info)
-                if not isinstance(attachment_url, str) or not attachment_url:
-                    continue
-
-                origin_candidates = self._collect_marked_origin_candidates(info)
-                if not origin_candidates:
-                    continue
-
-                for origin_candidate in origin_candidates:
-                    for key in self._build_upload_match_keys(origin_candidate):
-                        attachment_map.setdefault(key, attachment_url)
-
-            if not attachment_map:
-                continue
-
-            for one_group in upload_groups:
-                for upload in one_group:
-                    for key in self._build_upload_match_keys(upload):
-                        resolved_attachment_url = attachment_map.get(key)
-                        if isinstance(resolved_attachment_url, str) and resolved_attachment_url:
-                            upload["attachment_url"] = resolved_attachment_url
-                            break
-
-        return submission_list
 
     def _get_lesson_player_url_response(
         self,

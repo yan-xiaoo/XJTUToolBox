@@ -16,7 +16,9 @@ class LMSCourseCard(ElevatedCardWidget):
         self.course_id = self.course_id if isinstance(self.course_id, int) else -1
         self.course_name = str(course.get("name") or "-")
 
-        self.setFixedSize(370, 160)
+        self.setFixedWidth(370)
+        self.setMinimumHeight(160)
+        self.setMaximumHeight(160)
         self.setBorderRadius(12)
 
         self.verticalLayout = QVBoxLayout(self)
@@ -71,6 +73,17 @@ class LMSCourseCard(ElevatedCardWidget):
         self.verticalLayout.addWidget(self.termLabel)
         self.verticalLayout.addWidget(self.instructorLabel)
         self.verticalLayout.addLayout(self.hBoxLayout)
+
+        for widget in (
+            self.nameLabel,
+            self.termLabel,
+            self.instructorLabel,
+            self.creditIcon,
+            self.creditLabel,
+            self.studentIcon,
+            self.studentLabel,
+        ):
+            widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         self.setCursor(Qt.PointingHandCursor)
 
