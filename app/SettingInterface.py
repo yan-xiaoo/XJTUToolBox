@@ -9,7 +9,7 @@ from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxS
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
     InfoBadge, LineEdit, SwitchButton, IndicatorPosition, BodyLabel, HyperlinkLabel
 from qfluentwidgets import FluentIcon as FIF
-from PyQt5.QtWidgets import QWidget, QApplication
+from PyQt5.QtWidgets import QWidget, QApplication, QFileDialog
 from PyQt5.QtGui import QColor, QDesktopServices
 
 from .cards.copyable_switch_card import CopyablePushSettingCard
@@ -260,6 +260,25 @@ class SettingInterface(ScrollArea):
         self.scoreGroup.addSettingCard(self.ignoreLateCard)
         self.scoreGroup.addSettingCard(self.useReportCard)
 
+        # 思源学堂组
+        self.lmsGroup = SettingCardGroup(self.tr("思源学堂"), self.view)
+        self.lmsCacheCard = CustomSwitchSettingCard(
+            FIF.SYNC,
+            self.tr("是否开启缓存功能"),
+            self.tr("进入思源学堂时优先显示缓存并后台刷新课程和作业"),
+            cfg.lmsCacheEnable,
+            self.lmsGroup
+        )
+        self.lmsCacheDirectoryCard = PushSettingCard(
+            self.tr("设置"),
+            FIF.FOLDER,
+            self.tr("缓存存放位置"),
+            self._formatLmsCacheDirectory(cfg.lmsCacheDirectory.value),
+            self.lmsGroup
+        )
+        self.lmsGroup.addSettingCard(self.lmsCacheCard)
+        self.lmsGroup.addSettingCard(self.lmsCacheDirectoryCard)
+
         # 通知查询组
         self.noticeGroup = SettingCardGroup(self.tr("定时查询"), self.view)
         self.noticeCard = NoticeSearchCard(self, self.view)
@@ -357,6 +376,7 @@ class SettingInterface(ScrollArea):
         self.expandLayout.addWidget(self.accountGroup)
         self.expandLayout.addWidget(self.attendanceGroup)
         self.expandLayout.addWidget(self.scoreGroup)
+        self.expandLayout.addWidget(self.lmsGroup)
         self.expandLayout.addWidget(self.noticeGroup)
         self.expandLayout.addWidget(self.personalGroup)
         self.expandLayout.addWidget(self.aboutGroup)
@@ -385,6 +405,10 @@ class SettingInterface(ScrollArea):
         self.showAvatarCard.checkedChanged.connect(self._showAvatarClicked)
         self.visitorIdCard.clicked.connect(self._onVisitorIdClicked)
         self.visitorIdCard.copied.connect(self._onVisitorIdCopiedClicked)
+        self.lmsCacheDirectoryCard.clicked.connect(self._onLmsCacheDirectoryClicked)
+        cfg.lmsCacheDirectory.valueChanged.connect(
+            lambda _: self.lmsCacheDirectoryCard.setContent(self._formatLmsCacheDirectory(cfg.lmsCacheDirectory.value))
+        )
 
         if sys.platform == "darwin":
             # macOS 不支持直接设置自动启动
@@ -516,6 +540,22 @@ class SettingInterface(ScrollArea):
     @pyqtSlot()
     def _showAvatarClicked(self):
         self.main_window.on_avatar_update()
+
+    @staticmethod
+    def _formatLmsCacheDirectory(path: str) -> str:
+        text = str(path or "").strip()
+        return text if text else "未设置（默认目录）"
+
+    @pyqtSlot()
+    def _onLmsCacheDirectoryClicked(self):
+        current_path = str(cfg.lmsCacheDirectory.value or "").strip()
+        start_path = current_path if current_path and os.path.isdir(current_path) else os.path.expanduser("~")
+        selected = QFileDialog.getExistingDirectory(self, self.tr("选择缓存目录"), start_path)
+        if not selected:
+            return
+        cfg.lmsCacheDirectory.value = selected
+        self.lmsCacheDirectoryCard.setContent(self._formatLmsCacheDirectory(selected))
+        InfoBar.success(self.tr("设置成功"), self.tr("思源学堂缓存目录已更新"), parent=self)
 
     @pyqtSlot(UpdateStatus)
     def onUpdateCheck(self, status):

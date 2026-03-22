@@ -112,6 +112,38 @@ class LMSActivityPage(QFrame):
         self._activities = activities if isinstance(activities, list) else []
         self.filterActivities(self.activity_type_filter)
 
+    def upsertActivities(self, activities: list[dict]):
+        updates = [one for one in activities if isinstance(one, dict)]
+        if not updates:
+            return
+
+        index_by_id: dict[int, int] = {}
+        for index, activity in enumerate(self._activities):
+            activity_id = activity.get("id") if isinstance(activity, dict) else None
+            if isinstance(activity_id, int):
+                index_by_id[activity_id] = index
+
+        changed = False
+        for activity in updates:
+            activity_id = activity.get("id")
+            if not isinstance(activity_id, int):
+                continue
+            old_index = index_by_id.get(activity_id)
+            if old_index is None:
+                self._activities.append(activity)
+                index_by_id[activity_id] = len(self._activities) - 1
+            else:
+                self._activities[old_index] = activity
+            changed = True
+
+        if not changed:
+            return
+
+        self.filterActivities(self.activity_type_filter)
+
+    def getActivitiesSnapshot(self) -> list[dict]:
+        return [one for one in self._activities if isinstance(one, dict)]
+
     def filterActivities(self, key: str):
         """按活动类型过滤并重绘表格。
 

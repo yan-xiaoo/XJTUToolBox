@@ -3,7 +3,7 @@ import os
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 from urllib.parse import urlparse, unquote
 
 from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths
@@ -16,7 +16,7 @@ from .components.ProgressInfoBar import ProgressInfoBar
 from .threads.LMSFileDownloadThread import LMSFileDownloadThread
 from .threads.LMSThread import LMSThread, LMSAction
 from .threads.ProcessWidget import ProcessWidget
-from .utils import StyleSheet, accounts
+from .utils import StyleSheet, accounts, AccountDataManager, cfg
 from .sub_interfaces.lms import PageStatus, LMSStartPage, LMSCoursePage, LMSActivityPage, LMSDetailPage, LMSSubmissionPage, LMSVideoPage
 from .sub_interfaces.lms.image_preview_dialog import LMSImagePreviewDialog
 from .sub_interfaces.lms.common import format_size as common_format_size, format_replay_video_label
@@ -32,6 +32,8 @@ class LMSInterface(ScrollArea):
     ROUTE_DETAIL = "detailPage"
     ROUTE_SUBMISSION = "submissionPage"
     ROUTE_VIDEO = "videoPage"
+    COURSE_CACHE_FILE = "lms_courses_cache.json"
+    ACTIVITY_CACHE_FILE = "lms_activities_cache.json"
 
     def __init__(self, parent=None):
         """初始化 LMS 主容器、导航区、页面区与线程协作组件。"""
@@ -49,6 +51,8 @@ class LMSInterface(ScrollArea):
         self._mark_overlay_cache: dict[str, tuple[str | None, list[dict]]] = {}
         self._submission_marked_attachment_cache: dict[int, dict] = {}
         self._preview_dialog: LMSImagePreviewDialog | None = None
+        self._course_cache_visible_during_refresh = False
+        self._activity_cache_visible_during_refresh = False
 
         self.view = QWidget(self)
         self.setObjectName("LMSInterface")
@@ -90,6 +94,11 @@ class LMSInterface(ScrollArea):
 
         self.navLayout.addWidget(self.returnButton, alignment=Qt.AlignVCenter)
         self.navLayout.addWidget(self.breadcrumbBar, stretch=1, alignment=Qt.AlignVCenter)
+
+        self.thread_ = LMSThread()
+        self.processWidget = ProcessWidget(self.thread_, self.view, stoppable=True, hide_on_end=True)
+        self.processWidget.setVisible(False)
+        self.contentLayout.addWidget(self.processWidget)
         self.contentLayout.addWidget(self.navFrame)
 
         self.pageHost = QWidget(self.view)
@@ -97,11 +106,6 @@ class LMSInterface(ScrollArea):
         self.pageLayout.setContentsMargins(0, 0, 0, 0)
         self.pageLayout.setSpacing(0)
         self.contentLayout.addWidget(self.pageHost)
-
-        self.thread_ = LMSThread()
-        self.processWidget = ProcessWidget(self.thread_, self.view, stoppable=True, hide_on_end=True)
-        self.processWidget.setVisible(False)
-        self.contentLayout.addWidget(self.processWidget)
         self.vBoxLayout.addWidget(self.contentFrame)
 
         self._initPages()
@@ -288,6 +292,171 @@ class LMSInterface(ScrollArea):
         elif page is self.detailPage:
             self.detailPage.setPageStatus(status)
 
+    def _getAccountCacheManager(self) -> AccountDataManager | None:
+        current_account = accounts.current
+        if current_account is None:
+            return None
+        return AccountDataManager(current_account)
+
+    @staticmethod
+    def _isLmsCacheEnabled() -> bool:
+        return bool(cfg.lmsCacheEnable.value)
+
+    def _getLmsCacheFilePath(self, filename: str) -> str | None:
+        current_account = accounts.current
+        if current_account is None:
+            return None
+
+        configured_root = str(cfg.lmsCacheDirectory.value or "").strip()
+        if configured_root:
+            base_root = os.path.abspath(os.path.expanduser(os.path.expandvars(configured_root)))
+            return os.path.join(base_root, "lms_cache", current_account.uuid, filename)
+
+        manager = self._getAccountCacheManager()
+        if manager is None:
+            return None
+        return manager.path(filename)
+
+    @staticmethod
+    def _sanitizeCacheItems(items: object) -> list[dict]:
+        if not isinstance(items, list):
+            return []
+        return [dict(one) for one in items if isinstance(one, dict)]
+
+    @staticmethod
+    def _stableDump(data: Any) -> str:
+        return json.dumps(data, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+
+    def _readCoursesCache(self) -> list[dict]:
+        if not self._isLmsCacheEnabled():
+            return []
+        file_path = self._getLmsCacheFilePath(self.COURSE_CACHE_FILE)
+        if not file_path:
+            return []
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return []
+        if not isinstance(payload, dict):
+            return []
+        return self._sanitizeCacheItems(payload.get("courses"))
+
+    def _writeCoursesCache(self, courses: list[dict]) -> None:
+        if not self._isLmsCacheEnabled():
+            return
+        file_path = self._getLmsCacheFilePath(self.COURSE_CACHE_FILE)
+        if not file_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump({"courses": self._sanitizeCacheItems(courses)}, f, ensure_ascii=False)
+        except (OSError, TypeError, ValueError):
+            return
+
+    def _readActivityCacheMap(self) -> dict[str, list[dict]]:
+        if not self._isLmsCacheEnabled():
+            return {}
+        file_path = self._getLmsCacheFilePath(self.ACTIVITY_CACHE_FILE)
+        if not file_path:
+            return {}
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        by_course = payload.get("by_course_id")
+        if not isinstance(by_course, dict):
+            return {}
+
+        normalized: dict[str, list[dict]] = {}
+        for raw_key, raw_value in by_course.items():
+            key = str(raw_key).strip()
+            if not key:
+                continue
+            normalized[key] = self._sanitizeCacheItems(raw_value)
+        return normalized
+
+    def _readActivitiesCache(self, course_id: int) -> list[dict]:
+        return self._readActivityCacheMap().get(str(course_id), [])
+
+    def _writeActivitiesCache(self, course_id: int, activities: list[dict]) -> None:
+        if not self._isLmsCacheEnabled():
+            return
+        file_path = self._getLmsCacheFilePath(self.ACTIVITY_CACHE_FILE)
+        if not file_path:
+            return
+        by_course = self._readActivityCacheMap()
+        by_course[str(course_id)] = self._sanitizeCacheItems(activities)
+        try:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump({"by_course_id": by_course}, f, ensure_ascii=False)
+        except (OSError, TypeError, ValueError):
+            return
+
+    def _diffById(self, old_items: list[dict], new_items: list[dict]) -> dict[str, Any]:
+        old_rows = self._sanitizeCacheItems(old_items)
+        new_rows = self._sanitizeCacheItems(new_items)
+
+        old_non_int_id = any(not isinstance(one.get("id"), int) for one in old_rows)
+        new_non_int_id = any(not isinstance(one.get("id"), int) for one in new_rows)
+        if old_non_int_id or new_non_int_id:
+            identical = self._stableDump(old_rows) == self._stableDump(new_rows)
+            return {
+                "identical": identical,
+                "full_replace": not identical,
+                "upserts": [],
+                "new_count": 0,
+                "updated_count": 0,
+            }
+
+        old_by_id = {int(one["id"]): one for one in old_rows}
+        new_by_id = {int(one["id"]): one for one in new_rows}
+        has_removal = any(one_id not in new_by_id for one_id in old_by_id)
+
+        upserts: list[dict] = []
+        new_count = 0
+        updated_count = 0
+        for row in new_rows:
+            row_id = int(row["id"])
+            old_row = old_by_id.get(row_id)
+            if old_row is None:
+                upserts.append(row)
+                new_count += 1
+                continue
+            if self._stableDump(old_row) != self._stableDump(row):
+                upserts.append(row)
+                updated_count += 1
+
+        identical = not has_removal and not upserts and len(old_by_id) == len(new_by_id)
+        return {
+            "identical": identical,
+            "full_replace": has_removal,
+            "upserts": upserts,
+            "new_count": new_count,
+            "updated_count": updated_count,
+        }
+
+    def _showCachedCoursesIfAvailable(self) -> bool:
+        cached_courses = self._readCoursesCache()
+        if not cached_courses:
+            return False
+        self.coursePage.setCourses(cached_courses)
+        self.setPageStatus(self.coursePage, PageStatus.NORMAL)
+        return True
+
+    def _showCachedActivitiesIfAvailable(self, course_id: int) -> bool:
+        cached_activities = self._readActivitiesCache(course_id)
+        if not cached_activities:
+            return False
+        self.activityPage.setActivities(cached_activities)
+        self.setPageStatus(self.activityPage, PageStatus.NORMAL)
+        return True
+
     def lock(self):
         """锁定主界面交互，防止加载过程中的重复操作。
 
@@ -357,6 +526,21 @@ class LMSInterface(ScrollArea):
         :return: 无返回值。
         """
         self.error(title, msg, parent=self)
+
+        action = self.thread_.action
+        if action == LMSAction.LOAD_COURSES:
+            keep_cached = self._course_cache_visible_during_refresh and bool(self.coursePage.getCoursesSnapshot())
+            self._course_cache_visible_during_refresh = False
+            if keep_cached:
+                self.setPageStatus(self.coursePage, PageStatus.NORMAL)
+                return
+        elif action == LMSAction.LOAD_ACTIVITIES:
+            keep_cached = self._activity_cache_visible_during_refresh and bool(self.activityPage.getActivitiesSnapshot())
+            self._activity_cache_visible_during_refresh = False
+            if keep_cached:
+                self.setPageStatus(self.activityPage, PageStatus.NORMAL)
+                return
+
         self.setPageStatus(self._current_page, PageStatus.ERROR)
 
     @pyqtSlot()
@@ -365,7 +549,11 @@ class LMSInterface(ScrollArea):
 
         :return: 无返回值。
         """
-        self.setPageStatus(self.coursePage, PageStatus.LOADING)
+        has_visible_data = bool(self.coursePage.getCoursesSnapshot())
+        if not has_visible_data:
+            has_visible_data = self._showCachedCoursesIfAvailable()
+        self._course_cache_visible_during_refresh = has_visible_data
+        self.setPageStatus(self.coursePage, PageStatus.NORMAL if has_visible_data else PageStatus.LOADING)
         self.switchPage(self.coursePage)
         self.processWidget.setVisible(True)
         self.lock()
@@ -381,7 +569,11 @@ class LMSInterface(ScrollArea):
         if self.selected_course_id is None:
             self.error(self.tr("未选择课程"), self.tr("请先选择一门课程"), parent=self)
             return
-        self.setPageStatus(self.activityPage, PageStatus.LOADING)
+        has_visible_data = bool(self.activityPage.getActivitiesSnapshot())
+        if not has_visible_data:
+            has_visible_data = self._showCachedActivitiesIfAvailable(self.selected_course_id)
+        self._activity_cache_visible_during_refresh = has_visible_data
+        self.setPageStatus(self.activityPage, PageStatus.NORMAL if has_visible_data else PageStatus.LOADING)
         self.switchPage(self.activityPage)
         self.processWidget.setVisible(True)
         self.lock()
@@ -444,6 +636,7 @@ class LMSInterface(ScrollArea):
 
         self.activityPage.setCurrentActivityType(ActivityType.HOMEWORK.value)
         self.activityPage.clearData()
+        self._showCachedActivitiesIfAvailable(course_id)
 
         self.navigate_to(self.activityPage, self.selected_course_name)
         self.refreshActivities()
@@ -469,6 +662,11 @@ class LMSInterface(ScrollArea):
         :param courses: 课程列表。
         :return: 无返回值。
         """
+        network_courses = self._sanitizeCacheItems(courses)
+        current_courses = self.coursePage.getCoursesSnapshot()
+        had_cached_view = self._course_cache_visible_during_refresh
+        self._course_cache_visible_during_refresh = False
+
         self.setPageStatus(self.coursePage, PageStatus.NORMAL)
 
         self.selected_course_id = None
@@ -488,10 +686,35 @@ class LMSInterface(ScrollArea):
         self.submissionPage.reset()
         self.videoPage.reset()
 
-        self.coursePage.setCourses(courses)
+        if not current_courses:
+            diff = {
+                "identical": False,
+                "full_replace": True,
+                "upserts": [],
+                "new_count": len(network_courses),
+                "updated_count": 0,
+            }
+        else:
+            diff = self._diffById(current_courses, network_courses)
 
-        if courses:
-            self.success(self.tr("加载完成"), self.tr("已获取 {0} 门课程").format(len(courses)), parent=self)
+        if not current_courses or diff["full_replace"]:
+            self.coursePage.setCourses(network_courses)
+        elif not diff["identical"] and diff["upserts"]:
+            self.coursePage.upsertCourses(diff["upserts"])
+
+        self._writeCoursesCache(network_courses)
+
+        if network_courses:
+            if current_courses and not diff["identical"] and not diff["full_replace"]:
+                self.success(
+                    self.tr("课程已更新"),
+                    self.tr("新增 {0} 门，更新 {1} 门课程").format(diff["new_count"], diff["updated_count"]),
+                    parent=self
+                )
+            elif had_cached_view and diff["identical"]:
+                self.success(self.tr("课程已是最新"), self.tr("缓存与网络数据一致"), parent=self)
+            else:
+                self.success(self.tr("加载完成"), self.tr("已获取 {0} 门课程").format(len(network_courses)), parent=self)
         else:
             self.success(self.tr("暂无课程"), self.tr("当前账号未获取到课程"), parent=self)
 
@@ -503,14 +726,51 @@ class LMSInterface(ScrollArea):
         :param activities: 活动列表。
         :return: 无返回值。
         """
+        network_activities = self._sanitizeCacheItems(activities)
+        current_activities = self.activityPage.getActivitiesSnapshot()
+        had_cached_view = self._activity_cache_visible_during_refresh
+        self._activity_cache_visible_during_refresh = False
+
         self.setPageStatus(self.activityPage, PageStatus.NORMAL)
         if self.selected_course_id != course_id:
             return
-        self._current_activities = activities if isinstance(activities, list) else []
-        self.activityPage.setActivities(activities)
+
+        if not current_activities:
+            diff = {
+                "identical": False,
+                "full_replace": True,
+                "upserts": [],
+                "new_count": len(network_activities),
+                "updated_count": 0,
+            }
+        else:
+            diff = self._diffById(current_activities, network_activities)
+
+        if not current_activities or diff["full_replace"]:
+            self.activityPage.setActivities(network_activities)
+        elif not diff["identical"] and diff["upserts"]:
+            self.activityPage.upsertActivities(diff["upserts"])
+
+        self._current_activities = network_activities
+        self._writeActivitiesCache(course_id, network_activities)
         self.switchPage(self.activityPage)
-        if not activities:
+        if not network_activities:
             self.success(self.tr("无活动"), self.tr("该课程暂无可显示活动"), parent=self)
+            return
+
+        if current_activities and not diff["identical"] and not diff["full_replace"]:
+            homework_updates = [
+                one for one in diff["upserts"]
+                if isinstance(one, dict) and str(one.get("type") or "") == ActivityType.HOMEWORK.value
+            ]
+            if homework_updates:
+                self.success(
+                    self.tr("作业已更新"),
+                    self.tr("本课程有 {0} 项作业已新增或更新").format(len(homework_updates)),
+                    parent=self
+                )
+        elif had_cached_view and diff["identical"]:
+            self.success(self.tr("作业已是最新"), self.tr("缓存与网络数据一致"), parent=self)
 
     @pyqtSlot(int, dict)
     def onActivityDetailLoaded(self, activity_id: int, detail: dict):
@@ -686,6 +946,8 @@ class LMSInterface(ScrollArea):
         self.selected_activity_name = ""
         self._current_submission = None
         self._current_activities = []
+        self._course_cache_visible_during_refresh = False
+        self._activity_cache_visible_during_refresh = False
         self._preview_pixmap_cache.clear()
         self._mark_overlay_cache.clear()
         self._submission_marked_attachment_cache.clear()

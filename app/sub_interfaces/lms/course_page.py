@@ -137,8 +137,41 @@ class LMSCoursePage(QFrame):
         self._hideSkeletons()
 
         self._all_courses = courses if isinstance(courses, list) else []
-        self._rebuildFilterItems()
+        self._rebuildFilterItems(preserve_current=False)
         self._applyCurrentFilter()
+
+    def upsertCourses(self, courses: list[dict]):
+        updates = [one for one in courses if isinstance(one, dict)]
+        if not updates:
+            return
+
+        index_by_id: dict[int, int] = {}
+        for index, course in enumerate(self._all_courses):
+            course_id = course.get("id") if isinstance(course, dict) else None
+            if isinstance(course_id, int):
+                index_by_id[course_id] = index
+
+        changed = False
+        for course in updates:
+            course_id = course.get("id")
+            if not isinstance(course_id, int):
+                continue
+            old_index = index_by_id.get(course_id)
+            if old_index is None:
+                self._all_courses.append(course)
+                index_by_id[course_id] = len(self._all_courses) - 1
+            else:
+                self._all_courses[old_index] = course
+            changed = True
+
+        if not changed:
+            return
+
+        self._rebuildFilterItems(preserve_current=True)
+        self._applyCurrentFilter()
+
+    def getCoursesSnapshot(self) -> list[dict]:
+        return [one for one in self._all_courses if isinstance(one, dict)]
 
     def _clearCourseCards(self):
         """仅清除课程卡片，不影响原始数据与筛选项。"""
@@ -166,38 +199,63 @@ class LMSCoursePage(QFrame):
 
     def _animateCourseCardsIn(self):
         self._enter_animations.clear()
-        for index, card in enumerate(self._course_cards):
-            card.setMinimumHeight(0)
-            card.setMaximumHeight(0)
-            card.updateGeometry()
+        if not self._course_cards:
+            return
 
-            min_height_animation = QPropertyAnimation(card, b"minimumHeight", card)
-            min_height_animation.setDuration(260)
-            min_height_animation.setStartValue(0)
-            min_height_animation.setEndValue(160)
-            min_height_animation.setEasingCurve(QEasingCurve.OutQuad)
+        self.flowLayout.activate()
+        ordered_cards = sorted(self._course_cards, key=lambda one: (one.y(), one.x()))
+        row_tolerance = 12
+        rows: list[list] = []
+        for card in ordered_cards:
+            if not rows or abs(card.y() - rows[-1][0].y()) > row_tolerance:
+                rows.append([card])
+            else:
+                rows[-1].append(card)
+        for row in rows:
+            row.sort(key=lambda one: one.x())
 
-            max_height_animation = QPropertyAnimation(card, b"maximumHeight", card)
-            max_height_animation.setDuration(260)
-            max_height_animation.setStartValue(0)
-            max_height_animation.setEndValue(160)
-            max_height_animation.setEasingCurve(QEasingCurve.OutQuad)
+        animation_duration = 360
+        within_row_step = 70
+        between_row_gap = 30
+        row_start_delay = 0
 
-            group = QParallelAnimationGroup(self)
-            group.addAnimation(min_height_animation)
-            group.addAnimation(max_height_animation)
+        for row in rows:
+            for col_index, card in enumerate(row):
+                delay = row_start_delay + col_index * within_row_step
+                card.setMinimumHeight(0)
+                card.setMaximumHeight(0)
+                card.updateGeometry()
 
-            def finalize(target=card):
-                try:
-                    target.setMinimumHeight(160)
-                    target.setMaximumHeight(160)
-                    target.updateGeometry()
-                except RuntimeError:
-                    return
+                min_height_animation = QPropertyAnimation(card, b"minimumHeight", card)
+                min_height_animation.setDuration(animation_duration)
+                min_height_animation.setStartValue(0)
+                min_height_animation.setEndValue(160)
+                min_height_animation.setEasingCurve(QEasingCurve.OutBack)
 
-            group.finished.connect(finalize)
-            self._enter_animations.append(group)
-            QTimer.singleShot(index * 45, group.start)
+                max_height_animation = QPropertyAnimation(card, b"maximumHeight", card)
+                max_height_animation.setDuration(animation_duration)
+                max_height_animation.setStartValue(0)
+                max_height_animation.setEndValue(160)
+                max_height_animation.setEasingCurve(QEasingCurve.OutBack)
+
+                group = QParallelAnimationGroup(self)
+                group.addAnimation(min_height_animation)
+                group.addAnimation(max_height_animation)
+
+                def finalize(target=card):
+                    try:
+                        target.setMinimumHeight(160)
+                        target.setMaximumHeight(160)
+                        target.updateGeometry()
+                    except RuntimeError:
+                        return
+
+                group.finished.connect(finalize)
+                self._enter_animations.append(group)
+                QTimer.singleShot(delay, group.start)
+
+            row_anim_span = (len(row) - 1) * within_row_step + animation_duration
+            row_start_delay += row_anim_span + between_row_gap
 
     @staticmethod
     def _academicYearFromTermCode(term_code: str) -> str:
@@ -287,8 +345,8 @@ class LMSCoursePage(QFrame):
 
         return sorted_courses
 
-    def _rebuildFilterItems(self):
-        """重建筛选框选项，仅包含有课程的学年-学期。"""
+    def _rebuildFilterItems(self, preserve_current: bool = False):
+        current_key = self.termFilterComboBox.currentData() if preserve_current else self._FILTER_ALL_KEY
         term_codes = set()
         for course in self._all_courses:
             meta = self._courseTermMeta(course)
@@ -302,7 +360,8 @@ class LMSCoursePage(QFrame):
         self.termFilterComboBox.addItem(self.tr("全部课程"), userData=self._FILTER_ALL_KEY)
         for term in sorted_terms:
             self.termFilterComboBox.addItem(term, userData=term)
-        self.termFilterComboBox.setCurrentIndex(0)
+        selected_index = self.termFilterComboBox.findData(current_key)
+        self.termFilterComboBox.setCurrentIndex(selected_index if selected_index >= 0 else 0)
         self.termFilterComboBox.blockSignals(False)
 
     def _applyCurrentFilter(self):
