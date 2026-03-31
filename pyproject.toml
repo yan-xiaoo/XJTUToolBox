@@ -5,21 +5,17 @@ requires-python = ">=3.10, <=3.13"
 readme = "README.md"
 description = "A desktop application offering a variety of services for Xi'an Jiaotong University, including attendance check, schedule inquiry, and one-key teaching evaluation."
 dependencies = [
-    "requests~=2.32.0",
+    "requests>=2.33.0",
     "fake-useragent~=2.2.0",
     "pycryptodome~=3.21.0",
-    
     # 【环境隔离】为 macOS, Windows, Linux x86_64 安装 UI 库（跳过 Linux aarch64）
     "pyqt-fluent-widgets~=1.8.7; sys_platform == 'darwin' or sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
     "pyqt5-frameless-window~=0.7.4; sys_platform == 'darwin' or sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
-    
     # 【环境隔离】为 macOS, Linux x86_64 安装核心 PyQt5（跳过 Linux aarch64）
     "pyqt5>=5.15.11; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
-    
     # 在 Windows 下，强制使用 pyqt5>=5.15.11，配合软件包 pyqt5-qt5==5.15.2
     "pyqt5>=5.15.11; sys_platform == 'win32'",
     "pyqt5-qt5>=5.15,<=5.15.2; sys_platform == 'win32'",
-    
     "platformdirs~=4.3.6",
     "peewee~=3.17.8",
     "icalendar~=6.1.0",
