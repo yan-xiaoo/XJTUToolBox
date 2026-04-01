@@ -113,6 +113,11 @@ class LMSActivityPage(QFrame):
         self.filterActivities(self.activity_type_filter)
 
     def upsertActivities(self, activities: list[dict]):
+        """
+        更新已经存在的活动列表，插入一些新的活动。
+
+        :param activities: 新增的活动。其中已经存在的活动会被忽略，而不存在的活动会被插入到活动列表中。
+        """
         updates = [one for one in activities if isinstance(one, dict)]
         if not updates:
             return
@@ -142,6 +147,9 @@ class LMSActivityPage(QFrame):
         self.filterActivities(self.activity_type_filter)
 
     def getActivitiesSnapshot(self) -> list[dict]:
+        """
+        列出当前页面全部的活动（不经过筛选）。
+        """
         return [one for one in self._activities if isinstance(one, dict)]
 
     def filterActivities(self, key: str):

@@ -141,6 +141,11 @@ class LMSCoursePage(QFrame):
         self._applyCurrentFilter()
 
     def upsertCourses(self, courses: list[dict]):
+        """
+        更新已经存在的课程列表，插入一些新的课程。
+
+        :param courses: 新增的课程。其中已经存在的课程会被忽略，而不存在的课程会被插入到课程列表中。
+        """
         updates = [one for one in courses if isinstance(one, dict)]
         if not updates:
             return
@@ -171,6 +176,9 @@ class LMSCoursePage(QFrame):
         self._applyCurrentFilter()
 
     def getCoursesSnapshot(self) -> list[dict]:
+        """
+        列出当前页面全部的课程（不使用页面设置筛选）
+        """
         return [one for one in self._all_courses if isinstance(one, dict)]
 
     def _clearCourseCards(self):
@@ -178,6 +186,7 @@ class LMSCoursePage(QFrame):
         for animation in self._enter_animations:
             animation.stop()
         self._enter_animations.clear()
+
         for card in self._course_cards:
             self.flowLayout.removeWidget(card)
             card.deleteLater()
@@ -195,9 +204,13 @@ class LMSCoursePage(QFrame):
             )
             self.flowLayout.addWidget(card)
             self._course_cards.append(card)
+
         self._animateCourseCardsIn()
 
     def _animateCourseCardsIn(self):
+        """
+        播放课程卡片出现的动画
+        """
         self._enter_animations.clear()
         if not self._course_cards:
             return
@@ -346,6 +359,11 @@ class LMSCoursePage(QFrame):
         return sorted_courses
 
     def _rebuildFilterItems(self, preserve_current: bool = False):
+        """
+        重建筛选框选项，仅包含有课程的学年-学期。
+
+        :param preserve_current: 是否尝试保留当前选中的筛选项（如果仍然存在）。默认为 False。
+        """
         current_key = self.termFilterComboBox.currentData() if preserve_current else self._FILTER_ALL_KEY
         term_codes = set()
         for course in self._all_courses:

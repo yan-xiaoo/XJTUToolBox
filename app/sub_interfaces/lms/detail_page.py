@@ -413,7 +413,7 @@ class LMSDetailPage(QFrame):
             if can_preview_as_image(upload):
                 preview_btn = PushButton(self.tr("预览"), actions)
                 preview_btn.setFixedWidth(ATTACHMENT_ACTION_BUTTON_WIDTH)
-                preview_btn.clicked.connect(lambda _=False, one=upload, all_rows=rows: self.previewRequested.emit(one, all_rows))
+                preview_btn.clicked.connect(lambda checked=False, one=upload, all_rows=rows: self.previewRequested.emit(one, all_rows))
                 action_layout.addWidget(preview_btn)
             else:
                 spacer = QWidget(actions)
@@ -422,7 +422,7 @@ class LMSDetailPage(QFrame):
 
             save_btn = PushButton(self.tr("另存为"), actions)
             save_btn.setFixedWidth(ATTACHMENT_ACTION_BUTTON_WIDTH)
-            save_btn.clicked.connect(lambda _=False, one=upload: self.downloadRequested.emit(one))
+            save_btn.clicked.connect(lambda checked=False, one=upload: self.downloadRequested.emit(one))
             action_layout.addWidget(save_btn)
             action_layout.addStretch(1)
             table.setCellWidget(row, 2, actions)

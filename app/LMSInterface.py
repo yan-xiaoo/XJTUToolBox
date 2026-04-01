@@ -19,7 +19,8 @@ from .threads.ProcessWidget import ProcessWidget
 from .utils import StyleSheet, accounts, AccountDataManager, cfg
 from .sub_interfaces.lms import PageStatus, LMSStartPage, LMSCoursePage, LMSActivityPage, LMSDetailPage, LMSSubmissionPage, LMSVideoPage
 from .sub_interfaces.lms.image_preview_dialog import LMSImagePreviewDialog
-from .sub_interfaces.lms.common import format_size as common_format_size, format_replay_video_label
+from .sub_interfaces.lms.common import format_size as common_format_size, format_replay_video_label, \
+    can_preview_as_image, is_mark_attachment_upload
 from lms import LMSUtil
 from lms.models import ActivityType
 
@@ -1034,7 +1035,7 @@ class LMSInterface(ScrollArea):
             self.error(self.tr("批改预览不可用"), self.tr("当前提交中没有可预览图片"), parent=self)
             return
 
-        original_image_rows = [one for one in original_rows if self._can_preview_as_image(one)]
+        original_image_rows = [one for one in original_rows if can_preview_as_image(one)]
         clicked_index = self._find_upload_index(file_info, original_image_rows)
         if clicked_index is None:
             clicked_index = self._find_upload_index(file_info, review_rows)
@@ -1046,51 +1047,6 @@ class LMSInterface(ScrollArea):
                 file_info = matched_file_info
 
         self._preview_image_file(file_info, review_rows, True, review_rows)
-
-    @staticmethod
-    def _is_image_upload(file_info: dict) -> bool:
-        name = str(file_info.get("name") or "").lower()
-        file_type = str(file_info.get("type") or "").lower()
-        image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg", ".heic", ".heif")
-        if any(name.endswith(ext) for ext in image_exts):
-            return True
-        if file_type.startswith("image/"):
-            return True
-        return file_type in {"image", "img", "png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "svg", "heic", "heif"}
-
-    @staticmethod
-    def _is_image_by_url(file_info: dict) -> bool:
-        image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg", ".heic", ".heif")
-        for key in ("download_url", "preview_url", "attachment_url", "url", "href"):
-            value = file_info.get(key)
-            if not isinstance(value, str) or not value:
-                continue
-            path = unquote(urlparse(value).path or "").lower()
-            if any(path.endswith(ext) for ext in image_exts):
-                return True
-        return False
-
-    @staticmethod
-    def _is_mark_attachment_upload(file_info: dict) -> bool:
-        if not isinstance(file_info, dict):
-            return False
-        name = str(file_info.get("name") or "").strip().lower()
-        if name in {"markattachment.txt", "markattatchment.txt"}:
-            return True
-        if re.search(r"(markattachment|markattatchment|mark_attachment|annotation|markup).*\.(txt|json)$", name):
-            return True
-        has_payload = any(
-            file_info.get(key) is not None
-            for key in ("marked_attachment_payload", "marked_attachments_payload", "marked_attachments", "mark_overlay_payload")
-        )
-        has_upload_identity = any(
-            file_info.get(key)
-            for key in ("id", "reference_id", "key", "download_url", "preview_url", "attachment_url")
-        )
-        return has_payload and (not has_upload_identity)
-
-    def _can_preview_as_image(self, file_info: dict) -> bool:
-        return self._is_image_upload(file_info) or self._is_image_by_url(file_info)
 
     @staticmethod
     def _as_float(value) -> float | None:
@@ -1881,7 +1837,7 @@ class LMSInterface(ScrollArea):
             attachment_url = one.get("attachment_url")
             if isinstance(attachment_url, str) and attachment_url.startswith(("http://", "https://")):
                 return True
-            if self._is_mark_attachment_upload(one):
+            if is_mark_attachment_upload(one):
                 return True
         return False
 
@@ -1986,7 +1942,7 @@ class LMSInterface(ScrollArea):
         return rules
 
     def _build_review_preview_rows(self, uploads: list[dict], marked_data: dict | None) -> list[dict]:
-        image_rows = [dict(one) for one in uploads if isinstance(one, dict) and self._can_preview_as_image(one)]
+        image_rows = [dict(one) for one in uploads if isinstance(one, dict) and can_preview_as_image(one)]
         if not image_rows:
             return []
 
@@ -2101,12 +2057,12 @@ class LMSInterface(ScrollArea):
         review_mode: bool = False,
         review_uploads: list[dict] | None = None,
     ):
-        if not self._can_preview_as_image(file_info):
+        if not can_preview_as_image(file_info):
             self.error(self.tr("无法预览"), self.tr("该附件不是可预览图片"), parent=self)
             return
 
         if isinstance(uploads, list):
-            image_rows = [one for one in uploads if isinstance(one, dict) and self._can_preview_as_image(one)]
+            image_rows = [one for one in uploads if isinstance(one, dict) and can_preview_as_image(one)]
         else:
             image_rows = [file_info]
 
