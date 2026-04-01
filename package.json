@@ -14,6 +14,10 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"
   },
+  "overrides": {
+    "@xmldom/xmldom": "0.9.9",
+    "esbuild": "0.25.12"
+  },
   "dependencies": {
     "vitepress-plugin-comment-with-giscus": "^1.1.15"
   }
