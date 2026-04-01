@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QTableWidgetItem, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QFrame, QHBoxLayout, QSizePolicy, QTableWidgetItem, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -20,19 +20,16 @@ from qfluentwidgets import (
 
 from lms.models import ActivityType
 from .common import (
-    ATTACHMENT_ACTION_BUTTON_WIDTH,
-    ATTACHMENT_ACTION_COLUMN_WIDTH,
     PageStatus,
     activity_type_text,
-    can_preview_as_image,
     create_loading_frame,
     create_retry_frame,
     create_section_title,
     format_live_room,
     format_replay_video_label,
     format_size,
+    is_html_text,
     safe_text,
-    set_html_label,
     time_text,
     update_table_height, apply_stretch_and_fixed_column_width,
     apply_stretch_on_first_column,
@@ -138,8 +135,6 @@ class LMSDetailPage(QFrame):
     submissionRequested = pyqtSignal(dict)
     # 用户点击下载按钮后，通知主容器执行下载。
     downloadRequested = pyqtSignal(dict)
-    # 用户点击图片预览后，通知主容器打开预览对话框。
-    previewRequested = pyqtSignal(dict, list)
     # 用户点击“在线查看”后，请求主容器切换到视频播放页。
     replayVideoViewRequested = pyqtSignal(dict)
     # 用户点击“打开对应回放”后，请求主容器按开始时间跳转到对应 lesson。
@@ -179,12 +174,8 @@ class LMSDetailPage(QFrame):
         self.detailDescriptionCard.viewLayout.setContentsMargins(20, 15, 20, 15)
         self.detailDescriptionCard.viewLayout.setSpacing(0)
 
-        self.detailDescriptionLabel = QLabel(self.detailDescriptionCard)
-        self.detailDescriptionLabel.setWordWrap(True)
-        self.detailDescriptionLabel.setOpenExternalLinks(True)
-        self.detailDescriptionLabel.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
-        self.detailDescriptionLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        self.detailDescriptionCard.viewLayout.addWidget(self.detailDescriptionLabel)
+        self.detailDescriptionBrowser = DetailDescriptionBrowser(self.detailDescriptionCard)
+        self.detailDescriptionCard.viewLayout.addWidget(self.detailDescriptionBrowser)
 
         self.detailUploadsTitle = create_section_title(self, self.tr("活动附件"))
         self.detailUploadsTitle.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -281,7 +272,7 @@ class LMSDetailPage(QFrame):
             one.setVisible(True)
         self.detailMetaHost.setVisible(bool(self._metaCards))
         self.openRelatedLessonButton.setVisible(self._relatedLessonStartTime is not None)
-        self.detailDescriptionCard.setVisible(bool(self.detailDescriptionLabel.text().strip()))
+        self.detailDescriptionCard.setVisible(not self.detailDescriptionBrowser.document().isEmpty())
         self.failFrame.setVisible(False)
 
     def _normalWidgets(self) -> list[QWidget]:
@@ -400,32 +391,13 @@ class LMSDetailPage(QFrame):
         """渲染附件表格并返回附件数量。"""
         rows = [one for one in uploads if isinstance(one, dict)]
         table.setRowCount(len(rows))
-        table.setColumnWidth(2, ATTACHMENT_ACTION_COLUMN_WIDTH)
         for row, upload in enumerate(rows):
             table.setItem(row, 0, QTableWidgetItem(safe_text(upload.get("name"))))
             table.setItem(row, 1, QTableWidgetItem(format_size(upload.get("size"))))
 
-            actions = QWidget(table)
-            action_layout = QHBoxLayout(actions)
-            action_layout.setContentsMargins(4, 0, 4, 0)
-            action_layout.setSpacing(8)
-
-            if can_preview_as_image(upload):
-                preview_btn = PushButton(self.tr("预览"), actions)
-                preview_btn.setFixedWidth(ATTACHMENT_ACTION_BUTTON_WIDTH)
-                preview_btn.clicked.connect(lambda checked=False, one=upload, all_rows=rows: self.previewRequested.emit(one, all_rows))
-                action_layout.addWidget(preview_btn)
-            else:
-                spacer = QWidget(actions)
-                spacer.setFixedWidth(ATTACHMENT_ACTION_BUTTON_WIDTH)
-                action_layout.addWidget(spacer)
-
-            save_btn = PushButton(self.tr("另存为"), actions)
-            save_btn.setFixedWidth(ATTACHMENT_ACTION_BUTTON_WIDTH)
-            save_btn.clicked.connect(lambda checked=False, one=upload: self.downloadRequested.emit(one))
-            action_layout.addWidget(save_btn)
-            action_layout.addStretch(1)
-            table.setCellWidget(row, 2, actions)
+            save_btn = PushButton(self.tr("另存为"), table)
+            save_btn.clicked.connect(lambda _=False, one=upload: self.downloadRequested.emit(one))
+            table.setCellWidget(row, 2, save_btn)
 
         table.resizeRowsToContents()
         update_table_height(table, min_rows=0, min_height=38)
@@ -464,13 +436,26 @@ class LMSDetailPage(QFrame):
         """写入活动说明并同步描述卡片显隐。"""
         text = safe_text(rich_text)
         if text == "-":
-            self.detailDescriptionLabel.clear()
-            self.detailDescriptionLabel.setStyleSheet("")
+            self.detailDescriptionBrowser.clear()
             self.detailDescriptionCard.setVisible(False)
             return
 
-        has_content = set_html_label(self.detailDescriptionLabel, text)
-        self.detailDescriptionCard.setVisible(has_content)
+        if is_html_text(text):
+            content = (
+                "<style>"
+                "body{font-size:15px;line-height:1.7;}"
+                "p{margin:0 0 10px 0;}"
+                "ul,ol{margin-top:0;margin-bottom:10px;}"
+                "img{max-width:100%;height:auto;}"
+                "a{color:#0066CC;}"
+                "</style>"
+                f"{text}"
+            )
+            self.detailDescriptionBrowser.setDocumentContent(content, True)
+        else:
+            self.detailDescriptionBrowser.setDocumentContent(text, False)
+
+        self.detailDescriptionCard.setVisible(True)
 
     def _extractRichText(self, detail: dict) -> Optional[str]:
         """提取当前活动的说明文本。"""
