@@ -268,9 +268,6 @@ class Config(QConfig):
     # 是否启用思源学堂课程/作业缓存
     lmsCacheEnable = OptionsConfigItem("Settings", "lms_cache_enable",
                                        True, OptionsValidator([True, False]), BooleanSerializer())
-    # 思源学堂缓存目录（为空时使用默认目录）
-    lmsCacheDirectory = ConfigItem("Settings", "lms_cache_directory",
-                                   "", StringValidator(), StringSerializer())
     autoRetryAttendance = OptionsConfigItem("Settings", "auto_retry_attendance",
                                             True, OptionsValidator([True, False]), BooleanSerializer())
     traySetting = OptionsConfigItem("Settings", "tray_setting",

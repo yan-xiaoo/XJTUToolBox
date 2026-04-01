@@ -264,20 +264,12 @@ class SettingInterface(ScrollArea):
         self.lmsGroup = SettingCardGroup(self.tr("思源学堂"), self.view)
         self.lmsCacheCard = CustomSwitchSettingCard(
             FIF.SYNC,
-            self.tr("是否开启缓存功能"),
-            self.tr("进入思源学堂时优先显示缓存并后台刷新课程和作业"),
+            self.tr("启用缓存"),
+            self.tr("进入思源学堂时优先显示缓存，并在后台刷新课程和作业"),
             cfg.lmsCacheEnable,
             self.lmsGroup
         )
-        self.lmsCacheDirectoryCard = PushSettingCard(
-            self.tr("设置"),
-            FIF.FOLDER,
-            self.tr("缓存存放位置"),
-            self._formatLmsCacheDirectory(cfg.lmsCacheDirectory.value),
-            self.lmsGroup
-        )
         self.lmsGroup.addSettingCard(self.lmsCacheCard)
-        self.lmsGroup.addSettingCard(self.lmsCacheDirectoryCard)
 
         # 通知查询组
         self.noticeGroup = SettingCardGroup(self.tr("定时查询"), self.view)
@@ -405,10 +397,6 @@ class SettingInterface(ScrollArea):
         self.showAvatarCard.checkedChanged.connect(self._showAvatarClicked)
         self.visitorIdCard.clicked.connect(self._onVisitorIdClicked)
         self.visitorIdCard.copied.connect(self._onVisitorIdCopiedClicked)
-        self.lmsCacheDirectoryCard.clicked.connect(self._onLmsCacheDirectoryClicked)
-        cfg.lmsCacheDirectory.valueChanged.connect(
-            lambda _: self.lmsCacheDirectoryCard.setContent(self._formatLmsCacheDirectory(cfg.lmsCacheDirectory.value))
-        )
 
         if sys.platform == "darwin":
             # macOS 不支持直接设置自动启动
@@ -540,22 +528,6 @@ class SettingInterface(ScrollArea):
     @pyqtSlot()
     def _showAvatarClicked(self):
         self.main_window.on_avatar_update()
-
-    @staticmethod
-    def _formatLmsCacheDirectory(path: str) -> str:
-        text = str(path or "").strip()
-        return text if text else "未设置（默认目录）"
-
-    @pyqtSlot()
-    def _onLmsCacheDirectoryClicked(self):
-        current_path = str(cfg.lmsCacheDirectory.value or "").strip()
-        start_path = current_path if current_path and os.path.isdir(current_path) else os.path.expanduser("~")
-        selected = QFileDialog.getExistingDirectory(self, self.tr("选择缓存目录"), start_path)
-        if not selected:
-            return
-        cfg.lmsCacheDirectory.value = selected
-        self.lmsCacheDirectoryCard.setContent(self._formatLmsCacheDirectory(selected))
-        InfoBar.success(self.tr("设置成功"), self.tr("思源学堂缓存目录已更新"), parent=self)
 
     @pyqtSlot(UpdateStatus)
     def onUpdateCheck(self, status):

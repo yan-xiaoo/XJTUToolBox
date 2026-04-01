@@ -308,11 +308,6 @@ class LMSInterface(ScrollArea):
         if current_account is None:
             return None
 
-        configured_root = str(cfg.lmsCacheDirectory.value or "").strip()
-        if configured_root:
-            base_root = os.path.abspath(os.path.expanduser(os.path.expandvars(configured_root)))
-            return os.path.join(base_root, "lms_cache", current_account.uuid, filename)
-
         manager = self._getAccountCacheManager()
         if manager is None:
             return None

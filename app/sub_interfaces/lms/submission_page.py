@@ -94,7 +94,8 @@ class LMSSubmissionPage(QFrame):
         :return: 无返回值。
         """
         self.submissionTitleLabel.setText(f"{activity_name}")
-        self.debugMarkedAttachmentsButton.setVisible(isinstance(submission.get("id"), int))
+        # 这个批注映射似乎不该展示给用户。暂时注释掉显示 Button 的代码。
+        # self.debugMarkedAttachmentsButton.setVisible(isinstance(submission.get("id"), int))
 
         has_comment = set_html_label(self.submissionCommentLabel, submission.get("comment"))
         self.submissionCommentTitle.setVisible(has_comment)
