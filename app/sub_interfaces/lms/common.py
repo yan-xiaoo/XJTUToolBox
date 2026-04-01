@@ -1,14 +1,10 @@
 import enum
 import re
-from urllib.parse import unquote, urlparse
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import QFrame, QVBoxLayout, QWidget, QLabel
 from qfluentwidgets import BodyLabel, IndeterminateProgressBar, PrimaryPushButton, PushButton, StrongBodyLabel, TableWidget
-
-ATTACHMENT_ACTION_BUTTON_WIDTH = 112
-ATTACHMENT_ACTION_COLUMN_WIDTH = 420
 
 
 class PageStatus(enum.Enum):
@@ -260,115 +256,3 @@ def format_size(size) -> str:
             return f"{value:.2f} {unit}"
         value /= 1024
     return "-"
-
-
-def is_image_upload(file_info: dict) -> bool:
-    """判断附件元数据是否声明为图片。"""
-    name = str(file_info.get("name") or "").lower()
-    file_type = str(file_info.get("type") or "").lower()
-    image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg", ".heic", ".heif")
-    if any(name.endswith(ext) for ext in image_exts):
-        return True
-    if file_type.startswith("image/"):
-        return True
-    return file_type in {"image", "img", "png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "svg", "heic", "heif"}
-
-
-def is_image_by_url(file_info: dict) -> bool:
-    """根据附件 URL 推断是否为图片。"""
-    image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg", ".heic", ".heif")
-    for key in ("download_url", "preview_url", "attachment_url", "url", "href"):
-        value = file_info.get(key)
-        if not isinstance(value, str) or not value:
-            continue
-        path = unquote(urlparse(value).path or "").lower()
-        if any(path.endswith(ext) for ext in image_exts):
-            return True
-    return False
-
-
-def can_preview_as_image(file_info: dict) -> bool:
-    """判断附件是否可按图片预览。"""
-    return is_image_upload(file_info) or is_image_by_url(file_info)
-
-
-def is_mark_attachment_upload(file_info: dict) -> bool:
-    """判断附件是否像是批改标注文件。"""
-    if not isinstance(file_info, dict):
-        return False
-    name = str(file_info.get("name") or "").strip().lower()
-    if name in {"markattachment.txt", "markattatchment.txt"}:
-        return True
-    if re.search(r"(markattachment|markattatchment|mark_attachment|annotation|markup).*\.(txt|json)$", name):
-        return True
-    has_payload = any(
-        file_info.get(key) is not None
-        for key in ("marked_attachment_payload", "marked_attachments_payload", "marked_attachments", "mark_overlay_payload")
-    )
-    has_upload_identity = any(
-        file_info.get(key)
-        for key in ("id", "reference_id", "key", "download_url", "preview_url", "attachment_url")
-    )
-    return has_payload and (not has_upload_identity)
-
-
-def has_review_overlay_source(uploads: list[dict]) -> bool:
-    """判断一组附件里是否存在可用于批改预览的数据源。"""
-    for one in uploads:
-        if not isinstance(one, dict):
-            continue
-        for key in (
-            "marked_attachment_payload",
-            "marked_attachments_payload",
-            "marked_attachments",
-            "mark_overlay_payload",
-            "overlay_payload",
-            "annotation_payload",
-            "annotations",
-            "annotation",
-            "mark_data",
-            "markup",
-            "payload",
-            "data",
-        ):
-            if one.get(key) is not None:
-                return True
-        attachment_url = one.get("attachment_url")
-        if isinstance(attachment_url, str) and attachment_url.startswith(("http://", "https://")):
-            return True
-        if is_mark_attachment_upload(one):
-            return True
-    return False
-
-
-def has_attachment_review(file_info: dict) -> bool:
-    """判断当前附件是否存在可直接加载的批注附件。"""
-    if not isinstance(file_info, dict):
-        return False
-    attachment_url = file_info.get("attachment_url")
-    return isinstance(attachment_url, str) and attachment_url.startswith(("http://", "https://"))
-
-
-def has_attachment_review_by_rules(file_info: dict, marked_data: dict | None) -> bool:
-    if not isinstance(file_info, dict) or not isinstance(marked_data, dict):
-        return False
-
-    raw_rules = marked_data.get("rules")
-    if not isinstance(raw_rules, list):
-        return False
-
-    normalized_name = re.sub(r"\s+", " ", unquote(str(file_info.get("name") or "")).strip().lower())
-    if not normalized_name:
-        return False
-
-    for rule in raw_rules:
-        if not isinstance(rule, dict):
-            continue
-        origin_name = rule.get("origin_upload_name") or rule.get("origin_name") or rule.get("name")
-        rule_name = re.sub(r"\s+", " ", unquote(str(origin_name or "")).strip().lower())
-        if rule_name != normalized_name:
-            continue
-        url = rule.get("url") or rule.get("marked_attachment_url")
-        if isinstance(url, str) and url.startswith(("http://", "https://")):
-            return True
-    return False

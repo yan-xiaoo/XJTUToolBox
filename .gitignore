@@ -16,5 +16,3 @@ docs/.vitepress/cache
 node_modules
 
 secrets/*
-
-todo.md

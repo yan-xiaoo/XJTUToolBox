@@ -265,9 +265,6 @@ class Config(QConfig):
     # 是否通过请求成绩单，尝试绕过评教限制，查询学期成绩
     useScoreReport = OptionsConfigItem("Settings", "use_score_report",
                                        False, OptionsValidator([True, False]), BooleanSerializer())
-    # 是否启用思源学堂课程/作业缓存
-    lmsCacheEnable = OptionsConfigItem("Settings", "lms_cache_enable",
-                                       True, OptionsValidator([True, False]), BooleanSerializer())
     autoRetryAttendance = OptionsConfigItem("Settings", "auto_retry_attendance",
                                             True, OptionsValidator([True, False]), BooleanSerializer())
     traySetting = OptionsConfigItem("Settings", "tray_setting",

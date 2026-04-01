@@ -9,7 +9,7 @@ from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxS
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
     InfoBadge, LineEdit, SwitchButton, IndicatorPosition, BodyLabel, HyperlinkLabel
 from qfluentwidgets import FluentIcon as FIF
-from PyQt5.QtWidgets import QWidget, QApplication, QFileDialog
+from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtGui import QColor, QDesktopServices
 
 from .cards.copyable_switch_card import CopyablePushSettingCard
@@ -260,17 +260,6 @@ class SettingInterface(ScrollArea):
         self.scoreGroup.addSettingCard(self.ignoreLateCard)
         self.scoreGroup.addSettingCard(self.useReportCard)
 
-        # 思源学堂组
-        self.lmsGroup = SettingCardGroup(self.tr("思源学堂"), self.view)
-        self.lmsCacheCard = CustomSwitchSettingCard(
-            FIF.SYNC,
-            self.tr("启用缓存"),
-            self.tr("进入思源学堂时优先显示缓存，并在后台刷新课程和作业"),
-            cfg.lmsCacheEnable,
-            self.lmsGroup
-        )
-        self.lmsGroup.addSettingCard(self.lmsCacheCard)
-
         # 通知查询组
         self.noticeGroup = SettingCardGroup(self.tr("定时查询"), self.view)
         self.noticeCard = NoticeSearchCard(self, self.view)
@@ -368,7 +357,6 @@ class SettingInterface(ScrollArea):
         self.expandLayout.addWidget(self.accountGroup)
         self.expandLayout.addWidget(self.attendanceGroup)
         self.expandLayout.addWidget(self.scoreGroup)
-        self.expandLayout.addWidget(self.lmsGroup)
         self.expandLayout.addWidget(self.noticeGroup)
         self.expandLayout.addWidget(self.personalGroup)
         self.expandLayout.addWidget(self.aboutGroup)

@@ -72,17 +72,6 @@ class LMSCourseCard(ElevatedCardWidget):
         self.verticalLayout.addWidget(self.instructorLabel)
         self.verticalLayout.addLayout(self.hBoxLayout)
 
-        for widget in (
-            self.nameLabel,
-            self.termLabel,
-            self.instructorLabel,
-            self.creditIcon,
-            self.creditLabel,
-            self.studentIcon,
-            self.studentLabel,
-        ):
-            widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-
         self.setCursor(Qt.PointingHandCursor)
 
 
