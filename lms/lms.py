@@ -361,6 +361,9 @@ class LMSUtil:
 
         data = self._get_json(
             f"{self.RMS_BASE_URL}/api/embed/lesson-activities/captures/{normalized_replay_code}",
+            params={
+                "lesson_activity_id": lesson_activity_id,
+            },
             **request_kwargs,
         )
         if not isinstance(data, dict):
