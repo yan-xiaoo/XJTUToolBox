@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from typing import Optional, Any
 from urllib.parse import urlparse, unquote
 
-from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths
-from PyQt5.QtGui import QDesktopServices, QPixmap
+from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths, QBuffer
+from PyQt5.QtGui import QDesktopServices, QImageReader, QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QFileDialog, QSizePolicy
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, InfoBar, InfoBarPosition, BreadcrumbBar, \
     TransparentToolButton, FluentIcon
@@ -2013,9 +2013,17 @@ class LMSInterface(ScrollArea):
                 continue
 
             content = response.content or b""
-            pixmap = QPixmap()
-            if content and pixmap.loadFromData(content):
-                return pixmap, None
+            if content:
+                buffer = QBuffer()
+                buffer.setData(content)
+                buffer.open(QBuffer.ReadOnly)
+                image_reader = QImageReader(buffer)
+                # Respect EXIF orientation so phone photos display with correct rotation.
+                image_reader.setAutoTransform(True)
+                loaded_image = image_reader.read()
+                if not loaded_image.isNull():
+                    pixmap = QPixmap.fromImage(loaded_image)
+                    return pixmap, None
 
             nested_url = None
             content_type = str(response.headers.get("Content-Type") or "").lower()
@@ -2089,10 +2097,8 @@ class LMSInterface(ScrollArea):
                 [one for one in review_uploads if isinstance(one, dict)] if isinstance(review_uploads, list)
                 else ([one for one in uploads if isinstance(one, dict)] if isinstance(uploads, list) else [])
             )
-            overlay_loader_callback = (
-                lambda current, rows=review_rows:
+            def overlay_loader_callback(current, rows=review_rows):
                 self._load_review_overlay_into_dialog(self._preview_key(current), rows, dict(current))
-            )
 
         self._preview_dialog.open_images(
             image_rows,
