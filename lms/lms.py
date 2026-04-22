@@ -629,6 +629,7 @@ class LMSUtil:
                         "user_submit_count": activity_detail.get("user_submit_count"),
                         "description": data.get("description") if isinstance(data, Mapping) else None,
                         "average_score": activity_detail.get("average_score"),
+                        "has_score_count": activity_detail.get("has_score_count"),
                         "highest_score": activity_detail.get("highest_score"),
                         "lowest_score": activity_detail.get("lowest_score"),
                     }),

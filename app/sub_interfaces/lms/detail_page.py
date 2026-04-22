@@ -501,6 +501,7 @@ class LMSDetailPage(QFrame):
             self._appendMetaItem(items, FluentIcon.SPEED_HIGH, self.tr("最高分"), detail.get("highest_score"))
             self._appendMetaItem(items, FluentIcon.SPEED_OFF, self.tr("最低分"), detail.get("lowest_score"))
             self._appendMetaItem(items, FluentIcon.PIE_SINGLE, self.tr("平均分"), detail.get("average_score"))
+            self._appendMetaItem(items, FluentIcon.PEOPLE, self.tr("已批阅人数"), detail.get("has_score_count"))
             return items
 
         if type_name == ActivityType.LESSON.value:
