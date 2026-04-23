@@ -312,6 +312,8 @@ class LMSActivity(TypedDict, total=False):
     description: NotRequired[Optional[str]]
     # 全班平均分
     average_score: NotRequired[Optional[float]]
+    # 已批阅人数
+    has_score_count: NotRequired[Optional[int]]
     # 全班最高分
     highest_score: NotRequired[Optional[float]]
     # 全班最低分
