@@ -79,7 +79,6 @@ jobs:
         with:
           name: XJTUToolbox-macOS-${{ runner.arch }}
           path: |
-            ./dist/XJTUToolbox-macOS-*.zip
             ./dist/XJTUToolbox-macOS-*.dmg
 
       # 清理文件夹 (利用 extglob 同时保留 zip 和 dmg)
