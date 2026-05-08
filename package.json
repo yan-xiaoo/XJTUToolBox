@@ -15,7 +15,6 @@
     "docs:preview": "vitepress preview docs"
   },
   "overrides": {
-    "@xmldom/xmldom": "0.9.9",
     "esbuild": "0.25.12"
   },
   "dependencies": {
