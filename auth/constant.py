@@ -9,8 +9,7 @@ WEBVPN_LOGIN_URL = "https://webvpn.xjtu.edu.cn/login?cas_login=true"
 # 思源学堂（新版）登录地址
 LMS_LOGIN_URL = "lms.xjtu.edu.cn"
 # 本科生考勤系统登录地址
-# 都 2024 年了，本科考勤系统还是不支持 https，所以这里的地址是 http 的。
-ATTENDANCE_URL = "http://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1372&redirectUri=http://bkkq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
+ATTENDANCE_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1372&redirectUri=https://bkkq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
 ATTENDANCE_WEBVPN_URL = "http://bkkq.xjtu.edu.cn"
 # 研究生考勤登录地址
 POSTGRADUATE_ATTENDANCE_URL = "http://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1245&redirectUri=http://yjskq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
