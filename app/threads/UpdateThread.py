@@ -75,22 +75,24 @@ class UpdateThread(QThread):
     def get_download_url_from_assets(assets):
         """从发布信息中获取下载URL。"""
         system = platform.system()
-        if system == "Windows":
+
+        def find_asset(name_suffix):
             for asset in assets:
-                if "windows" in asset["name"]:
-                    return asset["browser_download_url"], asset["size"]
-        elif system == "Darwin":
-            arc = platform.machine()
-            if arc == "arm64":
-                for asset in assets:
-                    if "arm64" in asset["name"]:
-                        return asset["browser_download_url"], asset["size"]
-            elif arc == "x86_64":
-                for asset in assets:
-                    if "x86_64" in asset["name"]:
-                        return asset["browser_download_url"], asset["size"]
-        else:
+                name = asset.get("name", "").lower()
+                if name.endswith(name_suffix):
+                    return asset.get("browser_download_url"), asset.get("size")
             return None, None
+
+        if system == "Windows":
+            return find_asset("-windows.zip")
+        elif system == "Darwin":
+            arc = platform.machine().lower()
+            if arc in ("arm64", "aarch64"):
+                return find_asset("-macos-arm64.dmg")
+            elif arc in ("x86_64", "amd64"):
+                return find_asset("-macos-x86_64.dmg")
+
+        return None, None
 
     def run(self):
         """执行更新检查逻辑。"""
