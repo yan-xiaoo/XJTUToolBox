@@ -16,6 +16,7 @@ class FlowRecordType(Enum):
     INVALID = 0  # 无效：指在某个教室没有课但刷了卡
     VALID = 1  # 有效：指在有课的教室成功刷卡
     REPEATED = 2  # 重复：在某个有课的教室多次刷卡
+    UNKNOWN = 9  # 未知：不清楚是什么情况
 
 
 class WaterType(Enum):
