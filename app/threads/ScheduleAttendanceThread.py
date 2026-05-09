@@ -1,5 +1,6 @@
 import datetime
 import json
+import time
 from enum import Enum
 
 import requests
@@ -109,7 +110,8 @@ class ScheduleAttendanceThread(ProcessThread):
                 except (ServerError, requests.Timeout, json.JSONDecodeError):
                     if cfg.autoRetryAttendance.value:
                         self.error.emit("", self.tr("查询考勤流水失败，正在重试..."))
-                        logger.warning("查询考勤流水失败，正在重试...")
+                        logger.exception("查询考勤流水失败，正在重试...")
+                        time.sleep(2)
                         continue
                     else:
                         raise

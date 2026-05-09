@@ -547,7 +547,7 @@ class Attendance:
         """
         domain = "yjskq.xjtu.edu.cn" if self.is_postgraduate else "bkkq.xjtu.edu.cn"
         if self.use_vpn:
-            return getVPNUrl(f"http://{domain}{path}")
+            return getVPNUrl(f"https://{domain}{path}")
         else:
-            return f"http://{domain}{path}"
+            return f"https://{domain}{path}"
 

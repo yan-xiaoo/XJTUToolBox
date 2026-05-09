@@ -1,4 +1,5 @@
 import json
+import time
 from enum import Enum
 
 import requests
@@ -59,6 +60,7 @@ class AttendanceFlowThread(ProcessThread):
             except (ServerError, json.JSONDecodeError, requests.Timeout):
                 if cfg.autoRetryAttendance.value:
                     self.messageChanged.emit(self.tr("查询考勤流水失败，正在重试..."))
+                    time.sleep(2)
                     continue
                 else:
                     raise
