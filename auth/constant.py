@@ -12,7 +12,7 @@ LMS_LOGIN_URL = "lms.xjtu.edu.cn"
 ATTENDANCE_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1372&redirectUri=https://bkkq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
 ATTENDANCE_WEBVPN_URL = "http://bkkq.xjtu.edu.cn"
 # 研究生考勤登录地址
-POSTGRADUATE_ATTENDANCE_URL = "http://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1245&redirectUri=http://yjskq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
+POSTGRADUATE_ATTENDANCE_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1245&redirectUri=https://yjskq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
 POSTGRADUATE_ATTENDANCE_WEBVPN_URL = "http://yjskq.xjtu.edu.cn"
 
 # 没有 AppId 的考勤系统登录地址

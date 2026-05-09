@@ -312,7 +312,8 @@ class NewLogin:
             response = self._post("https://login.xjtu.edu.cn/cas/mfa/detect",
                                   data={"username": self._username,
                                         "password": self._password,
-                                        "fpVisitorId": self.fp_visitor_id},
+                                        "fpVisitorId": self.fp_visitor_id,
+                                        "loginType": "passwordLogin"},
                                   headers={"Referer": self.post_url})
             try:
                 data = response.json()
@@ -521,7 +522,8 @@ class NewWebVPNLogin(NewLogin):
             encrypted = getVPNUrl(url)
         else:
             encrypted = url
-        return self.session.get(encrypted, **kwargs)
+        a = self.session.get(encrypted, **kwargs)
+        return a
 
     def _post(self, url, **kwargs):
         """
