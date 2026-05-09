@@ -47,7 +47,11 @@ class AttendanceFlow:
 
     @classmethod
     def from_json(cls, json):
-        return cls(json["sBh"], json["eqno"], json["watertime"], FlowRecordType(int(json["isdone"])))
+        try:
+            type_ = FlowRecordType(int(json["isdone"]))
+        except ValueError:
+            type_ = FlowRecordType.UNKNOWN
+        return cls(json["sBh"], json["eqno"], json["watertime"], type_)
 
     def json(self):
         return {"sBh": self.sbh, "eqno": self.place, "watertime": self.water_time, "isdone": self.type_.value}
