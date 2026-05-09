@@ -311,12 +311,14 @@ class AttendanceFlowWidget(QFrame):
             self.tableWidget.setItem(i, 0, QTableWidgetItem(record[i].water_time))
             self.tableWidget.setItem(i, 1, QTableWidgetItem(record[i].place))
             statusWidget = QTableWidgetItem(self.mapTypeToResult(record[i].type_))
-            if record[i].type_ == FlowRecordType.INVALID:
+            if record[i].type_ == FlowRecordType.VALID:
+                statusWidget.setForeground(Color.VALID_COLOR)
+            elif record[i].type_ == FlowRecordType.INVALID:
                 statusWidget.setForeground(Color.INVALID_COLOR)
             elif record[i].type_ == FlowRecordType.REPEATED:
                 statusWidget.setForeground(Color.REPEAT_COLOR)
             else:
-                statusWidget.setForeground(Color.VALID_COLOR)
+                statusWidget.setForeground(Color.UNKNOWN_COLOR)
             self.tableWidget.setItem(i, 2, statusWidget)
 
     def constructWithAccountFrame(self) -> QFrame:

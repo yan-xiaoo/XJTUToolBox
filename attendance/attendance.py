@@ -16,6 +16,7 @@ class FlowRecordType(Enum):
     INVALID = 0  # 无效：指在某个教室没有课但刷了卡
     VALID = 1  # 有效：指在有课的教室成功刷卡
     REPEATED = 2  # 重复：在某个有课的教室多次刷卡
+    UNKNOWN = 9  # 未知：不清楚是什么情况
 
 
 class WaterType(Enum):
@@ -46,7 +47,11 @@ class AttendanceFlow:
 
     @classmethod
     def from_json(cls, json):
-        return cls(json["sBh"], json["eqno"], json["watertime"], FlowRecordType(int(json["isdone"])))
+        try:
+            type_ = FlowRecordType(int(json["isdone"]))
+        except ValueError:
+            type_ = FlowRecordType.UNKNOWN
+        return cls(json["sBh"], json["eqno"], json["watertime"], type_)
 
     def json(self):
         return {"sBh": self.sbh, "eqno": self.place, "watertime": self.water_time, "isdone": self.type_.value}

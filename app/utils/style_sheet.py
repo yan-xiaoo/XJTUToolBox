@@ -35,3 +35,4 @@ class Color:
     INVALID_COLOR = QColor(255, 0, 0)
     VALID_COLOR = QColor(0, 255, 0)
     REPEAT_COLOR = QColor(0, 0, 255)
+    UNKNOWN_COLOR = QColor(122, 122, 122)
