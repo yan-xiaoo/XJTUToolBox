@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from auth import GMIS_LOGIN_URL
 from auth.new_login import NewLogin
 from .common_session import CommonLoginSession
@@ -8,7 +10,9 @@ class GMISSession(CommonLoginSession):
     """
     ehall.xjtu.edu.cn 登录用的 Session
     """
-    def _login(self, username, password, *args, **kwargs):
+    site_key = "gmis"
+
+    def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_util = NewLogin(GMIS_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
         login_util.login_or_raise(username, password, account_type=NewLogin.POSTGRADUATE)
 

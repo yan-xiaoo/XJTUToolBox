@@ -6,6 +6,7 @@ import enum
 import json
 import re
 
+import requests
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from lxml import html
@@ -216,6 +217,9 @@ class NewLogin:
         self.post_url = response.url
         # 获得 execution 字段
         self.execution_input = extract_execution_value(response.text)
+        self._already_authenticated_response: requests.Response | None = None
+        if self.execution_input is None and "/cas/login" not in response.url:
+            self._already_authenticated_response = response
         # 获得一个标识符
         self.fp_visitor_id = visitor_id if visitor_id is not None else generate_fp_visitor_id()
         # 是否进行 mfa 验证
@@ -287,6 +291,13 @@ class NewLogin:
                  - (LoginState.REQUIRE_ACCOUNT_CHOICE, choices): 需要选择账户，附带账户选项列表。
         :raises RuntimeError: 如果已经登录过一次，则抛出此异常。请重新创建 NewLogin 对象以登录其他账号。
         """
+        if self._already_authenticated_response is not None:
+            authenticated_response = self._already_authenticated_response
+            self._already_authenticated_response = None
+            self.has_login = True
+            self.postLogin(authenticated_response)
+            return LoginState.SUCCESS, self.session
+
         # 如果需要选择账户，则执行账户选择逻辑
         if self._choose_account_response:
             return self._finish_account_choice(account_type)

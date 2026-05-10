@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from auth.constant import LMS_LOGIN_URL
 from auth.new_login import NewLogin
 from .common_session import CommonLoginSession
@@ -8,7 +10,9 @@ class LMSSession(CommonLoginSession):
     """
     lms.xjtu.edu.cn 登录用的 Session
     """
-    def _login(self, username, password, *args, **kwargs):
+    site_key = "lms"
+
+    def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_url = LMS_LOGIN_URL
         if not login_url.startswith(("http://", "https://")):
             login_url = f"https://{login_url}"
