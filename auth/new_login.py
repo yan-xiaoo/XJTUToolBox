@@ -508,8 +508,10 @@ class NewLogin:
 class NewWebVPNLogin(NewLogin):
     """
     通过 webvpn 执行的登录操作，包含登录 webvpn 和使用 webvpn 登录其他网站。
-    除非登录 WebVPN 或者使用 WebVPN 访问校内网站二次登录，否则不需要使用此类。
+    除非使用 WebVPN 访问校内网站二次登录，否则不需要使用此类。
     使用方法与 NewLogin 类似，但会自动将所有访问的网址加密为对应的 webvpn 网址。
+
+    注：登录 WebVPN 时，只需要使用 NewLogin(WEBVPN_LOGIN_URL) 进行常规登录，不需要使用本类。
     """
     def _get(self, url, **kwargs):
         """
