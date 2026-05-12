@@ -6,6 +6,7 @@ from PyQt5.QtCore import pyqtSignal
 from .ProcessWidget import ProcessThread
 from ..sessions.jwxt_session import JWXTSession
 from ..utils import Account, logger, accounts
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 
 from jwxt import AutoJudge, QuestionnaireTemplate
 from auth import ServerError
@@ -50,8 +51,12 @@ class JudgeThread(ProcessThread):
     def login(self) -> bool:
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
-        self.session.login(self.account.username, self.account.password)
-        self.session.has_login = True
+        self.session.ensure_login(
+            self.account.username,
+            self.account.password,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
+        )
 
         # 进入评教区域
         self.messageChanged.emit(self.tr("正在进入评教系统..."))
@@ -202,18 +207,14 @@ class JudgeThread(ProcessThread):
             self.error.emit(self.tr("未登录"), self.tr("请您先添加一个账户"))
             self.canceled.emit()
             return
-        # 依据当前的 session 重建 judge 对象
-        if self.session.has_login:
-            self.judge_ = AutoJudge(self.session)
         self.progressChanged.emit(0)
         try:
-            if self.choice == JudgeChoice.GET_COURSES:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
+            result = self.login()
+            if not result:
+                self.canceled.emit()
+                return
 
+            if self.choice == JudgeChoice.GET_COURSES:
                 self.messageChanged.emit(self.tr("正在获取未完成问卷信息..."))
                 self.progressChanged.emit(66)
                 if not self.can_run:
@@ -227,11 +228,6 @@ class JudgeThread(ProcessThread):
                 self.questionnaires.emit(questionnaires, questionnaires_finished)
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.JUDGE:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
                 result = self.judge()
                 if not result:
                     self.canceled.emit()
@@ -239,11 +235,6 @@ class JudgeThread(ProcessThread):
                 self.submitSuccess.emit()
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.EDIT:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
                 result = self.edit()
                 if not result:
                     self.canceled.emit()
@@ -251,11 +242,6 @@ class JudgeThread(ProcessThread):
                 self.editSuccess.emit()
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.JUDGE_ALL:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
                 result = self.judge_all()
                 if not result:
                     self.canceled.emit()
@@ -264,6 +250,14 @@ class JudgeThread(ProcessThread):
                 self.hasFinished.emit()
             else:
                 raise ValueError(self.tr("未知选项"))
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:

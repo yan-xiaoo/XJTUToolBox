@@ -7,6 +7,7 @@ from auth import ServerError
 from lms import LMSUtil
 from .ProcessWidget import ProcessThread
 from ..utils import accounts, logger
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 
 
 class LMSAction(Enum):
@@ -39,8 +40,12 @@ class LMSThread(ProcessThread):
     def login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录思源学堂..."))
-        self.session.login(accounts.current.username, accounts.current.password)
-        self.session.has_login = True
+        self.session.ensure_login(
+            accounts.current.username,
+            accounts.current.password,
+            account=accounts.current,
+            mfa_provider=accounts.current.session_manager.mfa_provider,
+        )
         if not self.can_run:
             return False
 
@@ -49,9 +54,6 @@ class LMSThread(ProcessThread):
         return True
 
     def _ensure_util(self) -> bool:
-        if self.session.has_login:
-            self.util = LMSUtil(self.session)
-            return True
         return self.login()
 
     def run(self):
@@ -111,6 +113,14 @@ class LMSThread(ProcessThread):
             else:
                 raise ValueError(self.tr("未知的 LMS 操作"))
 
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:

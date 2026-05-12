@@ -5,9 +5,9 @@ from qfluentwidgets import TitleLabel, ScrollArea, LineEdit, PasswordLineEdit, P
     ImageLabel, InfoBar, InfoBarPosition, StateToolTip, isDarkTheme, Theme, MessageBox
 
 from auth.new_login import NewLogin
-from .VerifyCodeDialog import VerifyCodeDialog
 from ..threads.LoginThreads import LoginThread
 from ..utils import StyleSheet, cfg, accounts
+from ..utils.mfa import MFAProvider
 
 
 class LoginInterface(ScrollArea):
@@ -18,7 +18,7 @@ class LoginInterface(ScrollArea):
     loginFail = pyqtSignal()
     cancel = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, mfa_provider: MFAProvider | None = None):
         super().__init__(parent)
 
         self.setObjectName("LoginInterface")
@@ -84,7 +84,9 @@ class LoginInterface(ScrollArea):
 
         # 控制逻辑用的变量
         self._captcha_required = False
-        self.__thread = LoginThread(LoginThread.LoginChoice.GET_SHOW_CAPTCHA, "", "", parent=self)
+        self.mfa_provider = mfa_provider
+        self.__thread = LoginThread(LoginThread.LoginChoice.GET_SHOW_CAPTCHA, "", "", mfa_provider=self.mfa_provider,
+                                    parent=self)
         # 在用户点击登录按钮时立刻保存变量，防止登录到一半结果输入框里东西被用户改了（
         self.__username = ""
         self.__password = ""
@@ -97,7 +99,6 @@ class LoginInterface(ScrollArea):
         self.loginSuccess.connect(self.on_login_success)
 
         self.__thread.needChooseAccount.connect(self.__on_choose_account)
-        self.__thread.needMFA.connect(self.__on_need_mfa)
         self.__thread.loginSuccess.connect(self.__on_login_success)
         self.__thread.loginFailed.connect(self.__on_login_fail)
         self.__thread.captchaCode.connect(self.__on_receive_captcha_code)
@@ -222,37 +223,6 @@ class LoginInterface(ScrollArea):
 
         self.__thread.choice = LoginThread.LoginChoice.FINISH_LOGIN
         self.__thread.start()
-
-    @pyqtSlot(str)
-    def __on_need_mfa(self, phone_number: str):
-        @pyqtSlot()
-        def __on_click_send_mfa():
-            self.__thread.choice = LoginThread.LoginChoice.MFA_SEND
-            self.__thread.start()
-
-        @pyqtSlot(bool, str)
-        def __on_report_send_mfa_result(success: bool, msg: str):
-            w.reportSendResult(success, msg)
-
-        w = VerifyCodeDialog(phone_number, self)
-        w.sendSignal.connect(__on_click_send_mfa)
-
-        try:
-            self.__thread.sendMFAResult.disconnect()
-        except TypeError:
-            pass
-        self.__thread.sendMFAResult.connect(__on_report_send_mfa_result)
-
-        if w.exec():
-            code = w.code
-            self.__thread.choice = LoginThread.LoginChoice.MFA_VERIFY
-            self.__thread._mfaCode = code
-            self.__thread.trustAgent = w.trust
-            self.__thread.start()
-        else:
-            # 需要重置一下 login 对象
-            self.resetLogin()
-            self._unlock(False)
 
     @pyqtSlot()
     def __on_login_success(self):

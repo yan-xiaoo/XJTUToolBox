@@ -6,6 +6,8 @@ from PyQt5.QtWidgets import QHBoxLayout
 from qfluentwidgets import MessageBoxBase, TitleLabel, CaptionLabel, LineEdit, PrimaryPushButton, \
     BodyLabel, InfoBar, CheckBox
 
+from app.utils.mfa import MFARequest
+
 
 class VerifyCodeDialog(MessageBoxBase):
     """用户选择发送手机验证码的对话框"""
@@ -13,15 +15,20 @@ class VerifyCodeDialog(MessageBoxBase):
     codeSignal = pyqtSignal(str, bool)
     # 点击发送按键的信号
     sendSignal = pyqtSignal()
+    # 用户取消验证的信号
+    cancelSignal = pyqtSignal()
 
-    def __init__(self, phone_number: str, parent=None):
+    def __init__(self, request: MFARequest, parent=None):
         super().__init__(parent)
 
-        self.title = TitleLabel(self.tr("两步验证"), self)
-        self.hint = CaptionLabel(self.tr("登录系统认为当前登录环境异常，需通过安全验证确定是本人操作后才可继续登录"), self)
+        self.title = TitleLabel(self.tr("需要安全验证"), self)
+        self.hint = CaptionLabel(
+            self.tr("学校统一认证要求完成两步验证后继续访问「{0}」。").format(request.site_name),
+            self,
+        )
 
         self.sendLayout = QHBoxLayout()
-        self.phoneNumberDisplay = BodyLabel(phone_number, self)
+        self.phoneNumberDisplay = BodyLabel(request.phone_number, self)
 
         self.sendButton = PrimaryPushButton(self.tr("发送验证码"), self)
         self.sendLayout.addWidget(self.phoneNumberDisplay, stretch=1)
@@ -118,3 +125,10 @@ class VerifyCodeDialog(MessageBoxBase):
             self.resendTimer.stop()
             self.sendButton.setText(self.tr("发送验证码"))
             self.sendButton.setEnabled(True)
+
+    def reject(self) -> None:
+        """
+        处理用户取消 MFA 验证。
+        """
+        self.cancelSignal.emit()
+        super().reject()

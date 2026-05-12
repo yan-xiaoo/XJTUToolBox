@@ -30,6 +30,7 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sub_interfaces import LoginInterface
+from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.EmptyRoomInterface import EmptyRoomInterface
 from app.LMSInterface import LMSInterface
@@ -37,7 +38,8 @@ from .sub_interfaces.NoticeInterface import NoticeInterface
 from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
 from .threads.UpdateThread import UpdateThread, UpdateStatus
-from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all
+from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all, QtMFAProvider, MFAAction, \
+    MFAActionType, MFARequest
 from .utils.config import TraySetting
 
 
@@ -77,6 +79,17 @@ class MainWindow(MSFluentWindow):
         super().__init__(parent)
 
         registerSession()
+        self.mfaProvider = QtMFAProvider(self)
+        # 线程要求 mfa 验证时，显示 MFA 对话框，并将用户的操作转交给 QtMFAProvider
+        self.mfaProvider.requestMFA.connect(self.show_mfa_dialog)
+        # 通过 QtMFAProvider 的 sendResult 信号收到验证码发送结果，在对话框中显示给用户  
+        self.mfaProvider.sendResult.connect(self.on_mfa_send_result)
+        # MFA 验证是要一个个来的，不能并行，因此这里都是单例
+        self._current_mfa_dialog: VerifyCodeDialog | None = None
+        self._current_mfa_request: MFARequest | None = None
+        # 为当前已知账户安装全局 MFA provider, 这样每个 session 都能找到它来处理 MFA 请求了
+        self._install_mfa_provider_for_accounts()
+        accounts.accountAdded.connect(self._install_mfa_provider_for_accounts)
 
         self.light_icon = QIcon("assets/icons/toolbox_light.png")
         self.dark_icon = QIcon("assets/icons/toolbox_dark.png")
@@ -139,7 +152,7 @@ class MainWindow(MSFluentWindow):
 
     def initInterface(self):
         self.home_interface = HomeInterface(self, self)
-        self.login_interface = LoginInterface(self)
+        self.login_interface = LoginInterface(self, mfa_provider=self.mfaProvider)
         self.attendance_interface = AttendanceInterface(self, self)
         self.account_interface = AccountInterface(accounts, self, self)
         self.setting_interface = SettingInterface(self, self)
@@ -170,6 +183,52 @@ class MainWindow(MSFluentWindow):
         self.tray_interface.notice_interface.connect(lambda: self.switchTo(self.notice_interface) or self.show())
         if cfg.traySetting.value == TraySetting.MINIMIZE:
             self.tray_interface.show()
+
+    def _install_mfa_provider_for_accounts(self) -> None:
+        """
+        为当前已知账户安装全局 MFA provider。
+        """
+        for account in accounts:
+            account.session_manager.set_mfa_provider(self.mfaProvider)
+
+    @pyqtSlot(object)
+    def show_mfa_dialog(self, request: object) -> None:
+        """
+        显示 MFA 对话框，并将用户动作转交给 QtMFAProvider。
+        """
+        if not isinstance(request, MFARequest):
+            return
+
+        dialog = VerifyCodeDialog(request, self)
+        self._current_mfa_dialog = dialog
+        self._current_mfa_request = request
+        # 用户点击发送验证码后，要求 mfaProvider 完成发送验证码的操作，并将结果通过 sendResult 信号反馈给对话框
+        dialog.sendSignal.connect(
+            lambda: self.mfaProvider.submit_action(MFAAction(MFAActionType.SEND_CODE))
+        )
+        # 用户在对话框中输入验证码并点击验证后，要求 mfaProvider 完成验证操作，并将用户输入的验证码和是否信任设备的选项一起提交
+        dialog.codeSignal.connect(
+            lambda code, trust: self.mfaProvider.submit_action(
+                MFAAction(MFAActionType.VERIFY_CODE, code=code, trust_agent=trust)
+            )
+        )
+        # 用户点击取消后，要求 mfaProvider 取消当前的 MFA 验证流程
+        dialog.cancelSignal.connect(
+            lambda: self.mfaProvider.submit_action(MFAAction(MFAActionType.CANCEL))
+        )
+        dialog.exec()
+        if self._current_mfa_dialog is dialog:
+            self._current_mfa_dialog = None
+            self._current_mfa_request = None
+
+    @pyqtSlot(object, bool, str)
+    def on_mfa_send_result(self, request: object, success: bool, message: str) -> None:
+        """
+        将验证码发送结果反馈给当前 MFA 对话框。
+        """
+        if request != self._current_mfa_request or self._current_mfa_dialog is None:
+            return
+        self._current_mfa_dialog.reportSendResult(success, message)
 
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))

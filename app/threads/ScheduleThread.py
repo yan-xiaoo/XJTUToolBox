@@ -7,6 +7,7 @@ from .ProcessWidget import ProcessThread
 from ..sessions.jwxt_session import JWXTSession
 from ..utils import logger, cfg
 from ..utils.account import accounts
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 
 
 class ScheduleThread(ProcessThread):
@@ -41,8 +42,12 @@ class ScheduleThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
-        self.session.login(accounts.current.username, accounts.current.password)
-        self.session.has_login = True
+        self.session.ensure_login(
+            accounts.current.username,
+            accounts.current.password,
+            account=accounts.current,
+            mfa_provider=accounts.current.session_manager.mfa_provider,
+        )
         if not self.can_run:
             return False
 
@@ -62,14 +67,10 @@ class ScheduleThread(ProcessThread):
             return
 
         try:
-            # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
-            if self.session.has_login:
-                self.util = Schedule(self.session)
-            else:
-                result = self.login()
-                if not result:
-                    self.canceled.emit()
-                    return
+            result = self.login()
+            if not result:
+                self.canceled.emit()
+                return
 
             self.progressChanged.emit(66)
             self.messageChanged.emit("正在获取课表信息...")
@@ -86,6 +87,14 @@ class ScheduleThread(ProcessThread):
 
             self.progressChanged.emit(100)
 
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:

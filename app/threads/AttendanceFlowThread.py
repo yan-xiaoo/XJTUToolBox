@@ -7,6 +7,7 @@ import requests
 from auth import ServerError
 from ..sessions.attendance_session import AttendanceSession
 from ..utils import Account, cfg, logger, accounts
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 from attendance.attendance import Attendance
 from .ProcessWidget import ProcessThread
 from PyQt5.QtCore import pyqtSignal
@@ -41,13 +42,25 @@ class AttendanceFlowThread(ProcessThread):
     def webvpn_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
-        self.session.webvpn_login(self.account.username, self.account.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+        self.session.webvpn_login(
+            self.account.username,
+            self.account.password,
+            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
+        )
         self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
 
     def normal_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
-        self.session.login(self.account.username, self.account.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+        self.session.ensure_login(
+            self.account.username,
+            self.account.password,
+            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
+        )
         self.messageChanged.emit(self.tr("直接登录考勤系统成功。"))
 
     def search(self, session):
@@ -104,7 +117,7 @@ class AttendanceFlowThread(ProcessThread):
                 self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
                 self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.SEARCH:
-                if not self.session.has_login:
+                if not self.session.has_login or not self.session.validate_login():
                     if self.last_login_choice is not None:
                         self.login_again()
                         result = self.search(self.session)
@@ -121,6 +134,14 @@ class AttendanceFlowThread(ProcessThread):
                     self.hasFinished.emit()
             else:
                 raise ValueError(f"{self.choice} is not a valid choice. ")
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:

@@ -1,11 +1,13 @@
 # 此文件实现了 2025 年 7 月 17 日后西安交通大学新统一认证系统的登录，即 login.xjtu.edu.cn。
-# 服务端部分处理尚不稳定，因此此文件中提供的 API 也不稳定，在后续版本中可能出现函数名更改/参数更改等情况。
-# 此文件会尽可能与登录页面前端实现保持一致，不会尝试利用设计漏洞等方式绕过验证码等安全措施。
+# 此文件会尽可能与登录页面前端实现保持一致，不会尝试利用设计漏洞等方式绕过验证码、两步验证等安全措施。
+from __future__ import annotations
+
 import base64
 import enum
 import json
 import re
 
+import requests
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from lxml import html
@@ -16,14 +18,50 @@ from .util import get_session, ServerError, generate_fp_visitor_id, getVPNUrl
 
 
 # 使用 lxml 解析 HTML 并提取表单中的 execution 值
-def extract_execution_value(html_content):
+def extract_execution_value(html_content: str) -> Optional[str]:
     """从 HTML 内容中提取 name=execution 的 input 元素的 value"""
     tree = html.fromstring(html_content)
     execution_input = tree.xpath('//input[@name="execution"]/@value')
     return execution_input[0] if execution_input else None
 
 
-def extract_account_choices(html_content):
+def extract_input_value(html_content: str, name: str) -> Optional[str]:
+    """
+    从 HTML 内容中提取指定 input 元素的 value。
+    :param html_content: HTML 文本
+    :param name: input 元素的 name 属性
+    :return: input 元素的 value，未找到时返回 None
+    """
+    tree = html.fromstring(html_content)
+    input_value = tree.xpath(f'//input[@name="{name}"]/@value')
+    return input_value[0] if input_value else None
+
+
+def is_safety_verify_page(html_content: str) -> bool:
+    """
+    判断 HTML 内容是否为统一认证返回的 Safety Verify 二次认证页面。
+    :param html_content: HTML 文本
+    :return: 如果页面符合 Safety Verify 的结构特征则返回 True
+    """
+    try:
+        tree = html.fromstring(html_content)
+    except (ValueError, html.ParserError):
+        return False
+
+    title = tree.xpath('string(//title)')
+    has_safety_title = "Safety Verify" in title
+    has_verify_form = bool(tree.xpath('//*[@id="fm1"]//input[@name="secState"]/@value'))
+    has_execution = bool(tree.xpath('//*[@id="fm1"]//input[@name="execution"]/@value'))
+    has_submit_event = bool(tree.xpath('//*[@id="fm1"]//input[@name="_eventId"]/@value'))
+    has_sec_init_api = "/cas/sec/initByType" in html_content or "\\/cas\\/sec\\/initByType" in html_content
+    has_safety_text = "选择安全认证" in html_content or "二次认证" in html_content
+
+    return has_verify_form and has_execution and has_submit_event and (
+        has_safety_title or has_sec_init_api or has_safety_text
+    )
+
+
+def extract_account_choices(html_content: str) -> Optional[list[dict[str, str]]]:
     """
     从账户选择页面中提取账户选项信息
     Args:
@@ -59,7 +97,7 @@ def extract_account_choices(html_content):
     return account_choices if account_choices else None
 
 
-def extract_alert_message(html_content):
+def extract_alert_message(html_content: str) -> Optional[dict[str, str | bool]]:
     """
     提取 el-alert 组件的错误信息
     Args:
@@ -138,13 +176,26 @@ class NewLogin:
         UNDERGRADUATE = 0
         POSTGRADUATE = 1
 
+    class MFAFlow(enum.Enum):
+        """
+        MFA 验证流程类型。
+        """
+        MFA_DETECT = "mfa"
+        SAFETY_VERIFY = "sec"
+
     class MFAContext:
-        def __init__(self, new_login_instance, state, required=True):
+        def __init__(
+                self,
+                new_login_instance: NewLogin,
+                state: str,
+                required: bool = True,
+                flow: Optional[NewLogin.MFAFlow] = None):
             self._new_login = new_login_instance
             self.state = state
-            self.gid = None
+            self.gid: Optional[str] = None
             self.required = required
-            self._phone_number = None
+            self.flow = flow if flow is not None else new_login_instance.MFAFlow.MFA_DETECT
+            self._phone_number: Optional[str] = None
 
         def get_phone_number(self) -> str:
             """
@@ -154,7 +205,7 @@ class NewLogin:
             if self._phone_number is not None:
                 return self._phone_number
 
-            data = self._new_login._get("https://login.xjtu.edu.cn/cas/mfa/initByType/securephone",
+            data = self._new_login._get(f"https://login.xjtu.edu.cn/cas/{self.flow.value}/initByType/securephone",
                                         params={"state": self.state})
             data.raise_for_status()
             json_result = data.json()
@@ -179,7 +230,7 @@ class NewLogin:
             else:
                 raise ServerError(json_result["code"], json_result["message"])
 
-        def verify_phone_code(self, code: str):
+        def verify_phone_code(self, code: str) -> None:
             """
             在登录系统要求两步验证且发送了登录验证码后，向系统核对验证码。
             :param code: 收到的验证码
@@ -193,6 +244,11 @@ class NewLogin:
             json_result = data.json()
             if json_result["code"] != 0:
                 raise ServerError(json_result["code"], json_result["message"])
+            result_data = json_result.get("data")
+            if isinstance(result_data, dict):
+                status = result_data.get("status")
+                if status is not None and status not in (2, "2"):
+                    raise ServerError(500, json_result.get("message") or "验证码验证失败。")
 
     UNDERGRADUATE = AccountType.UNDERGRADUATE
     POSTGRADUATE = AccountType.POSTGRADUATE
@@ -216,6 +272,9 @@ class NewLogin:
         self.post_url = response.url
         # 获得 execution 字段
         self.execution_input = extract_execution_value(response.text)
+        self._already_authenticated_response: requests.Response | None = None
+        if self.execution_input is None and "/cas/login" not in response.url:
+            self._already_authenticated_response = response
         # 获得一个标识符
         self.fp_visitor_id = visitor_id if visitor_id is not None else generate_fp_visitor_id()
         # 是否进行 mfa 验证
@@ -228,6 +287,8 @@ class NewLogin:
         self.has_login = False
         # 保存 checkForBothAccounts 方法可能获得的响应
         self._choose_account_response = None
+        # 保存 Safety Verify 二次认证页面响应
+        self._safety_verify_response: Optional[requests.Response] = None
         # 两步验证上下文
         self.mfa_context: Optional[NewLogin.MFAContext] = None
         # 登录凭据
@@ -287,9 +348,20 @@ class NewLogin:
                  - (LoginState.REQUIRE_ACCOUNT_CHOICE, choices): 需要选择账户，附带账户选项列表。
         :raises RuntimeError: 如果已经登录过一次，则抛出此异常。请重新创建 NewLogin 对象以登录其他账号。
         """
+        if self._already_authenticated_response is not None:
+            authenticated_response = self._already_authenticated_response
+            self._already_authenticated_response = None
+            self.has_login = True
+            self.postLogin(authenticated_response)
+            return LoginState.SUCCESS, self.session
+
         # 如果需要选择账户，则执行账户选择逻辑
         if self._choose_account_response:
             return self._finish_account_choice(account_type)
+
+        # 如果前一次登录 POST 返回了 Safety Verify 页面，则在 MFA 认证后提交该页面的隐藏表单。
+        if self._safety_verify_response is not None:
+            return self._finish_safety_verify()
 
         if self.has_login:
             raise RuntimeError("已经登录，不能重复登录。请重新创建 NewLogin 对象以登录其他账号。")
@@ -322,7 +394,12 @@ class NewLogin:
 
             state = data["data"]["state"]
             need = data["data"]["need"]
-            self.mfa_context = self.MFAContext(self, state, required=bool(need))
+            self.mfa_context = self.MFAContext(
+                self,
+                state,
+                required=bool(need),
+                flow=self.MFAFlow.MFA_DETECT,
+            )
 
             if need:
                 return LoginState.REQUIRE_MFA, self.mfa_context
@@ -348,6 +425,15 @@ class NewLogin:
                                           "geolocation": "",
                                           "trustAgent": trust_agent}, allow_redirects=True)
 
+        return self._process_login_response(login_response)
+
+    def _process_login_response(self, login_response: requests.Response) -> Tuple[LoginState, Union[
+        MFAContext, object, None]]:
+        """
+        处理登录流程中的 POST 响应，并将其转换为状态机结果。
+        :param login_response: 登录或后续认证提交返回的响应
+        :return: 登录状态和对应的附带信息
+        """
         if login_response.status_code == 401:
             self.fail_count += 1
             return LoginState.FAIL, "登录失败，用户名或密码错误。"
@@ -357,6 +443,21 @@ class NewLogin:
         if message:
             self.fail_count += 1
             return LoginState.FAIL, f"登录失败: {message['title']}"
+
+        if is_safety_verify_page(login_response.text):
+            sec_state = extract_input_value(login_response.text, "secState")
+            if sec_state is None:
+                raise ServerError(500, "服务器返回了二次认证页面，但页面中没有 secState 字段。")
+            self.fail_count = 0
+            self.has_login = False
+            self._safety_verify_response = login_response
+            self.mfa_context = self.MFAContext(
+                self,
+                sec_state,
+                required=True,
+                flow=self.MFAFlow.SAFETY_VERIFY,
+            )
+            return LoginState.REQUIRE_MFA, self.mfa_context
 
         self.fail_count = 0
         self.has_login = True
@@ -370,6 +471,39 @@ class NewLogin:
 
         self.postLogin(login_response)
         return LoginState.SUCCESS, self.session
+
+    def _finish_safety_verify(self) -> Tuple[LoginState, Union[MFAContext, object, None]]:
+        """
+        提交 Safety Verify 页面中的隐藏表单，以继续二次认证后的登录流程。
+        :return: 登录状态和对应的附带信息
+        """
+        if self._safety_verify_response is None:
+            raise RuntimeError("当前不需要完成 Safety Verify 二次认证。")
+
+        safety_response = self._safety_verify_response
+        sec_state = extract_input_value(safety_response.text, "secState")
+        execution = extract_execution_value(safety_response.text)
+        event_id = extract_input_value(safety_response.text, "_eventId") or "submit"
+        submit = extract_input_value(safety_response.text, "submit") or "Login1"
+
+        if sec_state is None or execution is None:
+            raise ServerError(500, "服务器返回的二次认证页面缺少必要的隐藏表单字段。")
+
+        verify_response = self._post(
+            safety_response.url,
+            data={
+                "secState": sec_state,
+                "execution": execution,
+                "_eventId": event_id,
+                "geolocation": "",
+                "fpVisitorId": self.fp_visitor_id,
+                "submit": submit,
+            },
+            allow_redirects=True,
+        )
+
+        self._safety_verify_response = None
+        return self._process_login_response(verify_response)
 
     def _finish_account_choice(self, account_type: AccountType, trust_agent=True):
         if not self._choose_account_response:

@@ -11,6 +11,7 @@ from auth import ServerError
 from .ProcessWidget import ProcessThread
 from ..sessions.attendance_session import AttendanceSession
 from ..utils import accounts, logger, cfg
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 
 
 class AttendanceFlowLogin(Enum):
@@ -47,7 +48,13 @@ class ScheduleAttendanceThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
-        self.session.webvpn_login(accounts.current.username, accounts.current.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+        self.session.webvpn_login(
+            accounts.current.username,
+            accounts.current.password,
+            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
+            account=accounts.current,
+            mfa_provider=accounts.current.session_manager.mfa_provider,
+        )
         self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
 
     def normal_login(self):
@@ -56,7 +63,13 @@ class ScheduleAttendanceThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
-        self.session.login(accounts.current.username, accounts.current.password, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+        self.session.ensure_login(
+            accounts.current.username,
+            accounts.current.password,
+            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
+            account=accounts.current,
+            mfa_provider=accounts.current.session_manager.mfa_provider,
+        )
         self.messageChanged.emit(self.tr("直接登录考勤系统成功。"))
 
     def run(self):
@@ -80,8 +93,8 @@ class ScheduleAttendanceThread(ProcessThread):
             return
 
         try:
-            # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
-            if self.session.has_login:
+            # 如果当前账户已经登录并且登录态仍有效，重建代理对象，防止 util 和 session 不对应。
+            if self.session.has_login and self.session.validate_login():
                 # 如果当前 session 已经登录，必须沿用当前登录方式。
                 self.login_method = AttendanceFlowLogin.NORMAL_LOGIN if self.session.login_method == self.session.LoginMethod.NORMAL else AttendanceFlowLogin.WEBVPN_LOGIN
                 self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
@@ -142,6 +155,14 @@ class ScheduleAttendanceThread(ProcessThread):
             self.records = records
             self.progressChanged.emit(100)
 
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:

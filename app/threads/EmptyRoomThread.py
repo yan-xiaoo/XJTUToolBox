@@ -9,6 +9,7 @@ from ..sessions.jwxt_session import JWXTSession
 from ..threads.ProcessWidget import ProcessThread
 from ..utils import accounts, logger, cfg
 from ..utils.cache import CacheManager
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 
 
 class EmptyRoomThread(ProcessThread):
@@ -39,7 +40,12 @@ class EmptyRoomThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
-        self.session.login(accounts.current.username, accounts.current.password)
+        self.session.ensure_login(
+            accounts.current.username,
+            accounts.current.password,
+            account=accounts.current,
+            mfa_provider=accounts.current.session_manager.mfa_provider,
+        )
         if not self.can_run:
             return False
         # 进入课表页面
@@ -59,14 +65,10 @@ class EmptyRoomThread(ProcessThread):
             return
 
         try:
-            # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
-            if self.session.has_login:
-                self.util = EmptyRoom(self.session)
-            else:
-                result = self.login()
-                if not result:
-                    self.canceled.emit()
-                    return
+            result = self.login()
+            if not result:
+                self.canceled.emit()
+                return
 
             cache_manager = CacheManager()
 
@@ -156,6 +158,14 @@ class EmptyRoomThread(ProcessThread):
                         if single["name"] in result_diction:
                             result_diction[single["name"]]["status"][period - 1] = 0
 
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:
