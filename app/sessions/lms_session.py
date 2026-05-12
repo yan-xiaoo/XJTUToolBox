@@ -36,6 +36,19 @@ class LMSSession(CommonLoginSession):
 
     _re_login = _login
 
+    def validate_login(self) -> bool:
+        """通过思源学堂用户主页验证站点登录态。"""
+        response = self.get(
+            "https://lms.xjtu.edu.cn/user/index",
+            timeout=10,
+            _skip_auth_check=True,
+        )
+        if not response.ok or self.is_auth_failure_response(response):
+            return False
+
+        page = response.text
+        return "globalData" in page and "user" in page
+
 
 # Backward compatibility for previous class name.
 LMSLoginSession = LMSSession

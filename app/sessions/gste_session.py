@@ -6,7 +6,7 @@ from app.sessions.common_session import CommonLoginSession
 from app.sessions.session_backend import AccessMode, SessionBackend
 from app.utils import cfg
 from app.utils.interactive_login import login_with_optional_mfa
-from auth import WEBVPN_LOGIN_URL, GSTE_LOGIN_URL
+from auth import WEBVPN_LOGIN_URL, GSTE_LOGIN_URL, getVPNUrl
 from auth.new_login import NewLogin, NewWebVPNLogin
 
 
@@ -60,6 +60,8 @@ class GSTESession(CommonLoginSession):
             account, mfa_provider = self.get_login_context(kwargs)
 
             with self.webvpn_backend.login_lock:
+                if self.webvpn_backend.has_timeout():
+                    self.webvpn_backend.has_login = False
                 if not self.webvpn_backend.has_login:
                     login_util = NewLogin(WEBVPN_LOGIN_URL, self, visitor_id=str(cfg.loginId.value))
                     login_with_optional_mfa(
@@ -92,3 +94,16 @@ class GSTESession(CommonLoginSession):
             self.has_login = True
 
     _re_login = _login
+
+    def validate_login(self) -> bool:
+        """通过研究生评教问卷列表页验证站点登录态。"""
+        url = "http://gste.xjtu.edu.cn/app/sshd4Stu/list.do"
+        if self.login_method == self.LoginMethod.WEBVPN:
+            url = getVPNUrl(url)
+
+        response = self.get(url, timeout=10, _skip_auth_check=True)
+        if not response.ok or self.is_auth_failure_response(response):
+            return False
+
+        page = response.text
+        return "sshd4Stu" in page or "questionnaire" in page or "评教" in page or response.url.startswith(url)

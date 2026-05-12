@@ -54,7 +54,7 @@ class AttendanceFlowThread(ProcessThread):
     def normal_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
-        self.session.login(
+        self.session.ensure_login(
             self.account.username,
             self.account.password,
             is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
@@ -117,7 +117,7 @@ class AttendanceFlowThread(ProcessThread):
                 self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
                 self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.SEARCH:
-                if not self.session.has_login:
+                if not self.session.has_login or not self.session.validate_login():
                     if self.last_login_choice is not None:
                         self.login_again()
                         result = self.search(self.session)

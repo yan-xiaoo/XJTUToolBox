@@ -86,7 +86,7 @@ class GraduateJudgeThread(ProcessThread):
     def normal_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录评教系统..."))
-        self.session.login(
+        self.session.ensure_login(
             self.account.username,
             self.account.password,
             account=self.account,
@@ -104,8 +104,8 @@ class GraduateJudgeThread(ProcessThread):
 
         self.progressChanged.emit(0)
         try:
-            # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
-            if self.session.has_login:
+            # 如果当前账户已经登录并且登录态仍有效，重建代理对象，防止 util 和 session 不对应。
+            if self.session.has_login and self.session.validate_login():
                 # 如果当前 session 已经登录，必须沿用当前登录方式。
                 util = GraduateAutoJudge(self.session, use_webvpn=self.session.login_method == self.session.LoginMethod.WEBVPN)
             else:
@@ -160,14 +160,13 @@ class GraduateJudgeThread(ProcessThread):
                 # 开填！
                 # 首先，填写基本信息
                 self.progressChanged.emit(30)
-                if not self.gmis_session.has_login:
-                    self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
-                    self.gmis_session.login(
-                        self.account.username,
-                        self.account.password,
-                        account=self.account,
-                        mfa_provider=self.account.session_manager.mfa_provider,
-                    )
+                self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
+                self.gmis_session.ensure_login(
+                    self.account.username,
+                    self.account.password,
+                    account=self.account,
+                    mfa_provider=self.account.session_manager.mfa_provider,
+                )
 
                 if not self.can_run:
                     self.canceled.emit()
@@ -208,14 +207,13 @@ class GraduateJudgeThread(ProcessThread):
                 # 评教全部课程
                 # 先获得公用内容：登录 GMIS 和获得课程类型信息
                 self.progressChanged.emit(5)
-                if not self.gmis_session.has_login:
-                    self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
-                    self.gmis_session.login(
-                        self.account.username,
-                        self.account.password,
-                        account=self.account,
-                        mfa_provider=self.account.session_manager.mfa_provider,
-                    )
+                self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
+                self.gmis_session.ensure_login(
+                    self.account.username,
+                    self.account.password,
+                    account=self.account,
+                    mfa_provider=self.account.session_manager.mfa_provider,
+                )
                 gmis_util = GraduateLessonDetail(self.gmis_session)
 
                 if not self.can_run:

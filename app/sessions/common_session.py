@@ -4,16 +4,29 @@ import threading
 import time
 from abc import ABCMeta, abstractmethod
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import requests
 import requests.structures
 
+from auth import ServerError, is_safety_verify_page
 from .session_backend import AccessMode, SessionBackend
 
 if TYPE_CHECKING:
     from app.utils.account import Account
     from app.utils.mfa import MFAProvider
+
+
+@dataclass(frozen=True)
+class LoginContext:
+    """
+    记录最近一次登录使用的账号上下文，用于登录态失效后的原地恢复。
+    """
+    username: str
+    password: str
+    account_uuid: str | None
+    kwargs: Mapping[str, object]
 
 
 class CommonLoginSession(metaclass=ABCMeta):
@@ -48,6 +61,8 @@ class CommonLoginSession(metaclass=ABCMeta):
         # 是否已经登录
         self._has_login = False
         self.login_method = None
+        self._login_context: LoginContext | None = None
+        self._login_depth = 0
         # 自身防止同时登录的锁
         self.login_lock = threading.RLock()
 
@@ -71,8 +86,10 @@ class CommonLoginSession(metaclass=ABCMeta):
         因此需要额外的标识位。
         如果当前已经超时，那么查询 has_login 时，has_login 会变为 False。
         """
-        if self.has_timeout():
+        if self.has_timeout() or self.backend.has_timeout():
             self._has_login = False
+            if self.backend.has_timeout():
+                self.backend.has_login = False
         return self._has_login
 
     @has_login.setter
@@ -89,8 +106,28 @@ class CommonLoginSession(metaclass=ABCMeta):
         登录指定的网站。
         """
         with self.login_lock:
+            self._remember_login_context(username, password, kwargs)
             self.clear_site_state()
-            self._login(username, password, **kwargs)
+            self._run_login(username, password, **kwargs)
+
+    def ensure_login(self, username: str, password: str, force: bool = False, **kwargs: object) -> bool:
+        """
+        确保当前业务站点已经具有可用登录态。
+
+        :param username: 登录用户名
+        :param password: 登录密码
+        :param force: 是否跳过现有状态并强制重新登录
+        :param kwargs: 传递给具体登录实现的上下文参数
+        :return: 如果本次执行了登录流程则返回 True，否则返回 False
+        """
+        with self.login_lock:
+            self._remember_login_context(username, password, kwargs)
+            if not force and self.has_login and self.validate_login():
+                return False
+
+            self.invalidate_login()
+            self._run_login(username, password, **kwargs)
+            return True
 
     @abstractmethod
     def _login(self, username: str, password: str, **kwargs: object) -> None:
@@ -103,8 +140,9 @@ class CommonLoginSession(metaclass=ABCMeta):
         重新登录指定的网站。
         """
         with self.login_lock:
+            self._remember_login_context(username, password, kwargs)
             self.clear_site_state()
-            self._re_login(username, password, **kwargs)
+            self._run_re_login(username, password, **kwargs)
 
     @abstractmethod
     def _re_login(self, username: str, password: str, **kwargs: object) -> None:
@@ -120,6 +158,7 @@ class CommonLoginSession(metaclass=ABCMeta):
         self.backend.reset_timeout()
 
         request_headers = kwargs.pop("headers", None)
+        skip_auth_check = kwargs.pop("_skip_auth_check", False) is True
         headers: dict[str, str] = {}
         # 使用公用 headers
         headers.update(self.backend.session.headers)
@@ -131,7 +170,12 @@ class CommonLoginSession(metaclass=ABCMeta):
             for key, value in request_headers.items():
                 headers[str(key)] = str(value)
 
-        return self.backend.session.request(method, url, headers=headers, **kwargs)
+        response = self.backend.session.request(method, url, headers=headers, **kwargs)
+        if skip_auth_check or self._login_depth > 0 or not self.is_auth_failure_response(response):
+            return response
+
+        self.invalidate_login()
+        return self._retry_request_after_auth_failure(method, url, request_headers, kwargs)
 
     def get(self, url: str, **kwargs: object) -> requests.Response:
         """发起 GET 请求。"""
@@ -151,6 +195,17 @@ class CommonLoginSession(metaclass=ABCMeta):
         self.headers.clear()
         self.login_method = None
 
+    def invalidate_login(self) -> None:
+        """标记当前业务站点登录态已经失效，并清理站点专属状态。"""
+        self.clear_site_state()
+
+    def validate_login(self) -> bool:
+        """
+        验证当前业务站点登录态是否仍然可信。
+        子类可以重写该方法，通过访问学校系统需要权限的接口实测是否要重新登录。
+        """
+        return self.has_login
+
     def clear_backend_cookies(self) -> None:
         """清理当前访问方式共享后端的全部 cookie。"""
         self.backend.clear_cookies()
@@ -169,6 +224,116 @@ class CommonLoginSession(metaclass=ABCMeta):
         if provider is None and account is not None:
             provider = account.session_manager.mfa_provider
         return account, provider
+
+    def is_auth_failure_response(self, response: requests.Response) -> bool:
+        """
+        判断一个响应是否表示当前业务站点登录态已经失效。
+        判断标准：
+        1. 响应的 Content-Type 不是 HTML 或纯文本，且响应内容不以 "<" 开头（排除接口返回的 JSON 等非 HTML 内容）；
+        2. 响应内容是安全验证页或统一身份认证登录页。
+        子类可以考虑使用该方法辅助重写 validate_login 方法。
+        """
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "html" not in content_type and "text" not in content_type:
+            stripped_text = response.text.lstrip()
+            if not stripped_text.startswith("<"):
+                return False
+
+        page = response.text
+        return is_safety_verify_page(page) or self._is_unified_login_page(page)
+
+    def _remember_login_context(self, username: str, password: str, kwargs: Mapping[str, object]) -> None:
+        """保存最近一次登录上下文，供响应兜底恢复使用。"""
+        self._login_context = LoginContext(
+            username=username,
+            password=password,
+            account_uuid=self._extract_account_uuid(kwargs),
+            kwargs=dict(kwargs),
+        )
+
+    def _extract_account_uuid(self, kwargs: Mapping[str, object]) -> str | None:
+        """从登录参数中提取账号 UUID。"""
+        from app.utils.account import Account
+
+        account_value = kwargs.get("account")
+        if isinstance(account_value, Account):
+            return account_value.uuid
+        return None
+
+    def _current_account_uuid(self) -> str | None:
+        """返回应用当前选中账号的 UUID。"""
+        from app.utils.account import accounts
+
+        if accounts.current is None:
+            return None
+        return accounts.current.uuid
+
+    def _ensure_login_context_matches_current_account(self, context: LoginContext) -> None:
+        """确认自动重登上下文仍属于当前选中账号。"""
+        current_account_uuid = self._current_account_uuid()
+        if context.account_uuid is None or current_account_uuid is None:
+            return
+        if context.account_uuid == current_account_uuid:
+            return
+
+        self.invalidate_login()
+        raise ServerError(102, "当前业务系统登录态属于此前选中的账号，请重新登录当前账号。")
+
+    def _is_unified_login_page(self, html_content: str) -> bool:
+        """判断响应是否为统一身份认证登录页。"""
+        has_login_form = 'id="fm1"' in html_content and 'name="execution"' in html_content
+        has_login_marker = (
+            "login.xjtu.edu.cn" in html_content
+            or "cas/login" in html_content
+            or "统一身份认证" in html_content
+        )
+        return has_login_form and has_login_marker
+
+    def _run_login(self, username: str, password: str, **kwargs: object) -> None:
+        """在登录保护区内执行具体登录实现。"""
+        self._login_depth += 1
+        try:
+            self._login(username, password, **kwargs)
+        finally:
+            self._login_depth -= 1
+
+    def _run_re_login(self, username: str, password: str, **kwargs: object) -> None:
+        """在登录保护区内执行具体重新登录实现。"""
+        self._login_depth += 1
+        try:
+            self._re_login(username, password, **kwargs)
+        finally:
+            self._login_depth -= 1
+
+    def _retry_request_after_auth_failure(
+            self,
+            method: str,
+            url: str,
+            request_headers: object,
+            request_kwargs: dict[str, object]) -> requests.Response:
+        """
+        在业务请求遇到二次认证页后，尝试重新登录并重放本次请求。
+        """
+        if self._login_context is None:
+            raise ServerError(102, "当前业务系统登录态已失效，需要重新登录。")
+
+        context = self._login_context
+        # 确保缓存的账号和当前登录的账户一致，以免误用之前账号的登录态
+        # 这一般不会有问题，因为 SessionManager 是每个账户都有一个的，因此每个账户都各自持有每种 session
+        # 理论上不会出现登录态被误用到其他账号的情况，但这里多加一个检查以防万一
+        self._ensure_login_context_matches_current_account(context)
+        # 尝试重新使用 context 静默登录
+        self.ensure_login(context.username, context.password, force=True, **dict(context.kwargs))
+
+        retry_kwargs = dict(request_kwargs)
+        if request_headers is not None:
+            retry_kwargs["headers"] = request_headers
+        retry_kwargs["_skip_auth_check"] = True
+        retry_response = self.request(method, url, **retry_kwargs)
+        if self.is_auth_failure_response(retry_response):
+            self.invalidate_login()
+            raise ServerError(102, "当前业务系统登录态已失效，需要重新进行安全验证。")
+        return retry_response
 
     def close(self) -> None:
         """关闭当前适配器使用的共享后端。"""

@@ -63,7 +63,7 @@ class ScheduleAttendanceThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
-        self.session.login(
+        self.session.ensure_login(
             accounts.current.username,
             accounts.current.password,
             is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
@@ -93,8 +93,8 @@ class ScheduleAttendanceThread(ProcessThread):
             return
 
         try:
-            # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
-            if self.session.has_login:
+            # 如果当前账户已经登录并且登录态仍有效，重建代理对象，防止 util 和 session 不对应。
+            if self.session.has_login and self.session.validate_login():
                 # 如果当前 session 已经登录，必须沿用当前登录方式。
                 self.login_method = AttendanceFlowLogin.NORMAL_LOGIN if self.session.login_method == self.session.LoginMethod.NORMAL else AttendanceFlowLogin.WEBVPN_LOGIN
                 self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)

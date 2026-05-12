@@ -32,3 +32,16 @@ class GMISSession(CommonLoginSession):
         self.has_login = True
 
     _re_login = _login
+
+    def validate_login(self) -> bool:
+        """通过研究生课表页面验证站点登录态。"""
+        response = self.get(
+            "https://gmis.xjtu.edu.cn/pyxx/pygl/xskbcx",
+            timeout=10,
+            _skip_auth_check=True,
+        )
+        if not response.ok or self.is_auth_failure_response(response):
+            return False
+
+        page = response.text
+        return "drpxq" in page or "xskbcx" in page or "课表" in page

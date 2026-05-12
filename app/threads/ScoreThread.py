@@ -43,13 +43,12 @@ class ScoreThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
-        self.session.login(
+        self.session.ensure_login(
             accounts.current.username,
             accounts.current.password,
             account=accounts.current,
             mfa_provider=accounts.current.session_manager.mfa_provider,
         )
-        self.session.has_login = True
         if not self.can_run:
             return False
 
@@ -75,14 +74,10 @@ class ScoreThread(ProcessThread):
         self.progressChanged.emit(0)
 
         try:
-            # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
-            if self.session.has_login:
-                self.util = Score(self.session)
-            else:
-                result = self.login()
-                if not result:
-                    self.canceled.emit()
-                    return
+            result = self.login()
+            if not result:
+                self.canceled.emit()
+                return
             self.progressChanged.emit(66)
             self.messageChanged.emit("正在获取成绩...")
             if not self.can_run:

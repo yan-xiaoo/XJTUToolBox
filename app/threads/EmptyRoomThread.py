@@ -40,7 +40,7 @@ class EmptyRoomThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
-        self.session.login(
+        self.session.ensure_login(
             accounts.current.username,
             accounts.current.password,
             account=accounts.current,
@@ -65,14 +65,10 @@ class EmptyRoomThread(ProcessThread):
             return
 
         try:
-            # 如果当前账户已经登录，重建代理对象，防止出现 util 和 session 不对应的情况。
-            if self.session.has_login:
-                self.util = EmptyRoom(self.session)
-            else:
-                result = self.login()
-                if not result:
-                    self.canceled.emit()
-                    return
+            result = self.login()
+            if not result:
+                self.canceled.emit()
+                return
 
             cache_manager = CacheManager()
 

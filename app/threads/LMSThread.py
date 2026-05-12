@@ -40,13 +40,12 @@ class LMSThread(ProcessThread):
     def login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录思源学堂..."))
-        self.session.login(
+        self.session.ensure_login(
             accounts.current.username,
             accounts.current.password,
             account=accounts.current,
             mfa_provider=accounts.current.session_manager.mfa_provider,
         )
-        self.session.has_login = True
         if not self.can_run:
             return False
 
@@ -55,9 +54,6 @@ class LMSThread(ProcessThread):
         return True
 
     def _ensure_util(self) -> bool:
-        if self.session.has_login:
-            self.util = LMSUtil(self.session)
-            return True
         return self.login()
 
     def run(self):

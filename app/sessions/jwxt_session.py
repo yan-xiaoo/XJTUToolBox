@@ -31,3 +31,23 @@ class JWXTSession(CommonLoginSession):
         self.has_login = True
 
     _re_login = _login
+
+    def validate_login(self) -> bool:
+        """通过教务系统当前用户接口验证站点登录态。"""
+        response = self.get(
+            "https://jwxt.xjtu.edu.cn/jwapp/sys/homeapp/api/home/currentUser.do",
+            headers={
+                "Referer": "https://jwxt.xjtu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp"
+            },
+            timeout=10,
+            _skip_auth_check=True,
+        )
+        if not response.ok or self.is_auth_failure_response(response):
+            return False
+
+        try:
+            result = response.json()
+        except ValueError:
+            return False
+
+        return result.get("code") == "0" and isinstance(result.get("datas"), dict)

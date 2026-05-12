@@ -7,7 +7,7 @@ from app.sessions.session_backend import AccessMode, SessionBackend
 from app.utils import cfg
 from app.utils.interactive_login import login_with_optional_mfa
 from attendance.attendance import AttendanceNewLogin, AttendanceNewWebVPNLogin
-from auth import WEBVPN_LOGIN_URL
+from auth import WEBVPN_LOGIN_URL, getVPNUrl
 from auth.new_login import NewLogin
 
 
@@ -63,6 +63,8 @@ class AttendanceSession(CommonLoginSession):
             account_type = NewLogin.POSTGRADUATE if is_postgraduate else NewLogin.UNDERGRADUATE
 
             with self.webvpn_backend.login_lock:
+                if self.webvpn_backend.has_timeout():
+                    self.webvpn_backend.has_login = False
                 if not self.webvpn_backend.has_login:
                     login_util = NewLogin(WEBVPN_LOGIN_URL, self, visitor_id=str(cfg.loginId.value))
                     login_with_optional_mfa(
@@ -96,3 +98,28 @@ class AttendanceSession(CommonLoginSession):
             self.has_login = True
 
     _re_login = _login
+
+    def validate_login(self) -> bool:
+        """通过考勤系统学生信息接口验证站点登录态。"""
+        if "Synjones-Auth" not in self.headers:
+            return False
+
+        is_postgraduate = False
+        if self._login_context is not None:
+            is_postgraduate = self._login_context.kwargs.get("is_postgraduate") is True
+
+        domain = "yjskq.xjtu.edu.cn" if is_postgraduate else "bkkq.xjtu.edu.cn"
+        url = f"https://{domain}/attendance-student/global/getStuInfo"
+        if self.login_method == self.LoginMethod.WEBVPN:
+            url = getVPNUrl(url)
+
+        response = self.post(url, timeout=10, _skip_auth_check=True)
+        if not response.ok or self.is_auth_failure_response(response):
+            return False
+
+        try:
+            result = response.json()
+        except ValueError:
+            return False
+
+        return result.get("success") is True

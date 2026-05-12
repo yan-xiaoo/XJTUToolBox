@@ -51,13 +51,12 @@ class JudgeThread(ProcessThread):
     def login(self) -> bool:
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
-        self.session.login(
+        self.session.ensure_login(
             self.account.username,
             self.account.password,
             account=self.account,
             mfa_provider=self.account.session_manager.mfa_provider,
         )
-        self.session.has_login = True
 
         # 进入评教区域
         self.messageChanged.emit(self.tr("正在进入评教系统..."))
@@ -208,18 +207,14 @@ class JudgeThread(ProcessThread):
             self.error.emit(self.tr("未登录"), self.tr("请您先添加一个账户"))
             self.canceled.emit()
             return
-        # 依据当前的 session 重建 judge 对象
-        if self.session.has_login:
-            self.judge_ = AutoJudge(self.session)
         self.progressChanged.emit(0)
         try:
-            if self.choice == JudgeChoice.GET_COURSES:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
+            result = self.login()
+            if not result:
+                self.canceled.emit()
+                return
 
+            if self.choice == JudgeChoice.GET_COURSES:
                 self.messageChanged.emit(self.tr("正在获取未完成问卷信息..."))
                 self.progressChanged.emit(66)
                 if not self.can_run:
@@ -233,11 +228,6 @@ class JudgeThread(ProcessThread):
                 self.questionnaires.emit(questionnaires, questionnaires_finished)
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.JUDGE:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
                 result = self.judge()
                 if not result:
                     self.canceled.emit()
@@ -245,11 +235,6 @@ class JudgeThread(ProcessThread):
                 self.submitSuccess.emit()
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.EDIT:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
                 result = self.edit()
                 if not result:
                     self.canceled.emit()
@@ -257,11 +242,6 @@ class JudgeThread(ProcessThread):
                 self.editSuccess.emit()
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.JUDGE_ALL:
-                if not self.session.has_login:
-                    result = self.login()
-                    if not result:
-                        self.canceled.emit()
-                        return
                 result = self.judge_all()
                 if not result:
                     self.canceled.emit()
