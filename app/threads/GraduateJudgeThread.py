@@ -10,6 +10,7 @@ from .ProcessWidget import ProcessThread
 from ..sessions.gmis_session import GMISSession
 from ..sessions.gste_session import GSTESession
 from ..utils import Account, logger, accounts
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 
 from auth import ServerError
 from enum import Enum
@@ -74,13 +75,23 @@ class GraduateJudgeThread(ProcessThread):
     def webvpn_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在通过 WebVPN 登录评教系统..."))
-        self.session.webvpn_login(self.account.username, self.account.password)
+        self.session.webvpn_login(
+            self.account.username,
+            self.account.password,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
+        )
         self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
 
     def normal_login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在直接登录评教系统..."))
-        self.session.login(self.account.username, self.account.password)
+        self.session.login(
+            self.account.username,
+            self.account.password,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
+        )
         self.messageChanged.emit(self.tr("直接登录评教系统成功。"))
 
     def run(self):
@@ -151,7 +162,12 @@ class GraduateJudgeThread(ProcessThread):
                 self.progressChanged.emit(30)
                 if not self.gmis_session.has_login:
                     self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
-                    self.gmis_session.login(self.account.username, self.account.password)
+                    self.gmis_session.login(
+                        self.account.username,
+                        self.account.password,
+                        account=self.account,
+                        mfa_provider=self.account.session_manager.mfa_provider,
+                    )
 
                 if not self.can_run:
                     self.canceled.emit()
@@ -194,7 +210,12 @@ class GraduateJudgeThread(ProcessThread):
                 self.progressChanged.emit(5)
                 if not self.gmis_session.has_login:
                     self.messageChanged.emit(self.tr("正在登录研究生管理信息系统..."))
-                    self.gmis_session.login(self.account.username, self.account.password)
+                    self.gmis_session.login(
+                        self.account.username,
+                        self.account.password,
+                        account=self.account,
+                        mfa_provider=self.account.session_manager.mfa_provider,
+                    )
                 gmis_util = GraduateLessonDetail(self.gmis_session)
 
                 if not self.can_run:
@@ -268,6 +289,14 @@ class GraduateJudgeThread(ProcessThread):
 
             else:
                 raise ValueError(self.tr("未知选项"))
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:

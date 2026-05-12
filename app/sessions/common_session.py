@@ -4,11 +4,16 @@ import threading
 import time
 from abc import ABCMeta, abstractmethod
 from collections.abc import Mapping
+from typing import TYPE_CHECKING, cast
 
 import requests
 import requests.structures
 
 from .session_backend import AccessMode, SessionBackend
+
+if TYPE_CHECKING:
+    from app.utils.account import Account
+    from app.utils.mfa import MFAProvider
 
 
 class CommonLoginSession(metaclass=ABCMeta):
@@ -19,6 +24,8 @@ class CommonLoginSession(metaclass=ABCMeta):
     """
     # 当前站点的标识符号。子类应当重写这个变量
     site_key = ""
+    # 当前站点展示给用户的名称。子类可以重写这个变量
+    site_name = ""
     # 站点默认选择的访问方式（是否通过 WebVPN 访问）
     default_access_mode = AccessMode.NORMAL
     # 当前站点是否支持 WebVPN。子类应当重写这个变量
@@ -148,6 +155,20 @@ class CommonLoginSession(metaclass=ABCMeta):
         """清理当前访问方式共享后端的全部 cookie。"""
         self.backend.clear_cookies()
         self.clear_site_state()
+
+    def get_login_context(self, kwargs: dict[str, object]) -> tuple[Account | None, MFAProvider | None]:
+        """
+        从登录参数中提取账号和 MFA provider 上下文。
+        """
+        from app.utils.account import Account
+
+        account_value = kwargs.get("account")
+        account = account_value if isinstance(account_value, Account) else None
+        provider_value = kwargs.get("mfa_provider")
+        provider = cast("MFAProvider | None", provider_value)
+        if provider is None and account is not None:
+            provider = account.session_manager.mfa_provider
+        return account, provider
 
     def close(self) -> None:
         """关闭当前适配器使用的共享后端。"""

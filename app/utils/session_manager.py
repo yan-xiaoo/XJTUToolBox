@@ -6,6 +6,7 @@ from app.sessions.session_backend import AccessMode, SessionBackend
 
 if TYPE_CHECKING:
     from app.sessions.common_session import CommonLoginSession
+    from app.utils.mfa import MFAProvider
 
 
 class SessionManager:
@@ -27,6 +28,7 @@ class SessionManager:
             AccessMode.NORMAL: SessionBackend(AccessMode.NORMAL),
             AccessMode.WEBVPN: SessionBackend(AccessMode.WEBVPN),
         }
+        self.mfa_provider: MFAProvider | None = None
 
     def register(self, class_: type[CommonLoginSession], name: str, allow_override: bool = True) -> None:
         """
@@ -102,6 +104,12 @@ class SessionManager:
     def get_backend(self, access_mode: AccessMode) -> SessionBackend:
         """获取指定访问方式对应的共享后端。"""
         return self.backends[access_mode]
+
+    def set_mfa_provider(self, provider: MFAProvider | None) -> None:
+        """
+        设置当前账号会话管理器使用的 MFA 交互提供者。
+        """
+        self.mfa_provider = provider
 
     def _create_session(self, class_: type[CommonLoginSession]) -> CommonLoginSession:
         """创建一个站点 Session 适配器实例。"""

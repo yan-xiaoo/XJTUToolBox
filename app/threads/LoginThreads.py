@@ -1,4 +1,5 @@
-import json.decoder
+from __future__ import annotations
+
 from enum import Enum
 
 from requests import HTTPError
@@ -8,6 +9,7 @@ from auth import ServerError
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from auth.new_login import NewLogin, LoginState
+from app.utils.mfa import MFACancelledError, MFAProvider, MFARequest, MFAUnavailableError
 from ywtb import YWTBLogin
 from ywtb.util import YWTBUtil
 
@@ -18,8 +20,6 @@ class LoginChoice(Enum):
     LOGIN = 2,
     GET_STUDENT_ID = 3
     FINISH_LOGIN = 4
-    MFA_SEND = 5
-    MFA_VERIFY = 6
 
 
 class LoginThread(QThread):
@@ -36,14 +36,16 @@ class LoginThread(QThread):
     loginSuccess = pyqtSignal()
     # 需要选择账户信号
     needChooseAccount = pyqtSignal()
-    # 需要 MFA 信号（数据：手机号）
-    needMFA = pyqtSignal(str)
-    # 发送验证码结果
-    sendMFAResult = pyqtSignal(bool, str)
-
     LoginChoice = LoginChoice
 
-    def __init__(self, choice: LoginChoice, username: str, password: str, captcha=None, parent=None):
+    def __init__(
+            self,
+            choice: LoginChoice,
+            username: str,
+            password: str,
+            captcha: str | None = None,
+            mfa_provider: MFAProvider | None = None,
+            parent=None):
         super().__init__(parent)
         self.choice = choice
         self.username = username
@@ -53,10 +55,8 @@ class LoginThread(QThread):
         self.login = None
         # 选择的账户类型
         self.accountType = None
-        # MFA Content
-        self._mfaContent = None
-        # MFA 验证码
-        self._mfaCode = None
+        # MFA 交互提供者
+        self.mfa_provider = mfa_provider
         # 是否信任当前客户端
         self.trustAgent = True
 
@@ -75,67 +75,26 @@ class LoginThread(QThread):
                 try:
                     # 检查账户是否存在多个身份
                     status, info = self.login.login(self.username, self.password, self.captcha or "", trust_agent=self.trustAgent)
+                    self._handle_login_status(status, info)
+                except (MFACancelledError, MFAUnavailableError) as e:
+                    logger.info("MFA 验证未完成：%s", e)
+                    self.loginFailed.emit(False, str(e))
                 except ServerError as e:
                     logger.error("服务器错误", exc_info=True)
                     self.loginFailed.emit(True, e.message)
-                else:
-                    if status == LoginState.SUCCESS:
-                        self.loginSuccess.emit()
-                    elif status == LoginState.REQUIRE_ACCOUNT_CHOICE:
-                        self.needChooseAccount.emit()
-                    elif status == LoginState.REQUIRE_MFA:
-                        self._mfaContent: NewLogin.MFAContext = info
-                        number = self._mfaContent.get_phone_number()
-                        self.needMFA.emit(number)
-                    elif status == LoginState.FAIL:
-                        logger.error("登录错误: \n%s", info)
-                        self.loginFailed.emit(True, info)
-                    else:
-                        raise ValueError("未知的登录状态")
-            elif self.choice == LoginChoice.MFA_VERIFY:
-                try:
-                    if self._mfaContent is None:
-                        raise ValueError("MFA 内容未设置")
-                    if self._mfaCode is None:
-                        raise ValueError("MFA 验证码未设置")
-                    self._mfaContent.verify_phone_code(self._mfaCode)
-                    status, info = self.login.login(trust_agent=self.trustAgent)
-                except ServerError as e:
-                    logger.error("服务器错误", exc_info=True)
-                    self.loginFailed.emit(True, e.message)
-                else:
-                    if status == LoginState.SUCCESS:
-                        self.loginSuccess.emit()
-                    elif status == LoginState.REQUIRE_ACCOUNT_CHOICE:
-                        self.needChooseAccount.emit()
-                    elif status == LoginState.FAIL:
-                        logger.error("登录错误: \n%s", info)
-                        self.loginFailed.emit(True, info)
-                    else:
-                        logger.error("登录错误：%s\n%s", status, info)
-                        raise ValueError("未知的登录状态")
-
-            elif self.choice == LoginChoice.MFA_SEND:
-                try:
-                    if self._mfaContent is None:
-                        raise ValueError("MFA 内容未设置")
-                    self._mfaContent.send_verify_code()
-                except (ServerError, HTTPError, json.decoder.JSONDecodeError) as e:
-                    logger.error("发送验证码时发生错误", exc_info=True)
-                    self.sendMFAResult.emit(False, str(e))
-                else:
-                    self.sendMFAResult.emit(True, "")
 
             elif self.choice == LoginChoice.FINISH_LOGIN:
                 try:
                     if self.accountType is None:
                         raise ValueError("必须选择账户类型")
-                    self.login.login(account_type=self.accountType, trust_agent=self.trustAgent)
+                    status, info = self.login.login(account_type=self.accountType, trust_agent=self.trustAgent)
+                    self._handle_login_status(status, info)
+                except (MFACancelledError, MFAUnavailableError) as e:
+                    logger.info("MFA 验证未完成：%s", e)
+                    self.loginFailed.emit(False, str(e))
                 except ServerError as e:
                     logger.error("服务器错误", exc_info=True)
                     self.loginFailed.emit(False, e.message)
-                else:
-                    self.loginSuccess.emit()
             elif self.choice == LoginChoice.GET_STUDENT_ID:
                 try:
                     ywtb_util = YWTBUtil(self.login.session)
@@ -162,3 +121,42 @@ class LoginThread(QThread):
         except Exception as e:
             logger.error("其他错误", exc_info=True)
             self.loginFailed.emit(False, str(e))
+
+    def _handle_login_status(self, status: LoginState, info: NewLogin.MFAContext | object | None) -> None:
+        """
+        处理 NewLogin 状态机返回的登录状态。
+        """
+        while True:
+            if status == LoginState.SUCCESS:
+                self.loginSuccess.emit()
+                return
+
+            if status == LoginState.REQUIRE_ACCOUNT_CHOICE:
+                self.needChooseAccount.emit()
+                return
+
+            if status == LoginState.REQUIRE_MFA:
+                if not isinstance(info, NewLogin.MFAContext):
+                    raise ServerError(500, "服务器返回了无法识别的 MFA 上下文。")
+                if self.mfa_provider is None:
+                    raise MFAUnavailableError("登录需要 MFA 验证，但当前没有可用的 MFA 交互提供者。")
+                phone_number = info.get_phone_number()
+                request = MFARequest(
+                    # 登录时还没有账户 UUID，所以先用一个固定值占位，等 MFA 验证完成后再更新为实际的账户 UUID
+                    account_uuid="login-draft",
+                    # 登录时同样还没有账户名称；采用用户输入的用户名占位。
+                    account_name=self.username,
+                    site_key="account-login",
+                    site_name="统一身份认证",
+                    phone_number=phone_number,
+                )
+                self.trustAgent = self.mfa_provider.handle(info, request)
+                status, info = self.login.login(trust_agent=self.trustAgent)
+                continue
+
+            if status == LoginState.FAIL:
+                logger.error("登录错误: \n%s", info)
+                self.loginFailed.emit(True, str(info))
+                return
+
+            raise ValueError("未知的登录状态")

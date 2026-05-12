@@ -5,6 +5,7 @@ import enum
 from app.sessions.common_session import CommonLoginSession
 from app.sessions.session_backend import AccessMode, SessionBackend
 from app.utils import cfg
+from app.utils.interactive_login import login_with_optional_mfa
 from auth import WEBVPN_LOGIN_URL, GSTE_LOGIN_URL
 from auth.new_login import NewLogin, NewWebVPNLogin
 
@@ -15,6 +16,7 @@ class GSTESession(CommonLoginSession):
     此网站要求校园网内访问，因此校外必须采用 WebVPN 访问
     """
     site_key = "gste"
+    site_name = "研究生评教系统"
     supports_webvpn = True
 
     class LoginMethod(enum.Enum):
@@ -30,14 +32,24 @@ class GSTESession(CommonLoginSession):
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         self.set_backend(self.normal_backend)
         login_util = NewLogin(GSTE_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
-        login_util.login_or_raise(username, password)
+        account, mfa_provider = self.get_login_context(kwargs)
+        login_with_optional_mfa(
+            login_util,
+            username,
+            password,
+            account,
+            mfa_provider,
+            account_type=NewLogin.POSTGRADUATE,
+            site_key=self.site_key,
+            site_name=self.site_name,
+        )
 
         self.login_method = self.LoginMethod.NORMAL
 
         self.reset_timeout()
         self.has_login = True
 
-    def webvpn_login(self, username: str, password: str) -> None:
+    def webvpn_login(self, username: str, password: str, **kwargs: object) -> None:
         """通过 WebVPN 登录研究生评教系统。"""
         # 目前 WebVPN 访问分为两个步骤
         # 1. 登录 WebVPN 自身，此时采用不经过 WebVPN 中介的接口
@@ -45,15 +57,34 @@ class GSTESession(CommonLoginSession):
         with self.login_lock:
             self.clear_site_state()
             self.set_backend(self.webvpn_backend)
+            account, mfa_provider = self.get_login_context(kwargs)
 
             with self.webvpn_backend.login_lock:
                 if not self.webvpn_backend.has_login:
                     login_util = NewLogin(WEBVPN_LOGIN_URL, self, visitor_id=str(cfg.loginId.value))
-                    login_util.login_or_raise(username, password)
+                    login_with_optional_mfa(
+                        login_util,
+                        username,
+                        password,
+                        account,
+                        mfa_provider,
+                        account_type=NewLogin.POSTGRADUATE,
+                        site_key="webvpn",
+                        site_name="WebVPN",
+                    )
                     self.webvpn_backend.has_login = True
 
             gste_login_util = NewWebVPNLogin(GSTE_LOGIN_URL, self, visitor_id=str(cfg.loginId.value))
-            gste_login_util.login_or_raise(username, password)
+            login_with_optional_mfa(
+                gste_login_util,
+                username,
+                password,
+                account,
+                mfa_provider,
+                account_type=NewLogin.POSTGRADUATE,
+                site_key=self.site_key,
+                site_name=self.site_name,
+            )
 
             self.login_method = self.LoginMethod.WEBVPN
 

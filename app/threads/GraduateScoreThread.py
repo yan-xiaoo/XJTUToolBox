@@ -6,6 +6,7 @@ from gmis.score import GraduateScore
 from ..sessions.gmis_session import GMISSession
 from ..threads.ProcessWidget import ProcessThread
 from ..utils import accounts, logger, cfg
+from ..utils.mfa import MFACancelledError, MFAUnavailableError
 from auth import ServerError, GMIS_LOGIN_URL
 
 
@@ -38,7 +39,12 @@ class GraduateScoreThread(ProcessThread):
         """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录研究生信息管理系统..."))
-        self.session.login(accounts.current.username, accounts.current.password)
+        self.session.login(
+            accounts.current.username,
+            accounts.current.password,
+            account=accounts.current,
+            mfa_provider=accounts.current.session_manager.mfa_provider,
+        )
         self.session.has_login = True
         if not self.can_run:
             return False
@@ -78,6 +84,14 @@ class GraduateScoreThread(ProcessThread):
                 return
             result = self.util.grade()
             self.progressChanged.emit(100)
+        except MFACancelledError as e:
+            logger.info("MFA 验证已取消：%s", e)
+            self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
+            self.canceled.emit()
+        except MFAUnavailableError as e:
+            logger.error("MFA 交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except ServerError as e:
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:
