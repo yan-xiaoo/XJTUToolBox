@@ -1,32 +1,44 @@
+from __future__ import annotations
+
 from PyQt5.QtCore import Qt, QUrl, pyqtSlot
 from PyQt5.QtGui import QDesktopServices, QColor
-from qfluentwidgets import BodyLabel, FluentStyleSheet, MessageBoxBase, SubtitleLabel, LineEdit, \
-    CaptionLabel
+from PyQt5.QtWidgets import QFrame, QSizePolicy, QWidget
+from qfluentwidgets import BodyLabel, MessageBoxBase, SubtitleLabel, LineEdit, \
+    CaptionLabel, TextBrowser
 
 
 class MessageBoxHtml(MessageBoxBase):
-    def __init__(self, title: str, content: str, parent=None):
+    def __init__(self, title: str, content: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.titleLabel = SubtitleLabel(title, self)
-        self.contentLabel = BodyLabel(content, parent)
+        self.contentLabel: TextBrowser = TextBrowser(self)
         self.contentLabel.setObjectName("contentLabel")
+        self.contentLabel.setHtml(content)
+        self.contentLabel.setReadOnly(True)
         self.contentLabel.setOpenExternalLinks(True)
-        self.contentLabel.linkActivated.connect(self.open_url)
-        self.contentLabel.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.contentLabel.setWordWrap(True)
+        self.contentLabel.setFrameShape(QFrame.Shape.NoFrame)
+        self.contentLabel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.contentLabel.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.contentLabel.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-        FluentStyleSheet.DIALOG.apply(self.contentLabel)
+        available_height = parent.height() if parent is not None else 720
+        content_max_height = max(240, min(520, int(available_height * 0.62)))
+        self.contentLabel.setMinimumWidth(520)
+        self.contentLabel.setMaximumHeight(content_max_height)
+        self.contentLabel.document().setTextWidth(500)
+        content_height = min(content_max_height, max(96, int(self.contentLabel.document().size().height()) + 12))
+        self.contentLabel.setFixedHeight(content_height)
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.contentLabel)
 
     @pyqtSlot(str)
-    def open_url(self, url):
+    def open_url(self, url: str) -> None:
         QDesktopServices.openUrl(QUrl(url))
 
 
 class MessageBoxUpdate(MessageBoxHtml):
-    def __init__(self, title: str, content: str, can_download: bool = True, parent=None):
+    def __init__(self, title: str, content: str, can_download: bool = True, parent: QWidget | None = None) -> None:
         super().__init__(title, content, parent)
 
         if can_download:
