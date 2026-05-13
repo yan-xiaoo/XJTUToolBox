@@ -416,8 +416,7 @@ class SettingInterface(ScrollArea):
         self.themeCard.comboBox.currentIndexChanged.connect(lambda: setTheme(cfg.get(cfg.themeMode), lazy=True))
         self.themeColorCard.colorChanged.connect(lambda c: setThemeColor(c, lazy=True))
         self.campusAccessPolicyCard.comboBox.currentIndexChanged.connect(
-            lambda: cfg.set(cfg.campusAccessPolicy, cfg.NetworkAccessPolicy(
-                self.campusAccessPolicyCard.comboBox.currentIndex()))
+            self._onCampusAccessPolicyChanged
         )
         cfg.traySetting.valueChanged.connect(self._onTraySettingChanged)
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
@@ -545,6 +544,13 @@ class SettingInterface(ScrollArea):
 
         accounts.clear_all_persisted_session_state()
         InfoBar.success(self.tr("已清空保存的登录状态"), self.tr("当前正在使用的登录状态不会受到影响"), parent=self)
+
+    @pyqtSlot(int)
+    def _onCampusAccessPolicyChanged(self, index: int) -> None:
+        """校园网访问策略改变时清理自动探测缓存。"""
+        cfg.set(cfg.campusAccessPolicy, cfg.NetworkAccessPolicy(index))
+        for account in accounts:
+            account.session_manager.clear_access_probe_cache()
 
     @pyqtSlot()
     def _onClearSessionsClicked(self):

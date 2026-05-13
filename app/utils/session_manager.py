@@ -144,6 +144,12 @@ class SessionManager:
             self._access_probe_time = now
             return mode
 
+    def clear_access_probe_cache(self) -> None:
+        """清理自动访问模式的网络探测缓存。"""
+        with self._access_probe_lock:
+            self._access_probe_result = None
+            self._access_probe_time = 0.0
+
     def can_reach_campus_network(self, *, timeout: float = 10.0) -> bool:
         """通过访问教务系统首页判断当前网络是否可以直连校内系统。"""
         try:
