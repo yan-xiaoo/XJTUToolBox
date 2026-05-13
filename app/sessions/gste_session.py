@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import enum
-
 from app.sessions.common_session import CommonLoginSession
 from app.sessions.session_backend import AccessMode
 from app.utils import cfg
@@ -19,13 +17,6 @@ class GSTESession(CommonLoginSession):
     site_name = "研究生评教系统"
     supports_webvpn = True
 
-    class LoginMethod(enum.Enum):
-        """
-        评教系统登录方式。
-        """
-        NORMAL = 0
-        WEBVPN = 1
-
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin
         qrcode_login_class = NewWebVPNQRCodeLogin if self.access_mode == AccessMode.WEBVPN else NewQRCodeLogin
@@ -38,8 +29,6 @@ class GSTESession(CommonLoginSession):
             account_type=NewLogin.POSTGRADUATE,
             allow_qrcode_login=kwargs.get("allow_qrcode_login") is not False,
         )
-
-        self.login_method = self.LoginMethod.WEBVPN if self.access_mode == AccessMode.WEBVPN else self.LoginMethod.NORMAL
 
         self.reset_timeout()
         self.has_login = True

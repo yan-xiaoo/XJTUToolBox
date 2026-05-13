@@ -80,7 +80,6 @@ class CommonLoginSession(metaclass=ABCMeta):
         # 是否已经登录
         self._has_login = False
         self._restored_auth_candidate = False
-        self.login_method = None
         self._login_context: LoginContext | None = None
         self._login_depth = 0
         self.session_manager: SessionManager | None = None
@@ -262,7 +261,6 @@ class CommonLoginSession(metaclass=ABCMeta):
         self._has_login = False
         self._restored_auth_candidate = False
         self.headers.clear()
-        self.login_method = None
 
     def invalidate_login(self) -> None:
         """标记当前业务站点登录态已经失效，并清理站点专属状态。"""

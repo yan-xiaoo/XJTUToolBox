@@ -3,11 +3,11 @@ import typing
 from PyQt5.QtWidgets import QWidget, QStackedWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractItemView
 from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, VBoxLayout, Pivot, BodyLabel, PrimaryPushButton, TableWidget, \
-    CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition, PipsPager, PipsScrollButtonDisplayMode, MessageBox
+    CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition, PipsPager, PipsScrollButtonDisplayMode
 from .utils import StyleSheet, accounts, AccountDataManager, Color
 from attendance.attendance import AttendanceFlow, FlowRecordType
 from .threads.ProcessWidget import ProcessWidget
-from .threads.AttendanceFlowThread import AttendanceFlowThread, AttendanceFlowChoice
+from .threads.AttendanceFlowThread import AttendanceFlowThread
 
 
 class AttendanceFlowWidget(QFrame):
@@ -114,8 +114,6 @@ class AttendanceFlowWidget(QFrame):
     def lock(self):
         """锁定一切网络连接有关的元素"""
         self.pager.setEnabled(False)
-        self.webVPNLoginAction.setEnabled(False)
-        self.normalLoginAction.setEnabled(False)
         self.refreshAction.setEnabled(False)
         self.nextAction.setEnabled(False)
         self.prevAction.setEnabled(False)
@@ -124,31 +122,9 @@ class AttendanceFlowWidget(QFrame):
     def unlock(self):
         """解锁一切网络连接有关的元素"""
         self.pager.setEnabled(True)
-        self.webVPNLoginAction.setEnabled(True)
-        self.normalLoginAction.setEnabled(True)
         self.refreshAction.setEnabled(True)
         self.nextAction.setEnabled(True)
         self.prevAction.setEnabled(True)
-
-    def askForRelogin(self) -> bool:
-        """
-        如果用户已经登录，则弹出对话框并询问用户是否要重新登录。如果用户没有登录，此函数直接返回 False。
-        :return: 用户选择是否要重新登录
-        """
-        if self.thread_.session.has_login:
-            if self.thread_.session.login_method == self.thread_.session.LoginMethod.WEBVPN:
-                w = MessageBox(self.tr("确认重新登录"),
-                               self.tr("你已经通过 WebVPN 登录考勤系统，是否要清除登录信息并重新登录？"),
-                               self.parent().parent())
-            else:
-                w = MessageBox(self.tr("确认重新登录"),
-                               self.tr("你已经直接登录考勤系统，是否要清除登录信息并重新登录？"), self.parent().parent())
-            w.yesButton.setText(self.tr("确定"))
-            w.cancelButton.setText(self.tr("取消"))
-            if w.exec():
-                return True
-        else:
-            return False
 
     def keyReleaseEvent(self, a0):
         if a0.key() == Qt.Key_Space:
@@ -162,45 +138,8 @@ class AttendanceFlowWidget(QFrame):
                 self.prevAction.trigger()
 
     @pyqtSlot()
-    def onWebVPNLoginClicked(self):
-        if self.askForRelogin():
-            self.thread_.session.has_login = False
-            self.thread_.session.cookies.clear_session_cookies()
-            self.processWidget.setVisible(True)
-            self.thread_.choice = AttendanceFlowChoice.WEBVPN_LOGIN
-            self.lock()
-            self.thread_.start()
-            return
-
-        if not self.thread_.session.has_login:
-            self.processWidget.setVisible(True)
-            self.thread_.choice = AttendanceFlowChoice.WEBVPN_LOGIN
-            self.lock()
-            self.thread_.start()
-            return
-
-    @pyqtSlot()
-    def onNormalLoginClicked(self):
-        if self.askForRelogin():
-            self.thread_.session.has_login = False
-            self.thread_.session.cookies.clear_session_cookies()
-            self.processWidget.setVisible(True)
-            self.thread_.choice = AttendanceFlowChoice.NORMAL_LOGIN
-            self.lock()
-            self.thread_.start()
-            return
-
-        if not self.thread_.session.has_login:
-            self.processWidget.setVisible(True)
-            self.thread_.choice = AttendanceFlowChoice.NORMAL_LOGIN
-            self.lock()
-            self.thread_.start()
-            return
-
-    @pyqtSlot()
     def onSearchClicked(self):
         self.processWidget.setVisible(True)
-        self.thread_.choice = AttendanceFlowChoice.SEARCH
         self.lock()
         self.thread_.start()
 
@@ -325,15 +264,8 @@ class AttendanceFlowWidget(QFrame):
         frame = QFrame(self)
         vBoxLayout = VBoxLayout(frame)
         self.commandBar = CommandBar(self)
-        vBoxLayout.addWidget(self.commandBar)
+        vBoxLayout.addWidget(self.commandBar, alignment=Qt.AlignHCenter)
         self.commandBar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.webVPNLoginAction = Action(FluentIcon.APPLICATION, self.tr("登录 WebVPN"))
-        self.webVPNLoginAction.triggered.connect(self.onWebVPNLoginClicked)
-        self.commandBar.addAction(self.webVPNLoginAction)
-        self.normalLoginAction = Action(FluentIcon.DOCUMENT, self.tr("直接登录"))
-        self.commandBar.addAction(self.normalLoginAction)
-        self.normalLoginAction.triggered.connect(self.onNormalLoginClicked)
-        self.commandBar.addSeparator()
         self.refreshAction = Action(FluentIcon.SYNC, self.tr("立刻刷新"))
         self.refreshAction.triggered.connect(self.onSearchClicked)
         self.commandBar.addAction(self.refreshAction)
@@ -343,9 +275,9 @@ class AttendanceFlowWidget(QFrame):
         self.nextAction = Action(FluentIcon.DOWN, self.tr("下一页"))
         self.nextAction.triggered.connect(self.onNextClicked)
         self.commandBar.addAction(self.nextAction)
+        self.commandBar.setMinimumWidth(max(self.commandBar.sizeHint().width(), 360))
 
-        self.thread_ = AttendanceFlowThread(accounts.current, choice=None, page=1, size=5,
-                                            parent=self)
+        self.thread_ = AttendanceFlowThread(accounts.current, page=1, size=5, parent=self)
         self.processWidget = ProcessWidget(thread=self.thread_,stoppable=True)
         vBoxLayout.addWidget(self.processWidget)
         self.processWidget.canceled.connect(self.onThreadTerminated, Qt.UniqueConnection)
@@ -377,7 +309,7 @@ class AttendanceFlowWidget(QFrame):
         vBoxLayout.addWidget(self.pager, alignment=Qt.AlignHCenter)
 
         self.mentionLabel = BodyLabel(
-            self.tr("使用说明：先点击「登录 WebVPN」或者「直接登录」，然后选择「立刻刷新」即可查询\n"
+            self.tr("使用说明：选择「立刻刷新」即可查询，访问方式会根据程序设置自动确定\n"
                     "结果说明：有效：正常上课刷卡；无效：没有课却刷了卡；重复：正常上课刷了多次卡"),
             frame
         )
