@@ -237,6 +237,25 @@ class SettingInterface(ScrollArea):
         self.saveKeyringCard.checkedChanged.connect(self._onSaveKeyringChanged)
         self._onUpdateEncryptStatus()
 
+        # 登录状态设置组
+        self.sessionGroup = SettingCardGroup(self.tr("登录状态"), self.view)
+        self.keepSessionCard = CustomSwitchSettingCard(
+            FIF.VPN,
+            self.tr("退出时保留登录状态"),
+            self.tr("保存系统的访问凭证，下次启动时先尝试复用"),
+            cfg.keepSessionOnExit,
+            self.sessionGroup
+        )
+        self.clearSessionCard = PushSettingCard(
+            self.tr("清空"),
+            FIF.CLEAR_SELECTION,
+            self.tr("清空所有 Session"),
+            self.tr("删除已保存的登录状态，并让当前已登录的校内系统重新认证"),
+            self.sessionGroup
+        )
+        self.sessionGroup.addSettingCard(self.keepSessionCard)
+        self.sessionGroup.addSettingCard(self.clearSessionCard)
+
         # 校园网访问设置组
         self.campusAccessGroup = SettingCardGroup(self.tr("校园网访问"), self.view)
         self.campusAccessPolicyCard = ComboBoxSettingCard(cfg.campusAccessPolicy, FIF.GLOBE,
@@ -369,6 +388,7 @@ class SettingInterface(ScrollArea):
 
         # 添加设置组到布局
         self.expandLayout.addWidget(self.accountGroup)
+        self.expandLayout.addWidget(self.sessionGroup)
         self.expandLayout.addWidget(self.campusAccessGroup)
         self.expandLayout.addWidget(self.attendanceGroup)
         self.expandLayout.addWidget(self.scoreGroup)
@@ -395,6 +415,8 @@ class SettingInterface(ScrollArea):
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
         self.clearCard.clicked.connect(self._onClearAccountsClicked)
+        self.keepSessionCard.checkedChanged.connect(self._onKeepSessionChanged)
+        self.clearSessionCard.clicked.connect(self._onClearSessionsClicked)
         self.updateCard.clicked.connect(self.onUpdateClicked)
         self.feedbackCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox/issues")))
         self.logCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("file:///" + LOG_DIRECTORY)))
@@ -490,6 +512,47 @@ class SettingInterface(ScrollArea):
             except keyring.errors.KeyringError:
                 pass
 
+        if cfg.keepSessionOnExit.value:
+            try:
+                accounts.migrate_all_persisted_session_state()
+            except keyring.errors.KeyringError:
+                InfoBar.error(self.tr("迁移登录状态失败"), self.tr("无法迁移已保存的登录状态"), parent=self)
+            else:
+                if cfg.useKeyring.value:
+                    InfoBar.info(self.tr("登录状态存储已切换"), self.tr("已保存的登录状态将存储到系统密码管理器"), parent=self)
+                else:
+                    InfoBar.warning(self.tr("登录状态存储已切换"), self.tr("已保存的登录状态将以明文文件保存"), parent=self)
+
+    @pyqtSlot(bool)
+    def _onKeepSessionChanged(self, checked: bool):
+        """退出时保留 Session 的设置被修改时触发。"""
+        if checked:
+            if not cfg.useKeyring.value:
+                InfoBar.warning(
+                    self.tr("已启用登录状态保留"),
+                    self.tr("当前未使用系统密码管理器，登录状态会以明文文件保存"),
+                    parent=self,
+                )
+            return
+
+        accounts.clear_all_persisted_session_state()
+        InfoBar.success(self.tr("已清空保存的登录状态"), self.tr("当前正在使用的登录状态不会受到影响"), parent=self)
+
+    @pyqtSlot()
+    def _onClearSessionsClicked(self):
+        """立刻清空所有内存和持久化 Session。"""
+        box = MessageBox(
+            self.tr("清空所有 Session"),
+            self.tr("这会删除已保存的登录状态，并让当前已登录的校内系统重新认证。\n正在进行的查询可能失败，需要重新点击查询。"),
+            self,
+        )
+        box.yesButton.setText(self.tr("清空"))
+        box.cancelButton.setText(self.tr("取消"))
+        if not box.exec():
+            return
+
+        accounts.clear_all_session_state(include_persisted=True)
+        InfoBar.success(self.tr("清空成功"), self.tr("所有 Session 登录状态已经清空"), parent=self)
 
     @pyqtSlot()
     def _onUpdateEncryptStatus(self):

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from abc import ABCMeta, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
+from http.cookiejar import CookieJar
 from typing import TYPE_CHECKING, cast
 
 import requests
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from app.utils.account import Account
     from app.utils.mfa import MFAProvider
     from app.utils.session_manager import SessionManager
+    from app.utils.session_persistence import SiteSnapshot
 
 
 @dataclass(frozen=True)
@@ -34,7 +36,7 @@ class LoginContext:
 class CommonLoginSession(metaclass=ABCMeta):
     """
     需要登录的所有网站的 Session 基类，具有登录/重新登录的接口。
-    由于会出现无限递归，此类自身不支持自动重新登录，需要外界检查 has_timeout 接口并手动调用登录。
+    由于会出现无限递归，此类自身通过 ensure_login 统一验证并自动登录。
     在本程序的其他模块，统一使用 session 提供的方法登录，没有具体的进度提示。
     """
     # 当前站点的标识符号。子类应当重写这个变量
@@ -62,6 +64,7 @@ class CommonLoginSession(metaclass=ABCMeta):
         self._last_request_time = 0.0
         # 是否已经登录
         self._has_login = False
+        self._restored_auth_candidate = False
         self.login_method = None
         self._login_context: LoginContext | None = None
         self._login_depth = 0
@@ -75,24 +78,16 @@ class CommonLoginSession(metaclass=ABCMeta):
         return self.backend.access_mode
 
     @property
-    def cookies(self) -> requests.cookies.RequestsCookieJar:
+    def cookies(self) -> CookieJar:
         """返回当前访问方式共享的 cookie jar。"""
         return self.backend.session.cookies
 
     @property
     def has_login(self) -> bool:
         """
-        当前 session 是否已经登录。此属性默认为 False，需要手动设置为 True.
-        当前 session 超时后，此属性会被自动设置为 False.
-        此属性和 has_timeout 有所区别：has_timeout 在发起请求后便会变为 False，
-        因此如果登录到一半被取消，has_timeout 已经从 True 变为 False，但其实现在没有登录成功,
-        因此需要额外的标识位。
-        如果当前已经超时，那么查询 has_login 时，has_login 会变为 False。
+        当前 session 是否持有一个未被判定失效的登录态候选。
+        这个属性不再因为本地 timeout 自动变为 False；真实可用性由 validate_login 判断。
         """
-        if self.has_timeout() or self.backend.has_timeout():
-            self._has_login = False
-            if self.backend.has_timeout():
-                self.backend.has_login = False
         return self._has_login
 
     @has_login.setter
@@ -131,6 +126,7 @@ class CommonLoginSession(metaclass=ABCMeta):
             self._remember_login_context(username, password, kwargs)
             self.choose_backend(preferred=preferred_access_mode, **kwargs)
             if not force and self.has_login and self.validate_login():
+                self.mark_login_validated()
                 return False
 
             self.invalidate_login()
@@ -247,6 +243,7 @@ class CommonLoginSession(metaclass=ABCMeta):
     def clear_site_state(self) -> None:
         """清理当前站点适配器状态，不清理共享 cookie。"""
         self._has_login = False
+        self._restored_auth_candidate = False
         self.headers.clear()
         self.login_method = None
 
@@ -259,12 +256,46 @@ class CommonLoginSession(metaclass=ABCMeta):
         验证当前业务站点登录态是否仍然可信。
         子类可以重写该方法，通过访问学校系统需要权限的接口实测是否要重新登录。
         """
-        return self.has_login
+        return False
 
     def clear_backend_cookies(self) -> None:
         """清理当前访问方式共享后端的全部 cookie。"""
-        self.backend.clear_cookies()
+        self.backend.clear_auth_state()
         self.clear_site_state()
+
+    def to_site_snapshot(self) -> SiteSnapshot:
+        """导出当前站点适配器的认证快照。"""
+        from app.utils.session_persistence import SiteSnapshot
+
+        return SiteSnapshot(
+            site_key=self.site_key,
+            access_mode=self.access_mode.value,
+            headers={str(key): str(value) for key, value in self.headers.items()},
+            saved_at=time.time(),
+        )
+
+    def restore_site_snapshot(self, snapshot: SiteSnapshot) -> None:
+        """从认证快照恢复当前站点适配器。"""
+        try:
+            access_mode = AccessMode(snapshot.access_mode)
+        except ValueError:
+            return
+
+        if self.session_manager is not None and access_mode != self.access_mode:
+            self.set_backend(self.session_manager.get_backend(access_mode))
+
+        self.headers.clear()
+        self.headers.update(snapshot.headers)
+        self._has_login = True
+        self._restored_auth_candidate = True
+        self.reset_timeout()
+
+    def mark_login_validated(self) -> None:
+        """将当前站点适配器标记为已经验证的登录态。"""
+        self._has_login = True
+        self._restored_auth_candidate = False
+        self.reset_timeout()
+        self.backend.mark_login_validated()
 
     def _ensure_webvpn_backend_login(self, username: str, password: str, **kwargs: object) -> None:
         """在 WebVPN 访问方式下确保 WebVPN 后端本身已经登录。"""

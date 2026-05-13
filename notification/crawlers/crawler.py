@@ -4,6 +4,7 @@ import random
 import re
 import time
 from abc import ABC, abstractmethod
+from http.cookiejar import Cookie, CookieJar
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -84,6 +85,42 @@ def generate_user_agent() -> str:
         os_name = "Mac OS X"
 
     return UserAgent(os=[os_name], browsers=['Chrome', 'Firefox', 'Edge']).random
+
+
+def make_cookie(name: str, value: str, domain: str, path: str = "/") -> Cookie:
+    """创建一个标准库 Cookie 对象。"""
+    return Cookie(
+        version=0,
+        name=name,
+        value=value,
+        port=None,
+        port_specified=False,
+        domain=domain,
+        domain_specified=True,
+        domain_initial_dot=domain.startswith("."),
+        path=path,
+        path_specified=True,
+        secure=False,
+        expires=None,
+        discard=True,
+        comment=None,
+        comment_url=None,
+        rest={},
+        rfc2109=False,
+    )
+
+
+def set_cookie(cookie_jar: CookieJar, name: str, value: str, domain: str, path: str = "/") -> None:
+    """向标准库 CookieJar 写入一个 cookie。"""
+    cookie_jar.set_cookie(make_cookie(name, value, domain, path))
+
+
+def get_cookie_value(cookie_jar: CookieJar, name: str, domain: Optional[str] = None) -> Optional[str]:
+    """从标准库 CookieJar 中查找指定 cookie 的值。"""
+    for cookie in cookie_jar:
+        if cookie.name == name and (domain is None or cookie.domain == domain):
+            return cookie.value
+    return None
 
 
 def get_system_platform():
@@ -173,14 +210,13 @@ def pass_challenge_for_website(website_url: str, challenge_url: str) -> requests
     :raises ValueError: 如果出现逻辑问题导致无法完成验证
     """
     session = get_session()
+    website_domain = urlparse(website_url).hostname
+    if website_domain is None:
+        raise ValueError("网站地址无效，无法设置验证 cookie。")
     # 如果有缓存的 client_id，就设置一下
-    if get_client_id(website_url) is not None:
-        session.cookies.set(
-            name="client_id",
-            value=get_client_id(website_url),
-            domain=urlparse(website_url).hostname,
-            path="/"
-        )
+    cached_client_id = get_client_id(website_url)
+    if cached_client_id is not None:
+        set_cookie(session.cookies, "client_id", cached_client_id, website_domain)
 
     response = session.get(website_url)
     challenge_id, answer = extract_challenge_id_from_html(response.text)
@@ -212,18 +248,17 @@ def pass_challenge_for_website(website_url: str, challenge_url: str) -> requests
                 client_id = response.json().get("client_id")
                 if client_id is not None:
                     # 存储整个 cookie jar
-                    session.cookies.update({
-                        "client_id": client_id
-                    })
-                    set_client_id(website_url, client_id)
+                    set_cookie(session.cookies, "client_id", str(client_id), website_domain)
+                    set_client_id(website_url, str(client_id))
             except Exception:
                 # 还有一种情况是，服务器返回了一个 set_cookie header
                 # 此时 requests 应该会帮我们自动在 session 中设置这个 cookie
                 # 我们只需要检查一下
-                if "client_id" not in session.cookies:
+                client_id = get_cookie_value(session.cookies, "client_id")
+                if client_id is None:
                     raise ValueError("无法通过教务处网站的人机验证，请稍后再尝试。如果问题一直存在，请联系开发者。")
                 else:
-                    set_client_id(website_url, session.cookies.get("client_id"))
+                    set_client_id(website_url, client_id)
         else:
             raise ValueError("无法通过教务处网站的人机验证，请稍后再尝试。如果问题一直存在，请联系开发者。")
 

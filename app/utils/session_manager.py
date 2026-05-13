@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
 import threading
 import time
 from typing import TYPE_CHECKING
 
 import requests
 
+from auth import is_safety_verify_page
 from app.sessions.session_backend import AccessMode, SessionBackend
+from app.utils.session_persistence import AccountSessionSnapshot, SessionPersistenceStore, SiteSnapshot
 
 if TYPE_CHECKING:
     from app.utils.account import Account
@@ -33,6 +36,7 @@ class SessionManager:
             AccessMode.NORMAL: SessionBackend(AccessMode.NORMAL),
             AccessMode.WEBVPN: SessionBackend(AccessMode.WEBVPN),
         }
+        self._pending_site_snapshots: dict[str, SiteSnapshot] = {}
         self.mfa_provider: MFAProvider | None = None
         self._access_probe_result: AccessMode | None = None
         self._access_probe_time = 0.0
@@ -107,6 +111,7 @@ class SessionManager:
                 self.instances[name] = self._create_session(self.sessions[name])
             else:
                 self.instances[name] = self._create_session(self.__class__.sessions[name])
+            self._restore_pending_site_snapshot(name)
         return self.instances[name]
 
     def get_backend(self, access_mode: AccessMode) -> SessionBackend:
@@ -176,10 +181,13 @@ class SessionManager:
 
         webvpn_backend = self.backends[AccessMode.WEBVPN]
         with webvpn_backend.login_lock:
-            if webvpn_backend.has_timeout():
-                webvpn_backend.has_login = False
             if webvpn_backend.has_login:
-                return
+                if not webvpn_backend.restored_auth_candidate:
+                    return
+                if self.validate_webvpn_backend():
+                    webvpn_backend.mark_login_validated()
+                    return
+                webvpn_backend.clear_auth_state()
 
             account_type = NewLogin.POSTGRADUATE if self._is_postgraduate_account(account, is_postgraduate) else NewLogin.UNDERGRADUATE
             login_util = NewLogin(WEBVPN_LOGIN_URL, session=webvpn_backend.session, visitor_id=str(cfg.loginId.value))
@@ -193,8 +201,21 @@ class SessionManager:
                 site_key="webvpn",
                 site_name="WebVPN",
             )
-            webvpn_backend.has_login = True
-            webvpn_backend.reset_timeout()
+            webvpn_backend.mark_login_validated()
+
+    def validate_webvpn_backend(self) -> bool:
+        """验证 WebVPN 后端本身是否仍处于已登录状态。"""
+        from auth import WEBVPN_LOGIN_URL
+
+        webvpn_backend = self.backends[AccessMode.WEBVPN]
+        try:
+            response = webvpn_backend.session.get(WEBVPN_LOGIN_URL, allow_redirects=True, timeout=10)
+        except requests.RequestException:
+            return False
+
+        if self._is_unified_or_safety_verify_page(response.text):
+            return False
+        return "西安交通大学WebVPN - 资源站点" in response.text
 
     @staticmethod
     def _is_postgraduate_account(account: Account | None, is_postgraduate: bool) -> bool:
@@ -211,9 +232,117 @@ class SessionManager:
         """
         self.mfa_provider = provider
 
+    def restore_persisted_state(self, account: Account) -> None:
+        """恢复当前账号持久化保存的 Session 状态。"""
+        store = SessionPersistenceStore()
+        snapshot = store.load_account_snapshot(account)
+        if snapshot is None or snapshot.account_uuid != account.uuid:
+            return
+
+        if not self._restore_snapshot_backends(snapshot):
+            self.clear_runtime_session_state()
+            store.delete_account_snapshot(account)
+            return
+
+        self._pending_site_snapshots = self._restorable_site_snapshots(snapshot)
+
+    def save_persisted_state(self, account: Account) -> None:
+        """保存当前账号的 Session 状态。"""
+        backends = {mode.value: backend.to_snapshot() for mode, backend in self.backends.items()}
+        sites = dict(self._pending_site_snapshots)
+        sites.update({
+            key: session.to_site_snapshot()
+            for key, session in self.instances.items()
+            if session is not None and session.has_login
+        })
+        snapshot = AccountSessionSnapshot(
+            version=SessionPersistenceStore.VERSION,
+            account_uuid=account.uuid,
+            saved_at=time.time(),
+            backends=backends,
+            sites=sites,
+        )
+        SessionPersistenceStore().save_account_snapshot(account, snapshot)
+
+    def clear_runtime_session_state(self) -> None:
+        """清理当前账号内存中的全部 Session 状态。"""
+        with ExitStack() as stack:
+            for session in self.instances.values():
+                if session is not None:
+                    stack.enter_context(session.login_lock)
+            for backend in self.backends.values():
+                stack.enter_context(backend.login_lock)
+            for backend in self.backends.values():
+                backend.clear_auth_state()
+            for session in self.instances.values():
+                if session is not None:
+                    session.clear_site_state()
+            self._pending_site_snapshots.clear()
+
+    def clear_persisted_session_state(self, account: Account) -> None:
+        """清理当前账号持久化保存的 Session 状态。"""
+        SessionPersistenceStore().delete_account_snapshot(account)
+
+    def clear_persisted_session_state_only(self, account: Account) -> None:
+        """只清理持久化 Session 状态，不影响内存。"""
+        self.clear_persisted_session_state(account)
+
+    def clear_all_session_state(self, account: Account, *, include_persisted: bool = True) -> None:
+        """清理当前账号的内存 Session，并可选清理持久化快照。"""
+        self.clear_runtime_session_state()
+        if include_persisted:
+            self.clear_persisted_session_state(account)
+
     def _create_session(self, class_: type[CommonLoginSession]) -> CommonLoginSession:
         """创建一个站点 Session 适配器实例。"""
         backend = self.backends[class_.default_access_mode]
         session = class_(backend=backend)
         session.session_manager = self
         return session
+
+    def _restore_pending_site_snapshot(self, name: str) -> None:
+        """在站点实例创建后恢复延迟保存的站点状态。"""
+        snapshot = self._pending_site_snapshots.pop(name, None)
+        session = self.instances.get(name)
+        if snapshot is not None and session is not None:
+            session.restore_site_snapshot(snapshot)
+
+    def _restore_snapshot_backends(self, snapshot: AccountSessionSnapshot) -> bool:
+        """集中校验并恢复账号快照中的后端状态。"""
+        expected_modes = {mode.value for mode in self.backends}
+        if set(snapshot.backends) != expected_modes:
+            return False
+
+        for mode, backend_snapshot in snapshot.backends.items():
+            try:
+                access_mode = AccessMode(backend_snapshot.access_mode)
+            except ValueError:
+                return False
+            if mode != access_mode.value or access_mode not in self.backends:
+                return False
+            if not self.backends[access_mode].restore_snapshot(backend_snapshot):
+                return False
+        return True
+
+    @staticmethod
+    def _restorable_site_snapshots(snapshot: AccountSessionSnapshot) -> dict[str, SiteSnapshot]:
+        """筛选访问方式合法的站点快照。"""
+        sites: dict[str, SiteSnapshot] = {}
+        for key, site_snapshot in snapshot.sites.items():
+            try:
+                AccessMode(site_snapshot.access_mode)
+            except ValueError:
+                continue
+            sites[key] = site_snapshot
+        return sites
+
+    @staticmethod
+    def _is_unified_or_safety_verify_page(html_content: str) -> bool:
+        """判断响应页面是否是统一认证或安全验证页面。"""
+        has_login_form = 'id="fm1"' in html_content and 'name="execution"' in html_content
+        has_login_marker = (
+            "login.xjtu.edu.cn" in html_content
+            or "cas/login" in html_content
+            or "统一身份认证" in html_content
+        )
+        return is_safety_verify_page(html_content) or (has_login_form and has_login_marker)

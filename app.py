@@ -14,7 +14,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # 去除广告 (静默导入业务逻辑)
 with contextlib.redirect_stdout(None):
     from app.main_window import MainWindow, MacReopenFilter
-    from app.utils import cfg
+    from app.utils import accounts, cfg, logger
     from app.utils.single_app import SingleApplication
     from app.utils.linux_compat import apply_linux_env_patches
 
@@ -24,6 +24,14 @@ apply_linux_env_patches()
 QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+
+
+def persist_session_state_on_exit() -> None:
+    """在程序退出前按用户设置保存或清理 Session 状态。"""
+    if cfg.keepSessionOnExit.value:
+        accounts.save_all_session_state()
+    else:
+        accounts.clear_all_persisted_session_state()
 
 if __name__ == '__main__':
     APP_ID = "XJTUToolBox_SingleInstance_Lock"
@@ -51,4 +59,8 @@ if __name__ == '__main__':
     try:
         app.exec_()
     finally:
+        try:
+            persist_session_state_on_exit()
+        except Exception:
+            logger.exception("保存或清理 Session 登录状态失败")
         cfg.save()

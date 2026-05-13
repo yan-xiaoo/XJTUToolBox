@@ -283,6 +283,7 @@ class AccountCard(CardWidget):
     def _onLoginFinish(self, username, password):
         self.account.username = username
         self.account.password = password
+        self.account.session_manager.clear_all_session_state(self.account, include_persisted=True)
         self.titleLabel.setText(self.account.nickname)
         self.main_window.switchTo(self.main_window.account_interface)
         self.accountChanged.emit()
@@ -433,6 +434,7 @@ class AccountInterface(ScrollArea):
 
     @pyqtSlot(Account)
     def _onAccountDeleted(self, account: Account):
+        account.session_manager.clear_all_session_state(account, include_persisted=True)
         if account == self.accounts.current:
             self.accounts.current = self.accounts[0]
             self.accounts.remove(account)

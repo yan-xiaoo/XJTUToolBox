@@ -79,6 +79,10 @@ class MainWindow(MSFluentWindow):
         super().__init__(parent)
 
         registerSession()
+        if cfg.keepSessionOnExit.value:
+            accounts.restore_all_session_state()
+        else:
+            accounts.clear_all_persisted_session_state()
         self.mfaProvider = QtMFAProvider(self)
         # 线程要求 mfa 验证时，显示 MFA 对话框，并将用户的操作转交给 QtMFAProvider
         self.mfaProvider.requestMFA.connect(self.show_mfa_dialog)

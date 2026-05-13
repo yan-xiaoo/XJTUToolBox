@@ -221,6 +221,7 @@ class AccountManager(QObject):
         """
         删除当前存储的所有账户信息，并且使账户不再受密码保护
         """
+        self.clear_all_session_state(include_persisted=True)
         # 清除当前账号信息
         self.accounts.clear()
         # 清除当前账号
@@ -381,6 +382,35 @@ class AccountManager(QObject):
         if data is None:
             raise ValueError("钥匙串中不存在账户数据")
         return cls.load(data, key)
+
+    def restore_all_session_state(self) -> None:
+        """恢复所有账号持久化保存的 Session 状态。"""
+        for account in self.accounts:
+            account.session_manager.restore_persisted_state(account)
+
+    def save_all_session_state(self) -> None:
+        """保存所有账号当前的 Session 状态。"""
+        for account in self.accounts:
+            account.session_manager.save_persisted_state(account)
+
+    def clear_all_session_state(self, *, include_persisted: bool = True) -> None:
+        """清理所有账号的 Session 状态。"""
+        for account in self.accounts:
+            account.session_manager.clear_all_session_state(account, include_persisted=False)
+        if include_persisted:
+            self.clear_all_persisted_session_state()
+
+    def clear_all_persisted_session_state(self) -> None:
+        """只清理所有账号持久化保存的 Session 状态。"""
+        from app.utils.session_persistence import SessionPersistenceStore
+
+        SessionPersistenceStore().delete_all_snapshots(self)
+
+    def migrate_all_persisted_session_state(self) -> None:
+        """迁移所有账号持久化保存的 Session 状态到当前存储位置。"""
+        from app.utils.session_persistence import SessionPersistenceStore
+
+        SessionPersistenceStore().migrate_all_snapshots(self)
 
 
 accounts = AccountManager()
