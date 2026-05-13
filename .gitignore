@@ -11,6 +11,14 @@ build
 dist
 .python-version
 
+PyQt-Fluent-Widgets/
+XJTUToolbox.spec
+*.html
+rootCA.crt
+AI-development-docs/**
+.vscode/**
+
+
 docs/.vitepress/dist
 docs/.vitepress/cache
 node_modules
