@@ -354,7 +354,7 @@ class Config(QConfig):
                                    BooleanSerializer())
     keepSessionOnExit = OptionsConfigItem("Settings", "keep_session_on_exit", False,
                                           OptionsValidator([True, False]), BooleanSerializer())
-    sessionKeepAliveEnabled = OptionsConfigItem("Settings", "session_keep_alive_enabled", False,
+    sessionKeepAliveEnabled = OptionsConfigItem("Settings", "session_keep_alive_enabled", True,
                                                OptionsValidator([True, False]), BooleanSerializer())
     sessionKeepAliveInterval = OptionsConfigItem("Settings", "session_keep_alive_interval",
                                                 SessionKeepAliveInterval.MINUTES_10,
