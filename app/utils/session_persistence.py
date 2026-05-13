@@ -248,7 +248,7 @@ class SessionPersistenceStore:
             if cfg.useKeyring.value:
                 try:
                     raw = _decrypt_bytes(raw)
-                except (ValueError, KeyError):
+                except ValueError:
                     pass
             text = raw.decode("utf-8")
             snapshot = self._snapshot_from_json(text)
@@ -330,7 +330,7 @@ class SessionPersistenceStore:
                     if use_encryption:
                         try:
                             raw = _decrypt_bytes(raw)
-                        except (ValueError, KeyError):
+                        except ValueError:
                             pass
                     cookie_text = raw.decode("utf-8")
                 except OSError:
