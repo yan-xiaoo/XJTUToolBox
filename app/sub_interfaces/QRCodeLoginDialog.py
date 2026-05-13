@@ -24,7 +24,7 @@ class QRCodeLoginDialog(MessageBoxBase):
 
         self.title = TitleLabel(self.tr("二维码登录"), self)
         self.hint = CaptionLabel(
-            self.tr("请使用手机 App 扫码登录「{0}」。").format(request.site_name),
+            self.tr("请使用移动交通大学 App 扫码登录「{0}」。").format(request.site_name),
             self,
         )
         self.imageLabel = QLabel(self)

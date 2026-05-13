@@ -110,7 +110,7 @@ class QtQRCodeLoginProvider(QObject):
         """
         image = login_util.get_qrcode_image()
         self.imageReady.emit(request, image)
-        self.statusChanged.emit(request, "请使用手机 App 扫码登录。")
+        self.statusChanged.emit(request, "请使用移动交通大学 App 扫码登录。")
 
     def _take_action(self, action_queue: queue.Queue[QRCodeLoginAction]) -> QRCodeLoginAction | None:
         """

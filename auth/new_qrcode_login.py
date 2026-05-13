@@ -135,13 +135,13 @@ class QRCodeLoginMixin:
 
         status = str(qr_code.get("status") or "")
         if status == "1":
-            return QRCodeCometResult(QRCodeLoginStatus.WAITING, "请使用手机 App 扫码登录。")
+            return QRCodeCometResult(QRCodeLoginStatus.WAITING, "请使用移动交通大学 App 扫码登录。")
         if status == "2":
             return QRCodeCometResult(QRCodeLoginStatus.SCANNED, "已扫码，请在手机上确认登录。")
         if status == "3":
             user_id = str(qr_code.get("userId") or "")
             if not user_id or not state_key:
-                return QRCodeCometResult(QRCodeLoginStatus.ERROR, "扫码确认结果缺少登录凭据。")
+                return QRCodeCometResult(QRCodeLoginStatus.ERROR, "服务器错误：扫码确认结果缺少登录凭据。")
             return QRCodeCometResult(QRCodeLoginStatus.AUTHORIZED, "扫码确认成功，正在登录。", user_id, state_key)
         if status == "4":
             return QRCodeCometResult(QRCodeLoginStatus.CANCELLED, "已在手机上取消登录，请刷新二维码。")
