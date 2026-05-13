@@ -51,13 +51,6 @@ class GraduateJudgeThread(ProcessThread):
         # 单个通用主观题答案
         self.single_answer: str = "无"
 
-    def set_login_method(self, method: GSTESession.LoginMethod):
-        """
-        设置登录方式，仅在当前 session 未登录时生效
-        """
-        if not self.session.has_login:
-            self.session.login_method = method
-
     @property
     def session(self) -> GSTESession:
         """
@@ -72,27 +65,17 @@ class GraduateJudgeThread(ProcessThread):
         """
         return self.account.session_manager.get_session("gmis")
 
-    def webvpn_login(self):
+    def login(self):
+        """按照统一访问策略登录研究生评教系统。"""
         self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在通过 WebVPN 登录评教系统..."))
-        self.session.webvpn_login(
-            self.account.username,
-            self.account.password,
-            account=self.account,
-            mfa_provider=self.account.session_manager.mfa_provider,
-        )
-        self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
-
-    def normal_login(self):
-        self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在直接登录评教系统..."))
+        self.messageChanged.emit(self.tr("正在登录评教系统..."))
         self.session.ensure_login(
             self.account.username,
             self.account.password,
             account=self.account,
             mfa_provider=self.account.session_manager.mfa_provider,
         )
-        self.messageChanged.emit(self.tr("直接登录评教系统成功。"))
+        self.messageChanged.emit(self.tr("登录评教系统成功。"))
 
     def run(self):
         # 强制重置可运行状态，避免上次取消后本次直接退出
@@ -107,17 +90,13 @@ class GraduateJudgeThread(ProcessThread):
             # 如果当前账户已经登录并且登录态仍有效，重建代理对象，防止 util 和 session 不对应。
             if self.session.has_login and self.session.validate_login():
                 # 如果当前 session 已经登录，必须沿用当前登录方式。
-                util = GraduateAutoJudge(self.session, use_webvpn=self.session.login_method == self.session.LoginMethod.WEBVPN)
+                util = GraduateAutoJudge(self.session)
             else:
-                # 手动登录。
-                if self.session.login_method == self.session.LoginMethod.NORMAL:
-                    self.normal_login()
-                else:
-                    self.webvpn_login()
+                self.login()
                 # 登录之后改一下进度条样式
                 self.setIndeterminate.emit(False)
                 self.progressChanged.emit(0)
-                util = GraduateAutoJudge(self.session, use_webvpn=self.session.login_method == self.session.LoginMethod.WEBVPN)
+                util = GraduateAutoJudge(self.session)
                 if not self.can_run:
                     self.canceled.emit()
                     return

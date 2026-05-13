@@ -4,7 +4,8 @@ from app.sessions.common_session import CommonLoginSession
 from app.utils import cfg
 from app.utils.interactive_login import login_with_optional_mfa
 from auth.new_login import NewLogin
-from jwapp.util import JwappNewLogin
+from jwapp.util import JwappNewLogin, JwappNewWebVPNLogin
+from .session_backend import AccessMode
 
 
 class JwappSession(CommonLoginSession):
@@ -13,9 +14,11 @@ class JwappSession(CommonLoginSession):
     """
     site_key = "jwapp"
     site_name = "移动教务系统"
+    supports_webvpn = True
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
-        login_util = JwappNewLogin(session=self, visitor_id=str(cfg.loginId.value))
+        login_class = JwappNewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else JwappNewLogin
+        login_util = login_class(session=self, visitor_id=str(cfg.loginId.value))
         account, mfa_provider = self.get_login_context(kwargs)
         login_with_optional_mfa(
             login_util,

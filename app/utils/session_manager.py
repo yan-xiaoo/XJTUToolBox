@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import threading
+import time
 from typing import TYPE_CHECKING
+
+import requests
 
 from app.sessions.session_backend import AccessMode, SessionBackend
 
 if TYPE_CHECKING:
+    from app.utils.account import Account
     from app.sessions.common_session import CommonLoginSession
     from app.utils.mfa import MFAProvider
 
@@ -29,6 +34,9 @@ class SessionManager:
             AccessMode.WEBVPN: SessionBackend(AccessMode.WEBVPN),
         }
         self.mfa_provider: MFAProvider | None = None
+        self._access_probe_result: AccessMode | None = None
+        self._access_probe_time = 0.0
+        self._access_probe_lock = threading.RLock()
 
     def register(self, class_: type[CommonLoginSession], name: str, allow_override: bool = True) -> None:
         """
@@ -105,6 +113,98 @@ class SessionManager:
         """获取指定访问方式对应的共享后端。"""
         return self.backends[access_mode]
 
+    def resolve_access_mode(self, *, force_refresh: bool = False,
+                            preferred: AccessMode | None = None) -> AccessMode:
+        """根据用户设置和网络探测结果解析本次校内系统访问方式。"""
+        from app.utils.config import cfg
+
+        if preferred is not None:
+            return preferred
+
+        policy = cfg.campusAccessPolicy.value
+        if policy == cfg.NetworkAccessPolicy.DIRECT:
+            return AccessMode.NORMAL
+        if policy == cfg.NetworkAccessPolicy.WEBVPN:
+            return AccessMode.WEBVPN
+
+        with self._access_probe_lock:
+            now = time.time()
+            if not force_refresh and self._access_probe_result is not None and now - self._access_probe_time < 5 * 60:
+                return self._access_probe_result
+
+            mode = AccessMode.NORMAL if self.can_reach_campus_network() else AccessMode.WEBVPN
+            self._access_probe_result = mode
+            self._access_probe_time = now
+            return mode
+
+    def can_reach_campus_network(self, *, timeout: float = 10.0) -> bool:
+        """通过访问教务系统首页判断当前网络是否可以直连校内系统。"""
+        try:
+            response = requests.get("https://jwxt.xjtu.edu.cn/", timeout=timeout)
+            response.close()
+            return True
+        except requests.RequestException:
+            return False
+
+    def start_background_access_probe(self) -> None:
+        """在自动访问模式下后台预热当前账号的网络探测结果。"""
+        from app.utils.config import cfg
+        from app.utils.log import logger
+
+        if cfg.campusAccessPolicy.value != cfg.NetworkAccessPolicy.AUTO:
+            return
+
+        def worker() -> None:
+            try:
+                mode = self.resolve_access_mode(force_refresh=True)
+                logger.info("校内系统访问模式自动探测完成：%s", mode.value)
+            except Exception:
+                logger.exception("校内系统访问模式自动探测失败")
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    def ensure_webvpn_login(self, username: str, password: str, *,
+                            account: Account | None = None,
+                            mfa_provider: MFAProvider | None = None,
+                            is_postgraduate: bool = False) -> None:
+        """确保当前账号的 WebVPN 后端已经登录 WebVPN 本身。"""
+        from app.utils.config import cfg
+        from app.utils.interactive_login import login_with_optional_mfa
+        from auth import WEBVPN_LOGIN_URL
+        from auth.new_login import NewLogin
+
+        webvpn_backend = self.backends[AccessMode.WEBVPN]
+        with webvpn_backend.login_lock:
+            if webvpn_backend.has_timeout():
+                webvpn_backend.has_login = False
+            if webvpn_backend.has_login:
+                return
+
+            account_type = NewLogin.POSTGRADUATE if self._is_postgraduate_account(account, is_postgraduate) else NewLogin.UNDERGRADUATE
+            login_util = NewLogin(WEBVPN_LOGIN_URL, session=webvpn_backend.session, visitor_id=str(cfg.loginId.value))
+            login_with_optional_mfa(
+                login_util,
+                username,
+                password,
+                account,
+                mfa_provider or self.mfa_provider,
+                account_type=account_type,
+                site_key="webvpn",
+                site_name="WebVPN",
+            )
+            webvpn_backend.has_login = True
+            webvpn_backend.reset_timeout()
+
+    @staticmethod
+    def _is_postgraduate_account(account: Account | None, is_postgraduate: bool) -> bool:
+        """判断当前登录上下文是否应使用研究生身份。"""
+        if is_postgraduate:
+            return True
+        if account is None:
+            return False
+        return getattr(account, "type", None) == getattr(account, "POSTGRADUATE", None)
+
     def set_mfa_provider(self, provider: MFAProvider | None) -> None:
         """
         设置当前账号会话管理器使用的 MFA 交互提供者。
@@ -114,6 +214,6 @@ class SessionManager:
     def _create_session(self, class_: type[CommonLoginSession]) -> CommonLoginSession:
         """创建一个站点 Session 适配器实例。"""
         backend = self.backends[class_.default_access_mode]
-        if class_.supports_webvpn:
-            return class_(backend=backend, webvpn_backend=self.backends[AccessMode.WEBVPN])
-        return class_(backend=backend)
+        session = class_(backend=backend)
+        session.session_manager = self
+        return session

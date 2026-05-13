@@ -1,7 +1,6 @@
 import datetime
 import json
 import time
-from enum import Enum
 
 import requests
 from PyQt5.QtCore import pyqtSignal
@@ -12,11 +11,6 @@ from .ProcessWidget import ProcessThread
 from ..sessions.attendance_session import AttendanceSession
 from ..utils import accounts, logger, cfg
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
-
-
-class AttendanceFlowLogin(Enum):
-    WEBVPN_LOGIN = 0
-    NORMAL_LOGIN = 1
 
 
 class ScheduleAttendanceThread(ProcessThread):
@@ -30,7 +24,6 @@ class ScheduleAttendanceThread(ProcessThread):
         self.util = None
         self.start_date = None
         self.end_date = None
-        self.login_method = None
         self.term_number = term_number
         self.term_map = None
         # 考勤流水（打卡信息）
@@ -42,27 +35,10 @@ class ScheduleAttendanceThread(ProcessThread):
     def session(self) -> AttendanceSession:
         return accounts.current.session_manager.get_session("attendance")
 
-    def webvpn_login(self):
-        """
-        通过 WebVPN 登录考勤系统
-        """
+    def login(self) -> None:
+        """按照统一访问策略登录考勤系统。"""
         self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
-        self.session.webvpn_login(
-            accounts.current.username,
-            accounts.current.password,
-            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
-            account=accounts.current,
-            mfa_provider=accounts.current.session_manager.mfa_provider,
-        )
-        self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
-
-    def normal_login(self):
-        """
-        直接登录考勤系统
-        """
-        self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
+        self.messageChanged.emit(self.tr("正在登录考勤系统..."))
         self.session.ensure_login(
             accounts.current.username,
             accounts.current.password,
@@ -70,7 +46,7 @@ class ScheduleAttendanceThread(ProcessThread):
             account=accounts.current,
             mfa_provider=accounts.current.session_manager.mfa_provider,
         )
-        self.messageChanged.emit(self.tr("直接登录考勤系统成功。"))
+        self.messageChanged.emit(self.tr("登录考勤系统成功。"))
 
     def run(self):
         # 强制重置可运行状态
@@ -83,10 +59,6 @@ class ScheduleAttendanceThread(ProcessThread):
             self.error.emit(self.tr("未登录"), self.tr("请先添加一个账户"))
             self.canceled.emit()
             return
-        if self.login_method is None:
-            self.error.emit(self.tr("未选择登录方式"), self.tr("请先选择登录方式"))
-            self.canceled.emit()
-            return
         if self.start_date is None or self.end_date is None:
             self.error.emit(self.tr("未选择日期"), self.tr("请先选择日期"))
             self.canceled.emit()
@@ -96,15 +68,10 @@ class ScheduleAttendanceThread(ProcessThread):
             # 如果当前账户已经登录并且登录态仍有效，重建代理对象，防止 util 和 session 不对应。
             if self.session.has_login and self.session.validate_login():
                 # 如果当前 session 已经登录，必须沿用当前登录方式。
-                self.login_method = AttendanceFlowLogin.NORMAL_LOGIN if self.session.login_method == self.session.LoginMethod.NORMAL else AttendanceFlowLogin.WEBVPN_LOGIN
-                self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+                self.util = Attendance(self.session, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
             else:
-                # 手动登录。
-                if self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN:
-                    self.webvpn_login()
-                else:
-                    self.normal_login()
-                self.util = Attendance(self.session, use_webvpn=self.login_method == AttendanceFlowLogin.WEBVPN_LOGIN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+                self.login()
+                self.util = Attendance(self.session, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
                 if not self.can_run:
                     self.canceled.emit()
                     return

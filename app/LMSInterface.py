@@ -13,6 +13,8 @@ from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, InfoBar, Inf
     TransparentToolButton, FluentIcon
 
 from .components.ProgressInfoBar import ProgressInfoBar
+from .sessions.lms_session import LMSSession
+from .sessions.session_backend import AccessMode
 from .threads.LMSFileDownloadThread import LMSFileDownloadThread
 from .threads.LMSThread import LMSThread, LMSAction
 from .threads.ProcessWidget import ProcessWidget
@@ -21,6 +23,7 @@ from .sub_interfaces.lms import PageStatus, LMSStartPage, LMSCoursePage, LMSActi
 from .sub_interfaces.lms.image_preview_dialog import LMSImagePreviewDialog
 from .sub_interfaces.lms.common import format_size as common_format_size, format_replay_video_label, \
     can_preview_as_image, is_mark_attachment_upload
+from auth import getVPNUrl
 from lms import LMSUtil
 from lms.models import ActivityType
 
@@ -793,13 +796,26 @@ class LMSInterface(ScrollArea):
         self.submissionPage.setSubmission(submission, self.selected_course_name, self.selected_activity_name)
         self.navigate_to(self.submissionPage, self.tr("提交详情"))
 
-    def _get_lms_util(self) -> LMSUtil | None:
+    def ensure_lms_login(self) -> tuple[LMSSession | None, str | None]:
+        """确保当前账户已经登录思源学堂，并返回可用 session。"""
         current_account = accounts.current
         if current_account is None:
-            return None
+            return None, self.tr("请先添加一个账户")
         try:
             session = current_account.session_manager.get_session("lms")
-        except Exception:
+            session.ensure_login(
+                current_account.username,
+                current_account.password,
+                account=current_account,
+                mfa_provider=current_account.session_manager.mfa_provider,
+            )
+        except Exception as e:
+            return None, str(e)
+        return session, None
+
+    def _get_lms_util(self) -> LMSUtil | None:
+        session, _ = self.ensure_lms_login()
+        if session is None:
             return None
         return LMSUtil(session)
 
@@ -966,6 +982,14 @@ class LMSInterface(ScrollArea):
         if not isinstance(url, str) or not url:
             self.error(self.tr("无法查看"), self.tr("该文件没有可用链接"), parent=self)
             return
+        current_account = accounts.current
+        if current_account is not None:
+            try:
+                access_mode = current_account.session_manager.resolve_access_mode()
+                if access_mode == AccessMode.WEBVPN and url.startswith(("http://", "https://")):
+                    url = getVPNUrl(url)
+            except Exception:
+                pass
         QDesktopServices.openUrl(QUrl(url))
 
     @pyqtSlot(dict)
@@ -989,7 +1013,10 @@ class LMSInterface(ScrollArea):
             if current_account is None:
                 self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
                 return
-            session = current_account.session_manager.get_session("lms")
+            session, error = self.ensure_lms_login()
+            if session is None:
+                self.error(self.tr("未登录"), error or self.tr("请先添加一个账户"), parent=self)
+                return
             bar = ProgressInfoBar(title=self.tr("附件下载"), content=self.tr("准备下载"), parent=self,
                                   position=InfoBarPosition.BOTTOM_RIGHT)
             thread = LMSFileDownloadThread(session, url, path, os.path.basename(path), parent=self)
@@ -1116,10 +1143,9 @@ class LMSInterface(ScrollArea):
         if accounts.current is None:
             return None, self.tr("请先登录后再预览")
 
-        try:
-            session = accounts.current.session_manager.get_session("lms")
-        except Exception as e:
-            return None, str(e)
+        session, error = self.ensure_lms_login()
+        if session is None:
+            return None, error
 
         queue = self._resolve_upload_urls(file_info)
         tried: set[str] = set()
@@ -1990,10 +2016,9 @@ class LMSInterface(ScrollArea):
         if accounts.current is None:
             return None, self.tr("请先登录后再预览")
 
-        try:
-            session = accounts.current.session_manager.get_session("lms")
-        except Exception as e:
-            return None, str(e)
+        session, error = self.ensure_lms_login()
+        if session is None:
+            return None, error
 
         queue = self._resolve_upload_urls(file_info)
         tried: set[str] = set()

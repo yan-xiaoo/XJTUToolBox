@@ -8,7 +8,6 @@ import os
 import requests
 
 from auth import ServerError
-from auth.util import getVPNUrl
 
 
 @dataclass
@@ -400,13 +399,11 @@ class GraduateAutoJudge:
     研究生评教系统交互 API。
     请注意研究生评教系统需要校园网内访问，因此需要在校园网内登录，或者使用 WebVPN 登录。
     """
-    def __init__(self, session, use_webvpn=False):
+    def __init__(self, session):
         """
         :param session: 已登录研究生评教系统的 requests.Session 对象
-        :param use_webvpn: 是否使用 WebVPN 登录
         """
         self.session = session
-        self.use_webvpn = use_webvpn
 
     def getQuestionnaires(self) -> List[GraduateQuestionnaire]:
         """
@@ -548,15 +545,11 @@ class GraduateAutoJudge:
             raise ServerError(data["code"], data["msg"])
 
     def _get(self, url, **kwargs) -> requests.Response:
-        if self.use_webvpn:
-            url = getVPNUrl(url)
         response = self.session.get(url, **kwargs)
         response.raise_for_status()
         return response
 
     def _post(self, url, **kwargs) -> requests.Response:
-        if self.use_webvpn:
-            url = getVPNUrl(url)
         response = self.session.post(url, **kwargs)
         response.raise_for_status()
         return response

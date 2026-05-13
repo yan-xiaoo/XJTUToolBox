@@ -90,6 +90,7 @@ class MainWindow(MSFluentWindow):
         # 为当前已知账户安装全局 MFA provider, 这样每个 session 都能找到它来处理 MFA 请求了
         self._install_mfa_provider_for_accounts()
         accounts.accountAdded.connect(self._install_mfa_provider_for_accounts)
+        self._start_access_probe_for_current_account()
 
         self.light_icon = QIcon("assets/icons/toolbox_light.png")
         self.dark_icon = QIcon("assets/icons/toolbox_dark.png")
@@ -137,6 +138,7 @@ class MainWindow(MSFluentWindow):
         self.addScheduledTask(cfg.scoreAutoSearch, self.score_interface.onTimerSearch)
 
         accounts.currentAccountChanged.connect(self.on_avatar_update)
+        accounts.currentAccountChanged.connect(self._start_access_probe_for_current_account)
         self.account_interface.avatarChanged.connect(self.on_avatar_update)
         self.on_avatar_update()
 
@@ -190,6 +192,15 @@ class MainWindow(MSFluentWindow):
         """
         for account in accounts:
             account.session_manager.set_mfa_provider(self.mfaProvider)
+
+    def _start_access_probe_for_current_account(self) -> None:
+        """
+        在自动访问模式下为当前账户后台预热校内系统访问方式。
+        访问一个校外无法访问的网址，从而猜测是否需要使用 WebVPN 连接。
+        """
+        if accounts.current is None:
+            return
+        accounts.current.session_manager.start_background_access_probe()
 
     @pyqtSlot(object)
     def show_mfa_dialog(self, request: object) -> None:

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from auth.constant import LMS_LOGIN_URL
-from auth.new_login import NewLogin
+from auth.new_login import NewLogin, NewWebVPNLogin
 from app.utils.interactive_login import login_with_optional_mfa
 from .common_session import CommonLoginSession
+from .session_backend import AccessMode
 from ..utils import cfg
 
 
@@ -13,13 +14,15 @@ class LMSSession(CommonLoginSession):
     """
     site_key = "lms"
     site_name = "思源学堂"
+    supports_webvpn = True
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_url = LMS_LOGIN_URL
         if not login_url.startswith(("http://", "https://")):
             login_url = f"https://{login_url}"
 
-        login_util = NewLogin(login_url, session=self, visitor_id=str(cfg.loginId.value))
+        login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin
+        login_util = login_class(login_url, session=self, visitor_id=str(cfg.loginId.value))
         account, mfa_provider = self.get_login_context(kwargs)
         login_with_optional_mfa(
             login_util,

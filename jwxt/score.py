@@ -101,7 +101,6 @@ class Score:
                                          "pageNumber": 1,
                                          "querySetting": json.dumps(query_setting)
                                      })
-
         data = response.json()
         if jwapp_format:
             data = data["datas"]["xscjcx"]["rows"]

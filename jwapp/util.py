@@ -1,6 +1,6 @@
 import datetime
 
-from auth import JWAPP_URL, NewLogin, ServerError
+from auth import JWAPP_URL, NewLogin, NewWebVPNLogin, ServerError
 
 
 class JwappNewLogin(NewLogin):
@@ -10,6 +10,24 @@ class JwappNewLogin(NewLogin):
         super().__init__(JWAPP_URL, session=session, visitor_id=visitor_id)
 
     def postLogin(self, login_response) -> None:
+        try:
+            token = login_response.url.split("token=")[1].split('&')[0]
+        except IndexError:
+            raise ServerError(500, "服务器出现内部错误。")
+        self.session.headers.update({"Authorization": token})
+
+        return self.session
+
+
+class JwappNewWebVPNLogin(NewWebVPNLogin):
+    """通过 WebVPN 登录移动教务系统，并在登录后保存移动教务 token。"""
+
+    def __init__(self, session: object | None = None, visitor_id: object | None = None) -> None:
+        """创建移动教务 WebVPN 登录器。"""
+        super().__init__(JWAPP_URL, session=session, visitor_id=visitor_id)
+
+    def postLogin(self, login_response: object) -> object:
+        """从登录回调 URL 中提取移动教务 token。"""
         try:
             token = login_response.url.split("token=")[1].split('&')[0]
         except IndexError:

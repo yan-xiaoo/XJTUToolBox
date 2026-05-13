@@ -13,7 +13,6 @@ from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
 from qfluentwidgets import FluentIcon as FIF
 
 from .components.ScheduleTable import ScheduleTableWidget
-from .sessions.attendance_session import AttendanceSession
 from .sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from .sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
 from .sub_interfaces.LessonConflictDialog import LessonConflictDialog
@@ -24,9 +23,9 @@ from .threads.GraduateScheduleThread import GraduateScheduleThread
 from .threads.HolidayThread import HolidayThread
 from .threads.ProcessWidget import ProcessWidget
 from .threads.ScheduleAttendanceMonitorThread import ScheduleAttendanceMonitorThread
-from .threads.ScheduleAttendanceThread import ScheduleAttendanceThread, AttendanceFlowLogin
+from .threads.ScheduleAttendanceThread import ScheduleAttendanceThread
 from .threads.ScheduleThread import ScheduleThread
-from .utils import StyleSheet, accounts, cfg
+from .utils import StyleSheet, accounts
 from .utils.cache import cacheManager
 from .utils.migrate_data import account_data_directory
 from attendance.attendance import AttendanceWaterRecord, AttendanceFlow, WaterType, FlowRecordType
@@ -765,26 +764,6 @@ class ScheduleInterface(ScrollArea):
 
         self.schedule_attendance_thread.start_date = start_date
         self.schedule_attendance_thread.end_date = end_date
-        setting = cfg.get(cfg.defaultAttendanceLoginMethod)
-        if setting == cfg.AttendanceLoginMethod.WEBVPN:
-            self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
-        elif setting == cfg.AttendanceLoginMethod.NORMAL:
-            self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
-        else:
-            if not self.schedule_attendance_thread.session.has_login:
-                w = MessageBox(self.tr("获取考勤"), self.tr("您想使用什么方式登录考勤系统？"),
-                               self)
-                w.yesButton.setText(self.tr("WebVPN 登录"))
-                w.cancelButton.setText(self.tr("直接登录"))
-                if w.exec():
-                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
-                else:
-                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
-            else:
-                if self.schedule_attendance_thread.session.login_method == AttendanceSession.LoginMethod.NORMAL:
-                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.NORMAL_LOGIN
-                else:
-                    self.schedule_attendance_thread.login_method = AttendanceFlowLogin.WEBVPN_LOGIN
         self.lock()
         self.process_widget_attendance.setVisible(True)
         self.schedule_attendance_thread.start()

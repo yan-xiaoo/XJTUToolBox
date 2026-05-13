@@ -5,6 +5,7 @@ from enum import Enum
 import requests
 
 from auth import ServerError
+from app.sessions.session_backend import AccessMode
 from ..sessions.attendance_session import AttendanceSession
 from ..utils import Account, cfg, logger, accounts
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
@@ -39,34 +40,29 @@ class AttendanceFlowThread(ProcessThread):
         """
         return self.account.session_manager.get_session("attendance")
 
-    def webvpn_login(self):
+    def login(self, preferred_access_mode: AccessMode | None = None) -> None:
+        """按照统一访问策略登录考勤系统，可传入本次访问方式覆盖。"""
         self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
-        self.session.webvpn_login(
-            self.account.username,
-            self.account.password,
-            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
-            account=self.account,
-            mfa_provider=self.account.session_manager.mfa_provider,
-        )
-        self.messageChanged.emit(self.tr("登录 WebVPN 成功。"))
-
-    def normal_login(self):
-        self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
+        if preferred_access_mode == AccessMode.WEBVPN:
+            self.messageChanged.emit(self.tr("正在通过 WebVPN 登录考勤系统..."))
+        elif preferred_access_mode == AccessMode.NORMAL:
+            self.messageChanged.emit(self.tr("正在直接登录考勤系统..."))
+        else:
+            self.messageChanged.emit(self.tr("正在登录考勤系统..."))
         self.session.ensure_login(
             self.account.username,
             self.account.password,
             is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
             account=self.account,
             mfa_provider=self.account.session_manager.mfa_provider,
+            preferred_access_mode=preferred_access_mode,
         )
-        self.messageChanged.emit(self.tr("直接登录考勤系统成功。"))
+        self.messageChanged.emit(self.tr("登录考勤系统成功。"))
 
     def search(self, session):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在查询考勤流水..."))
-        lookup_wrapper = Attendance(session, use_webvpn=self.session.login_method == AttendanceSession.LoginMethod.WEBVPN, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
+        lookup_wrapper = Attendance(session, is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE)
         while True:
             try:
                 result = lookup_wrapper.getFlowRecordWithPage(self.page, self.size)
@@ -86,33 +82,24 @@ class AttendanceFlowThread(ProcessThread):
         根据存储的上次使用的登录方法，再次登录。
         """
         if self.last_login_choice == AttendanceFlowChoice.WEBVPN_LOGIN:
-            self.webvpn_login()
+            self.login(AccessMode.WEBVPN)
         else:
-            self.normal_login()
+            self.login(AccessMode.NORMAL)
 
     def run(self):
         # 重设自身为可执行
         self.can_run = True
-        # 如果用户已经选择过登录方式，就不再更改
-        if self.last_login_choice is None:
-            # 根据设置更改登录方式
-            setting = cfg.get(cfg.defaultAttendanceLoginMethod)
-            if setting == cfg.AttendanceLoginMethod.WEBVPN:
-                self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
-            elif setting == cfg.AttendanceLoginMethod.NORMAL:
-                self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
-
         try:
             if self.account is None:
                 raise ValueError(self.tr("账户信息为空"))
 
             if self.choice == AttendanceFlowChoice.WEBVPN_LOGIN:
-                self.webvpn_login()
+                self.login(AccessMode.WEBVPN)
                 self.last_login_choice = AttendanceFlowChoice.WEBVPN_LOGIN
                 self.successMessage.emit(self.tr("WebVPN 登录成功"))
                 self.hasFinished.emit()
             elif self.choice == AttendanceFlowChoice.NORMAL_LOGIN:
-                self.normal_login()
+                self.login(AccessMode.NORMAL)
                 self.last_login_choice = AttendanceFlowChoice.NORMAL_LOGIN
                 self.successMessage.emit(self.tr("直接登录考勤系统成功。"))
                 self.hasFinished.emit()
@@ -120,13 +107,12 @@ class AttendanceFlowThread(ProcessThread):
                 if not self.session.has_login or not self.session.validate_login():
                     if self.last_login_choice is not None:
                         self.login_again()
-                        result = self.search(self.session)
-                        self.flowRecord.emit(result)
-                        self.successMessage.emit(self.tr("获得考勤流水成功。"))
-                        self.hasFinished.emit()
                     else:
-                        self.error.emit(self.tr("请先选择一种方式登录"), "")
-                        self.canceled.emit()
+                        self.login()
+                    result = self.search(self.session)
+                    self.flowRecord.emit(result)
+                    self.successMessage.emit(self.tr("获得考勤流水成功。"))
+                    self.hasFinished.emit()
                 else:
                     result = self.search(self.session)
                     self.flowRecord.emit(result)

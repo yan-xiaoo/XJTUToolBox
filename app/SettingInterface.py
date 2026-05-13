@@ -237,17 +237,20 @@ class SettingInterface(ScrollArea):
         self.saveKeyringCard.checkedChanged.connect(self._onSaveKeyringChanged)
         self._onUpdateEncryptStatus()
 
+        # 校园网访问设置组
+        self.campusAccessGroup = SettingCardGroup(self.tr("校园网访问"), self.view)
+        self.campusAccessPolicyCard = ComboBoxSettingCard(cfg.campusAccessPolicy, FIF.GLOBE,
+                                                          self.tr("校内系统访问方式"),
+                                                          self.tr("自动判断当前网络环境，也可固定通过 WebVPN 或直接连接"),
+                                                          texts=[self.tr("自动选择"), self.tr("强制 WebVPN"),
+                                                                 self.tr("强制直连")],
+                                                          parent=self.campusAccessGroup)
+        self.campusAccessGroup.addSettingCard(self.campusAccessPolicyCard)
+
         # 考勤设置组
         self.attendanceGroup = SettingCardGroup(self.tr("考勤"), self.view)
-        self.loginMethodCard = ComboBoxSettingCard(cfg.defaultAttendanceLoginMethod, FIF.GLOBE,
-                                                   self.tr("考勤默认连接方式"),
-                                                   self.tr("选择是否默认通过 WebVPN 连接考勤系统"),
-                                                   texts=[self.tr("每次都询问"), self.tr("直接连接"),
-                                                          self.tr("WebVPN 连接")],
-                                                   parent=self.attendanceGroup)
         self.autoRetryCard = CustomSwitchSettingCard(FIF.ACCEPT, self.tr("自动重试查询"),
                                                      self.tr("在考勤系统查询失败时自动重试"), cfg.autoRetryAttendance, self.attendanceGroup)
-        self.attendanceGroup.addSettingCard(self.loginMethodCard)
         self.attendanceGroup.addSettingCard(self.autoRetryCard)
 
         # 成绩查询组
@@ -366,6 +369,7 @@ class SettingInterface(ScrollArea):
 
         # 添加设置组到布局
         self.expandLayout.addWidget(self.accountGroup)
+        self.expandLayout.addWidget(self.campusAccessGroup)
         self.expandLayout.addWidget(self.attendanceGroup)
         self.expandLayout.addWidget(self.scoreGroup)
         self.expandLayout.addWidget(self.lmsGroup)
@@ -383,9 +387,10 @@ class SettingInterface(ScrollArea):
         # 连接信号-槽
         self.themeCard.comboBox.currentIndexChanged.connect(lambda: setTheme(cfg.get(cfg.themeMode), lazy=True))
         self.themeColorCard.colorChanged.connect(lambda c: setThemeColor(c, lazy=True))
-        self.loginMethodCard.comboBox.currentIndexChanged.connect(lambda: cfg.set(cfg.defaultAttendanceLoginMethod,
-                                                                                  cfg.AttendanceLoginMethod(
-                                                                                      self.loginMethodCard.comboBox.currentIndex())))
+        self.campusAccessPolicyCard.comboBox.currentIndexChanged.connect(
+            lambda: cfg.set(cfg.campusAccessPolicy, cfg.NetworkAccessPolicy(
+                self.campusAccessPolicyCard.comboBox.currentIndex()))
+        )
         cfg.traySetting.valueChanged.connect(self._onTraySettingChanged)
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)

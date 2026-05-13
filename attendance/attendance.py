@@ -6,7 +6,7 @@ from enum import Enum
 
 import requests
 
-from auth import ATTENDANCE_URL, ATTENDANCE_WEBVPN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL, ServerError, getVPNUrl
+from auth import ATTENDANCE_URL, ATTENDANCE_WEBVPN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL, ServerError
 from auth.new_login import NewLogin, NewWebVPNLogin
 from schedule import Schedule, WeekSchedule, Lesson
 
@@ -151,19 +151,16 @@ class Attendance:
     请注意：考勤系统对同一个 session 的连接存在时间限制。因此，不要持久性的存储此类的对象；每次使用时通过 AttendanceNewLogin 或
     AttendanceNewWebVPNLogin 重新得到一个登录的 session，然后重新创建此对象。
     """
-    def __init__(self, session: requests.Session, use_webvpn=False, is_postgraduate=False):
+    def __init__(self, session: requests.Session, is_postgraduate=False):
         """
         创建一个接口对象
         :param session: 已经登录考勤系统的 session 对象
-        :param use_webvpn: 是否通过 WebVPN 访问考勤系统。如果设为 true，传入的 session 必须已经登录 webvpn 系统。
         :param is_postgraduate: 是否为研究生。true：是；false：不是（本科生）
         本科生和研究生的网站接口完全一致，但是二者不在同一域名下（bkkq.xjtu.edu.cn 和 yjskq.xjtu.edu.cn）。此参数将用于决定访问哪个系统。
         """
         self.session = session
         # 缓存学期编号
         self._bh = None
-        # 是否使用 WebVPN
-        self.use_vpn = use_webvpn
         # 是否为研究生
         self.is_postgraduate = is_postgraduate
 
@@ -551,8 +548,4 @@ class Attendance:
         将接口路径与域名（bkkq.xjtu.edu.cn 或 yjskq.xjtu.edu.cn）拼接成完整的 URL
         """
         domain = "yjskq.xjtu.edu.cn" if self.is_postgraduate else "bkkq.xjtu.edu.cn"
-        if self.use_vpn:
-            return getVPNUrl(f"https://{domain}{path}")
-        else:
-            return f"https://{domain}{path}"
-
+        return f"https://{domain}{path}"

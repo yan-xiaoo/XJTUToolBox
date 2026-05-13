@@ -225,13 +225,15 @@ class StrListSerializer(ConfigSerializer):
         return []
 
 
-class AttendanceLoginMethod(Enum):
-    # 不设置，每次询问
-    NONE = 0
-    # 直接登录
-    NORMAL = 1
-    # WebVPN 登录
-    WEBVPN = 2
+class NetworkAccessPolicy(Enum):
+    """校内系统访问策略。"""
+
+    # 自动判断当前网络环境
+    AUTO = 0
+    # 强制通过 WebVPN 访问校内系统
+    WEBVPN = 1
+    # 强制直接访问校内系统
+    DIRECT = 2
 
 
 class TraySetting(Enum):
@@ -244,18 +246,18 @@ class TraySetting(Enum):
 
 
 class Config(QConfig):
-    AttendanceLoginMethod = AttendanceLoginMethod
+    NetworkAccessPolicy = NetworkAccessPolicy
 
     hasReadLoginTip = OptionsConfigItem("one_time_notice", "read_login_tip", False,
                                         OptionsValidator([True, False]), BooleanSerializer())
     hasReadCloudflareTip = OptionsConfigItem("one_time_notice", "read_cloudflare_tip", False,
                                              OptionsValidator([True, False]), BooleanSerializer())
-    defaultAttendanceLoginMethod = OptionsConfigItem("Settings", "default_attendance_login_method",
-                                                     AttendanceLoginMethod.NONE,
-                                                     OptionsValidator(
-                                                         [AttendanceLoginMethod.NONE, AttendanceLoginMethod.NORMAL,
-                                                          AttendanceLoginMethod.WEBVPN]),
-                                                     EnumSerializer(AttendanceLoginMethod))
+    campusAccessPolicy = OptionsConfigItem("Settings", "campus_access_policy",
+                                           NetworkAccessPolicy.AUTO,
+                                           OptionsValidator([NetworkAccessPolicy.AUTO,
+                                                             NetworkAccessPolicy.WEBVPN,
+                                                             NetworkAccessPolicy.DIRECT]),
+                                           EnumSerializer(NetworkAccessPolicy))
     checkUpdateAtStartTime = OptionsConfigItem("Settings", "check_update_at_start_time",
                                                True, OptionsValidator([True, False]), BooleanSerializer())
     prereleaseEnable = OptionsConfigItem("Settings", "prerelease_enable",

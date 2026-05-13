@@ -4,9 +4,11 @@ from PyQt5.QtCore import Qt, pyqtSlot, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFrame
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ScrollArea, PrimaryPushButton, \
-    InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, TitleLabel, MessageBox
+    InfoBar, InfoBarPosition, CommandBar, Action, FluentIcon, TitleLabel
 from jwxt import Questionnaire, QuestionnaireTemplate
 from gste.judge import GraduateQuestionnaire, GraduateQuestionnaireData
+from auth import getVPNUrl
+from app.sessions.session_backend import AccessMode
 from .GraduateJudgeOptionInterface import GraduateJudgeOptionMessageBox
 from .JudgeOptionInterface import JudgeOptionMessageBox
 from .JudgeAllOptionInterface import JudgeAllOptionMessageBox
@@ -194,9 +196,20 @@ class AutoJudgeInterface(ScrollArea):
     @pyqtSlot()
     def onViewEhallTriggered(self):
         if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
-            QDesktopServices.openUrl(QUrl("http://gste.xjtu.edu.cn/"))
+            self._open_campus_url("http://gste.xjtu.edu.cn/")
         else:
-            QDesktopServices.openUrl(QUrl("https://ehall.xjtu.edu.cn/"))
+            self._open_campus_url("https://ehall.xjtu.edu.cn/")
+
+    def _open_campus_url(self, url: str) -> None:
+        """根据当前访问策略打开校内系统链接。"""
+        if accounts.current is not None:
+            try:
+                access_mode = accounts.current.session_manager.resolve_access_mode()
+                if access_mode == AccessMode.WEBVPN:
+                    url = getVPNUrl(url)
+            except Exception:
+                pass
+        QDesktopServices.openUrl(QUrl(url))
 
     def lockAllCards(self):
         for card in self.questionnaireWidgets:
@@ -308,17 +321,6 @@ class AutoJudgeInterface(ScrollArea):
             return
 
         if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
-            # 研究生评教系统是需要 WebVPN 的。如果没有登录的话，询问用户想要怎么登录。
-            if not self.gradateThread.session.has_login:
-                w = MessageBox(self.tr("开始评教"), self.tr("您想使用什么方式登录评教系统？"),
-                               self)
-                w.yesButton.setText(self.tr("WebVPN 登录"))
-                w.cancelButton.setText(self.tr("直接登录"))
-                if w.exec():
-                    self.gradateThread.session.login_method = self.gradateThread.session.LoginMethod.WEBVPN
-                else:
-                    self.gradateThread.session.login_method = self.gradateThread.session.LoginMethod.NORMAL
-
             self.gradateThread.choice = GraduateJudgeChoice.GET_COURSES
             self.gradateThread.start()
         else:

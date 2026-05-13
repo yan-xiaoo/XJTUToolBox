@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from urllib.parse import urlparse
 from abc import ABCMeta, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from .session_backend import AccessMode, SessionBackend
 if TYPE_CHECKING:
     from app.utils.account import Account
     from app.utils.mfa import MFAProvider
+    from app.utils.session_manager import SessionManager
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class CommonLoginSession(metaclass=ABCMeta):
         self.login_method = None
         self._login_context: LoginContext | None = None
         self._login_depth = 0
+        self.session_manager: SessionManager | None = None
         # 自身防止同时登录的锁
         self.login_lock = threading.RLock()
 
@@ -101,16 +104,20 @@ class CommonLoginSession(metaclass=ABCMeta):
         if value:
             self.backend.has_login = True
 
-    def login(self, username: str, password: str, **kwargs: object) -> None:
+    def login(self, username: str, password: str, preferred_access_mode: AccessMode | None = None,
+              **kwargs: object) -> None:
         """
         登录指定的网站。
         """
         with self.login_lock:
             self._remember_login_context(username, password, kwargs)
+            self.choose_backend(preferred=preferred_access_mode, **kwargs)
+            self._ensure_webvpn_backend_login(username, password, **kwargs)
             self.clear_site_state()
             self._run_login(username, password, **kwargs)
 
-    def ensure_login(self, username: str, password: str, force: bool = False, **kwargs: object) -> bool:
+    def ensure_login(self, username: str, password: str, force: bool = False,
+                     preferred_access_mode: AccessMode | None = None, **kwargs: object) -> bool:
         """
         确保当前业务站点已经具有可用登录态。
 
@@ -122,10 +129,12 @@ class CommonLoginSession(metaclass=ABCMeta):
         """
         with self.login_lock:
             self._remember_login_context(username, password, kwargs)
+            self.choose_backend(preferred=preferred_access_mode, **kwargs)
             if not force and self.has_login and self.validate_login():
                 return False
 
             self.invalidate_login()
+            self._ensure_webvpn_backend_login(username, password, **kwargs)
             self._run_login(username, password, **kwargs)
             return True
 
@@ -159,6 +168,7 @@ class CommonLoginSession(metaclass=ABCMeta):
 
         request_headers = kwargs.pop("headers", None)
         skip_auth_check = kwargs.pop("_skip_auth_check", False) is True
+        skip_webvpn_rewrite = kwargs.pop("_skip_webvpn_rewrite", False) is True
         headers: dict[str, str] = {}
         # 使用公用 headers
         headers.update(self.backend.session.headers)
@@ -170,7 +180,9 @@ class CommonLoginSession(metaclass=ABCMeta):
             for key, value in request_headers.items():
                 headers[str(key)] = str(value)
 
-        response = self.backend.session.request(method, url, headers=headers, **kwargs)
+        prepared_url = self.prepare_url_for_access_mode(url, skip_webvpn_rewrite=skip_webvpn_rewrite)
+        prepared_headers = self.prepare_headers_for_access_mode(headers, skip_webvpn_rewrite=skip_webvpn_rewrite)
+        response = self.backend.session.request(method, prepared_url, headers=prepared_headers, **kwargs)
         if skip_auth_check or self._login_depth > 0 or not self.is_auth_failure_response(response):
             return response
 
@@ -188,6 +200,49 @@ class CommonLoginSession(metaclass=ABCMeta):
     def set_backend(self, backend: SessionBackend) -> None:
         """切换当前站点适配器使用的共享后端。"""
         self.backend = backend
+
+    def choose_backend(self, *, preferred: AccessMode | None = None, **kwargs: object) -> AccessMode:
+        """根据统一访问策略选择当前站点适配器使用的后端。"""
+        if self.session_manager is None:
+            return self.access_mode
+
+        target_mode = self.session_manager.resolve_access_mode(preferred=preferred)
+        if target_mode == AccessMode.WEBVPN and not self.supports_webvpn:
+            target_mode = AccessMode.NORMAL
+
+        if target_mode != self.access_mode:
+            self.set_backend(self.session_manager.get_backend(target_mode))
+            self.clear_site_state()
+        return target_mode
+
+    def prepare_url_for_access_mode(self, url: str, *, skip_webvpn_rewrite: bool = False) -> str:
+        """根据当前访问方式准备实际请求 URL。"""
+        if skip_webvpn_rewrite or self.access_mode != AccessMode.WEBVPN:
+            return url
+        if not self._should_rewrite_to_webvpn(url):
+            return url
+
+        from auth import getVPNUrl
+
+        return getVPNUrl(url)
+
+    def prepare_headers_for_access_mode(self, headers: dict[str, str], *,
+                                        skip_webvpn_rewrite: bool = False) -> dict[str, str]:
+        """根据当前访问方式准备本次请求使用的 headers 副本。"""
+        if skip_webvpn_rewrite or self.access_mode != AccessMode.WEBVPN:
+            return headers
+
+        prepared = dict(headers)
+        referer = prepared.get("Referer") or prepared.get("referer")
+        if referer is not None and self._should_rewrite_to_webvpn(referer):
+            from auth import getVPNUrl
+
+            rewritten = getVPNUrl(referer)
+            if "Referer" in prepared:
+                prepared["Referer"] = rewritten
+            else:
+                prepared["referer"] = rewritten
+        return prepared
 
     def clear_site_state(self) -> None:
         """清理当前站点适配器状态，不清理共享 cookie。"""
@@ -210,6 +265,30 @@ class CommonLoginSession(metaclass=ABCMeta):
         """清理当前访问方式共享后端的全部 cookie。"""
         self.backend.clear_cookies()
         self.clear_site_state()
+
+    def _ensure_webvpn_backend_login(self, username: str, password: str, **kwargs: object) -> None:
+        """在 WebVPN 访问方式下确保 WebVPN 后端本身已经登录。"""
+        if self.access_mode != AccessMode.WEBVPN or self.session_manager is None:
+            return
+        account, mfa_provider = self.get_login_context(kwargs)
+        self.session_manager.ensure_webvpn_login(
+            username,
+            password,
+            account=account,
+            mfa_provider=mfa_provider,
+            is_postgraduate=kwargs.get("is_postgraduate") is True,
+        )
+
+    @staticmethod
+    def _should_rewrite_to_webvpn(url: str) -> bool:
+        """判断 URL 是否应当被改写为 WebVPN 地址。"""
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return False
+        hostname = parsed.hostname or ""
+        if hostname == "webvpn.xjtu.edu.cn":
+            return False
+        return hostname == "xjtu.edu.cn" or hostname.endswith(".xjtu.edu.cn")
 
     def get_login_context(self, kwargs: dict[str, object]) -> tuple[Account | None, MFAProvider | None]:
         """
