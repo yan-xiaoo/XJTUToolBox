@@ -21,16 +21,20 @@ class MessageBoxHtml(MessageBoxBase):
         self.contentLabel.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.contentLabel.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-        available_height = parent.height() if parent is not None else 720
-        content_max_height = max(240, min(520, int(available_height * 0.62)))
+        self._content_max_height = max(240, min(520, int((parent.height() if parent is not None else 720) * 0.62)))
         self.contentLabel.setMinimumWidth(520)
-        self.contentLabel.setMaximumHeight(content_max_height)
+        self.contentLabel.setMaximumHeight(self._content_max_height)
         self.contentLabel.document().setTextWidth(500)
-        content_height = min(content_max_height, max(96, int(self.contentLabel.document().size().height()) + 12))
-        self.contentLabel.setFixedHeight(content_height)
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.contentLabel)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 在 showEvent 中计算 document 高度，此时 widget 已布局，高度值准确
+        # 如果在 __init__ 中提前计算并 setFixedHeight，布局未完成会导致高度不准、内容被裁剪且无法滚动
+        doc_height = int(self.contentLabel.document().size().height()) + 12
+        self.contentLabel.setFixedHeight(min(self._content_max_height, max(96, doc_height)))
 
     @pyqtSlot(str)
     def open_url(self, url: str) -> None:
