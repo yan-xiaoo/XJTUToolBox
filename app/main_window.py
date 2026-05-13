@@ -38,6 +38,7 @@ from app.LMSInterface import LMSInterface
 from .sub_interfaces.NoticeInterface import NoticeInterface
 from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
+from .threads.SessionKeepAliveThread import SessionKeepAliveThread
 from .threads.UpdateThread import UpdateThread, UpdateStatus
 from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all, QtMFAProvider, MFAAction, \
     MFAActionType, MFARequest, QtQRCodeLoginProvider, QRCodeLoginAction, QRCodeLoginActionType, QRCodeLoginRequest
@@ -148,6 +149,12 @@ class MainWindow(MSFluentWindow):
         # 通知自动查询
         self.addScheduledTask(cfg.noticeAutoSearch, self.notice_interface.onTimerSearch)
         self.addScheduledTask(cfg.scoreAutoSearch, self.score_interface.onTimerSearch)
+        self.session_keep_alive_thread: SessionKeepAliveThread | None = None
+        self.session_keep_alive_timer = QTimer(self)
+        self.session_keep_alive_timer.timeout.connect(self._start_session_keep_alive)
+        cfg.sessionKeepAliveEnabled.valueChanged.connect(lambda _: self._restart_session_keep_alive_timer())
+        cfg.sessionKeepAliveInterval.valueChanged.connect(lambda _: self._restart_session_keep_alive_timer())
+        self._restart_session_keep_alive_timer()
 
         accounts.currentAccountChanged.connect(self.on_avatar_update)
         accounts.currentAccountChanged.connect(self._start_access_probe_for_current_account)
@@ -417,6 +424,43 @@ class MainWindow(MSFluentWindow):
         config.valueChanged.connect(lambda _:  timer.start(60 * 1000) if config.value else timer.stop())
         if config.value:
             timer.start(60 * 1000)
+
+    def _session_keep_alive_interval_ms(self) -> int:
+        """返回后台 Session 保活计时器的毫秒间隔。"""
+        return int(cfg.sessionKeepAliveInterval.value.value) * 60 * 1000
+
+    @pyqtSlot()
+    def _restart_session_keep_alive_timer(self) -> None:
+        """按照当前设置重启后台 Session 保活计时器。"""
+        if not cfg.sessionKeepAliveEnabled.value:
+            self.session_keep_alive_timer.stop()
+            return
+        self.session_keep_alive_timer.start(self._session_keep_alive_interval_ms())
+
+    @pyqtSlot()
+    def _start_session_keep_alive(self) -> None:
+        """在没有保活线程运行时启动一次后台 Session 保活。"""
+        if not cfg.sessionKeepAliveEnabled.value:
+            return
+        if self.session_keep_alive_thread is not None:
+            if self.session_keep_alive_thread.isRunning():
+                return
+            self.session_keep_alive_thread.deleteLater()
+            self.session_keep_alive_thread = None
+        if accounts.current is None:
+            return
+
+        thread = SessionKeepAliveThread(accounts.current, self)
+        self.session_keep_alive_thread = thread
+        thread.finished.connect(lambda current_thread=thread: self._on_session_keep_alive_finished(current_thread))
+        thread.start()
+
+    @pyqtSlot(object)
+    def _on_session_keep_alive_finished(self, thread: SessionKeepAliveThread) -> None:
+        """在后台 Session 保活线程结束后清理线程对象。"""
+        if self.session_keep_alive_thread is thread:
+            self.session_keep_alive_thread = None
+        thread.deleteLater()
 
     @pyqtSlot()
     def on_theme_changed(self):

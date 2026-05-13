@@ -33,6 +33,7 @@ class SessionBackend:
         self.timeout = timeout
         self.last_request_time = 0.0
         self.has_login = False
+        self.webvpn_has_login = False
         self.restored_auth_candidate = False
         self.login_lock = threading.RLock()
 
@@ -52,6 +53,7 @@ class SessionBackend:
         """清理当前后端的认证状态。"""
         self.session.cookies.clear()
         self.has_login = False
+        self.webvpn_has_login = False
         self.restored_auth_candidate = False
 
     def to_snapshot(self) -> BackendSnapshot:
@@ -95,12 +97,15 @@ class SessionBackend:
     def mark_restored_candidate(self) -> None:
         """将当前后端标记为待验证恢复态。"""
         self.has_login = True
+        self.webvpn_has_login = False
         self.restored_auth_candidate = True
         self.reset_timeout()
 
     def mark_login_validated(self) -> None:
         """将当前后端标记为已经验证的登录态。"""
         self.has_login = True
+        if self.access_mode == AccessMode.WEBVPN:
+            self.webvpn_has_login = True
         self.restored_auth_candidate = False
         self.reset_timeout()
 

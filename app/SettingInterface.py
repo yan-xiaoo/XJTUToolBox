@@ -257,11 +257,28 @@ class SettingInterface(ScrollArea):
         self.clearSessionCard = PushSettingCard(
             self.tr("清空"),
             FIF.CLEAR_SELECTION,
-            self.tr("清空所有 Session"),
+            self.tr("清空所有登录凭证"),
             self.tr("删除已保存的登录状态，并让当前已登录的校内系统重新认证"),
             self.sessionGroup
         )
+        self.sessionKeepAliveEnableCard = CustomSwitchSettingCard(
+            FIF.SYNC,
+            self.tr("启用后台保活"),
+            self.tr("程序运行时定期访问已登录系统，尽量维持后台登录状态"),
+            cfg.sessionKeepAliveEnabled,
+            self.sessionGroup,
+        )
+        self.sessionKeepAliveCard = ComboBoxSettingCard(
+            cfg.sessionKeepAliveInterval,
+            FIF.SYNC,
+            self.tr("后台保活间隔"),
+            self.tr("设置后台保活请求的触发间隔"),
+            texts=[self.tr("5 分钟"), self.tr("10 分钟"), self.tr("15 分钟"), self.tr("30 分钟")],
+            parent=self.sessionGroup,
+        )
         self.sessionGroup.addSettingCard(self.keepSessionCard)
+        self.sessionGroup.addSettingCard(self.sessionKeepAliveEnableCard)
+        self.sessionGroup.addSettingCard(self.sessionKeepAliveCard)
         self.sessionGroup.addSettingCard(self.clearSessionCard)
 
         # 校园网访问设置组
@@ -423,6 +440,7 @@ class SettingInterface(ScrollArea):
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
         self.clearCard.clicked.connect(self._onClearAccountsClicked)
         self.keepSessionCard.checkedChanged.connect(self._onKeepSessionChanged)
+        self.sessionKeepAliveEnableCard.checkedChanged.connect(self._onSessionKeepAliveChanged)
         self.clearSessionCard.clicked.connect(self._onClearSessionsClicked)
         self.updateCard.clicked.connect(self.onUpdateClicked)
         self.feedbackCard.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox/issues")))
@@ -442,6 +460,7 @@ class SettingInterface(ScrollArea):
             self.autoStartCard.setVisible(False)
             self.aboutGroup.cardLayout.removeWidget(self.autoStartCard)
             self.aboutGroup.adjustSize()
+        self._onSessionKeepAliveChanged(cfg.sessionKeepAliveEnabled.value)
 
     @pyqtSlot()
     def _onTraySettingChanged(self):
@@ -545,6 +564,13 @@ class SettingInterface(ScrollArea):
         accounts.clear_all_persisted_session_state()
         InfoBar.success(self.tr("已清空保存的登录状态"), self.tr("当前正在使用的登录状态不会受到影响"), parent=self)
 
+    @pyqtSlot(bool)
+    def _onSessionKeepAliveChanged(self, checked: bool):
+        """后台保活启用状态被修改时触发。"""
+        self.sessionKeepAliveCard.setEnabled(checked)
+        if hasattr(self.sessionKeepAliveCard, "comboBox"):
+            self.sessionKeepAliveCard.comboBox.setEnabled(checked)
+
     @pyqtSlot(int)
     def _onCampusAccessPolicyChanged(self, index: int) -> None:
         """校园网访问策略改变时清理自动探测缓存。"""
@@ -556,7 +582,7 @@ class SettingInterface(ScrollArea):
     def _onClearSessionsClicked(self):
         """立刻清空所有内存和持久化 Session。"""
         box = MessageBox(
-            self.tr("清空所有 Session"),
+            self.tr("清空所有登录凭证"),
             self.tr("这会删除已保存的登录状态，并让当前已登录的校内系统重新认证。\n正在进行的查询可能失败，需要重新点击查询。"),
             self,
         )
@@ -566,7 +592,7 @@ class SettingInterface(ScrollArea):
             return
 
         accounts.clear_all_session_state(include_persisted=True)
-        InfoBar.success(self.tr("清空成功"), self.tr("所有 Session 登录状态已经清空"), parent=self)
+        InfoBar.success(self.tr("清空成功"), self.tr("所有登录凭证已经清空"), parent=self)
 
     @pyqtSlot()
     def _onUpdateEncryptStatus(self):

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import dataclass
 import threading
 import time
 from typing import TYPE_CHECKING
 
 import requests
 
+from app.sessions.common_session import KeepAliveStatus
 from auth import is_safety_verify_page
 from app.sessions.session_backend import AccessMode, SessionBackend
 from app.utils.session_persistence import AccountSessionSnapshot, SessionPersistenceStore, SiteSnapshot
@@ -16,6 +18,29 @@ if TYPE_CHECKING:
     from app.sessions.common_session import CommonLoginSession
     from app.utils.mfa import MFAProvider
     from app.utils.qrcode_login import QRCodeLoginProvider
+
+
+@dataclass(frozen=True)
+class KeepAliveSiteResult:
+    """记录单个站点的一次后台保活结果。"""
+
+    site_key: str
+    site_name: str
+    access_mode: AccessMode
+    status: KeepAliveStatus
+
+
+@dataclass(frozen=True)
+class KeepAliveReport:
+    """记录当前账号一次后台保活的整体结果。"""
+
+    account_uuid: str
+    webvpn_status: KeepAliveStatus | None
+    site_results: tuple[KeepAliveSiteResult, ...]
+
+
+class WebVPNBackendUnknownError(RuntimeError):
+    """表示 WebVPN 后端验证页面无法被可靠识别。"""
 
 
 class SessionManager:
@@ -191,13 +216,28 @@ class SessionManager:
 
         webvpn_backend = self.backends[AccessMode.WEBVPN]
         with webvpn_backend.login_lock:
-            if webvpn_backend.has_login:
+            if webvpn_backend.webvpn_has_login:
                 if not webvpn_backend.restored_auth_candidate:
                     return
-                if self.validate_webvpn_backend():
-                    webvpn_backend.mark_login_validated()
-                    return
-                webvpn_backend.clear_auth_state()
+                try:
+                    if self.validate_webvpn_backend():
+                        webvpn_backend.mark_login_validated()
+                        return
+                except WebVPNBackendUnknownError:
+                    pass
+                else:
+                    webvpn_backend.clear_auth_state()
+            elif webvpn_backend.has_login:
+                try:
+                    if self.validate_webvpn_backend():
+                        webvpn_backend.mark_login_validated()
+                        return
+                except WebVPNBackendUnknownError:
+                    pass
+                else:
+                    webvpn_backend.clear_auth_state()
+
+            webvpn_backend.clear_auth_state()
 
             account_type = (
                 NewLogin.POSTGRADUATE
@@ -233,14 +273,106 @@ class SessionManager:
         from auth import WEBVPN_LOGIN_URL
 
         webvpn_backend = self.backends[AccessMode.WEBVPN]
+        response = webvpn_backend.session.get(WEBVPN_LOGIN_URL, allow_redirects=True, timeout=10)
         try:
-            response = webvpn_backend.session.get(WEBVPN_LOGIN_URL, allow_redirects=True, timeout=10)
-        except requests.RequestException:
+            page = response.text
+        finally:
+            response.close()
+
+        if self._is_unified_or_safety_verify_page(page):
+            webvpn_backend.webvpn_has_login = False
             return False
 
-        if self._is_unified_or_safety_verify_page(response.text):
-            return False
-        return "西安交通大学WebVPN - 资源站点" in response.text
+        if "西安交通大学WebVPN - 资源站点" in page:
+            webvpn_backend.webvpn_has_login = True
+            return True
+
+        raise WebVPNBackendUnknownError("无法识别 WebVPN 后端验证页面")
+
+    def keep_alive_webvpn_backend(self) -> KeepAliveStatus:
+        """对 WebVPN 后端本身执行一次后台保活验证。"""
+        from app.utils.log import logger
+
+        webvpn_backend = self.backends[AccessMode.WEBVPN]
+        if not webvpn_backend.login_lock.acquire(blocking=False):
+            return KeepAliveStatus.BUSY
+
+        try:
+            try:
+                if self.validate_webvpn_backend():
+                    webvpn_backend.mark_login_validated()
+                    return KeepAliveStatus.VALID
+
+                webvpn_backend.clear_auth_state()
+                return KeepAliveStatus.AUTH_INVALID
+            except requests.RequestException:
+                return KeepAliveStatus.NETWORK_ERROR
+            except WebVPNBackendUnknownError:
+                logger.warning("WebVPN 后端保活页面无法识别，保留现有登录态")
+                return KeepAliveStatus.ERROR
+            except Exception:
+                logger.exception("WebVPN 后端保活验证失败")
+                return KeepAliveStatus.ERROR
+        finally:
+            webvpn_backend.login_lock.release()
+
+    def keep_alive_logged_in_sessions(self, account_uuid: str = "") -> KeepAliveReport:
+        """对当前已创建且已登录的站点 Session 执行一次后台保活。"""
+        from app.utils.log import logger
+
+        normal_sessions: list[tuple[str, CommonLoginSession]] = []
+        webvpn_sessions: list[tuple[str, CommonLoginSession]] = []
+        for key, session in tuple(self.instances.items()):
+            if session is None or not session.has_login:
+                continue
+            if session.access_mode == AccessMode.WEBVPN:
+                webvpn_sessions.append((key, session))
+            else:
+                normal_sessions.append((key, session))
+
+        site_results: list[KeepAliveSiteResult] = []
+        webvpn_status: KeepAliveStatus | None = None
+        if webvpn_sessions:
+            webvpn_status = self.keep_alive_webvpn_backend()
+            if webvpn_status == KeepAliveStatus.VALID:
+                for key, session in webvpn_sessions:
+                    site_results.append(self._keep_alive_site(key, session))
+            elif webvpn_status == KeepAliveStatus.AUTH_INVALID:
+                for key, session in webvpn_sessions:
+                    session.invalidate_login()
+                    site_results.append(self._site_keep_alive_result(key, session, KeepAliveStatus.AUTH_INVALID))
+            else:
+                for key, session in webvpn_sessions:
+                    site_results.append(self._site_keep_alive_result(key, session, webvpn_status))
+
+        for key, session in normal_sessions:
+            site_results.append(self._keep_alive_site(key, session))
+
+        report = KeepAliveReport(
+            account_uuid=account_uuid,
+            webvpn_status=webvpn_status,
+            site_results=tuple(site_results),
+        )
+        logger.debug("后台 Session 保活完成：%s", report)
+        return report
+
+    def _keep_alive_site(self, key: str, session: CommonLoginSession) -> KeepAliveSiteResult:
+        """对单个站点执行保活并返回结构化结果。"""
+        status = session.keep_alive()
+        return self._site_keep_alive_result(key, session, status)
+
+    @staticmethod
+    def _site_keep_alive_result(
+            key: str,
+            session: CommonLoginSession,
+            status: KeepAliveStatus) -> KeepAliveSiteResult:
+        """构造单个站点的后台保活结果。"""
+        return KeepAliveSiteResult(
+            site_key=key,
+            site_name=session.site_name or session.site_key,
+            access_mode=session.access_mode,
+            status=status,
+        )
 
     @staticmethod
     def _is_postgraduate_account(account: Account | None, is_postgraduate: bool) -> bool:

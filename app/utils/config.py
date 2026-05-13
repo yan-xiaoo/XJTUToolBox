@@ -236,6 +236,15 @@ class NetworkAccessPolicy(Enum):
     DIRECT = 2
 
 
+class SessionKeepAliveInterval(Enum):
+    """后台 Session 保活间隔。"""
+
+    MINUTES_5 = 5
+    MINUTES_10 = 10
+    MINUTES_15 = 15
+    MINUTES_30 = 30
+
+
 class TraySetting(Enum):
     # 未设置，需要询问
     UNKNOWN = 0
@@ -247,6 +256,7 @@ class TraySetting(Enum):
 
 class Config(QConfig):
     NetworkAccessPolicy = NetworkAccessPolicy
+    SessionKeepAliveInterval = SessionKeepAliveInterval
 
     hasReadLoginTip = OptionsConfigItem("one_time_notice", "read_login_tip", False,
                                         OptionsValidator([True, False]), BooleanSerializer())
@@ -344,6 +354,15 @@ class Config(QConfig):
                                    BooleanSerializer())
     keepSessionOnExit = OptionsConfigItem("Settings", "keep_session_on_exit", False,
                                           OptionsValidator([True, False]), BooleanSerializer())
+    sessionKeepAliveEnabled = OptionsConfigItem("Settings", "session_keep_alive_enabled", False,
+                                               OptionsValidator([True, False]), BooleanSerializer())
+    sessionKeepAliveInterval = OptionsConfigItem("Settings", "session_keep_alive_interval",
+                                                SessionKeepAliveInterval.MINUTES_10,
+                                                OptionsValidator([SessionKeepAliveInterval.MINUTES_5,
+                                                                  SessionKeepAliveInterval.MINUTES_10,
+                                                                  SessionKeepAliveInterval.MINUTES_15,
+                                                                  SessionKeepAliveInterval.MINUTES_30]),
+                                                EnumSerializer(SessionKeepAliveInterval))
     enableQRCodeLogin = OptionsConfigItem("Settings", "enable_qrcode_login", False,
                                           OptionsValidator([True, False]), BooleanSerializer())
     # 同样不是设置项目；这个项目存储登录时使用的 fp_visitor_id，以保证每次启动程序后登录时使用相同的 ID

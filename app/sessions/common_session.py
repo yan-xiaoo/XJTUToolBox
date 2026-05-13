@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import enum
 from urllib.parse import urlparse
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable
@@ -34,6 +35,17 @@ class LoginContext:
     account_uuid: str | None
     allow_qrcode_login: bool
     kwargs: Mapping[str, object]
+
+
+class KeepAliveStatus(enum.Enum):
+    """后台保活一次执行后的结果状态。"""
+
+    VALID = "valid"
+    AUTH_INVALID = "auth_invalid"
+    NETWORK_ERROR = "network_error"
+    BUSY = "busy"
+    ERROR = "error"
+    SKIPPED = "skipped"
 
 
 class CommonLoginSession(metaclass=ABCMeta):
@@ -262,6 +274,33 @@ class CommonLoginSession(metaclass=ABCMeta):
         子类可以重写该方法，通过访问学校系统需要权限的接口实测是否要重新登录。
         """
         return False
+
+    def keep_alive(self) -> KeepAliveStatus:
+        """
+        尝试对当前站点执行一次后台保活验证。
+        """
+        if not self.login_lock.acquire(blocking=False):
+            return KeepAliveStatus.BUSY
+
+        try:
+            if not self.has_login:
+                return KeepAliveStatus.SKIPPED
+            try:
+                if self.validate_login():
+                    self.mark_login_validated()
+                    return KeepAliveStatus.VALID
+
+                self.invalidate_login()
+                return KeepAliveStatus.AUTH_INVALID
+            except requests.RequestException:
+                return KeepAliveStatus.NETWORK_ERROR
+            except Exception:
+                from app.utils.log import logger
+
+                logger.exception("站点后台保活失败：%s", self.site_key)
+                return KeepAliveStatus.ERROR
+        finally:
+            self.login_lock.release()
 
     def clear_backend_cookies(self) -> None:
         """清理当前访问方式共享后端的全部 cookie。"""
