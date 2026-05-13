@@ -273,7 +273,8 @@ class NewLogin:
         # 获得 execution 字段
         self.execution_input = extract_execution_value(response.text)
         self._already_authenticated_response: requests.Response | None = None
-        if self.execution_input is None and "/cas/login" not in response.url:
+        initial_safety_verify = is_safety_verify_page(response.text)
+        if not initial_safety_verify and self.execution_input is None and "/cas/login" not in response.url:
             self._already_authenticated_response = response
         # 获得一个标识符
         self.fp_visitor_id = visitor_id if visitor_id is not None else generate_fp_visitor_id()
@@ -289,8 +290,11 @@ class NewLogin:
         self._choose_account_response = None
         # 保存 Safety Verify 二次认证页面响应
         self._safety_verify_response: Optional[requests.Response] = None
+        self._safety_verify_mfa_requested = False
         # 两步验证上下文
         self.mfa_context: Optional[NewLogin.MFAContext] = None
+        if initial_safety_verify:
+            self._safety_verify_response = response
         # 登录凭据
         self._username = None
         self._password = None
@@ -361,6 +365,8 @@ class NewLogin:
 
         # 如果前一次登录 POST 返回了 Safety Verify 页面，则在 MFA 认证后提交该页面的隐藏表单。
         if self._safety_verify_response is not None:
+            if not self._safety_verify_mfa_requested:
+                return self._require_safety_verify_mfa(self._safety_verify_response)
             return self._finish_safety_verify()
 
         if self.has_login:
@@ -445,19 +451,7 @@ class NewLogin:
             return LoginState.FAIL, f"登录失败: {message['title']}"
 
         if is_safety_verify_page(login_response.text):
-            sec_state = extract_input_value(login_response.text, "secState")
-            if sec_state is None:
-                raise ServerError(500, "服务器返回了二次认证页面，但页面中没有 secState 字段。")
-            self.fail_count = 0
-            self.has_login = False
-            self._safety_verify_response = login_response
-            self.mfa_context = self.MFAContext(
-                self,
-                sec_state,
-                required=True,
-                flow=self.MFAFlow.SAFETY_VERIFY,
-            )
-            return LoginState.REQUIRE_MFA, self.mfa_context
+            return self._require_safety_verify_mfa(login_response)
 
         self.fail_count = 0
         self.has_login = True
@@ -471,6 +465,26 @@ class NewLogin:
 
         self.postLogin(login_response)
         return LoginState.SUCCESS, self.session
+
+    def _require_safety_verify_mfa(self, safety_response: requests.Response) -> Tuple[LoginState, Union[
+        MFAContext, object, None]]:
+        """
+        将当前登录流程切换到 Safety Verify 二次认证状态。
+        """
+        sec_state = extract_input_value(safety_response.text, "secState")
+        if sec_state is None:
+            raise ServerError(500, "服务器返回了二次认证页面，但页面中没有 secState 字段。")
+        self.fail_count = 0
+        self.has_login = False
+        self._safety_verify_response = safety_response
+        self._safety_verify_mfa_requested = True
+        self.mfa_context = self.MFAContext(
+            self,
+            sec_state,
+            required=True,
+            flow=self.MFAFlow.SAFETY_VERIFY,
+        )
+        return LoginState.REQUIRE_MFA, self.mfa_context
 
     def _finish_safety_verify(self) -> Tuple[LoginState, Union[MFAContext, object, None]]:
         """
@@ -503,6 +517,7 @@ class NewLogin:
         )
 
         self._safety_verify_response = None
+        self._safety_verify_mfa_requested = False
         return self._process_login_response(verify_response)
 
     def _finish_account_choice(self, account_type: AccountType, trust_agent=True):
