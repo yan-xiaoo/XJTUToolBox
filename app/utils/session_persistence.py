@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import tempfile
@@ -13,7 +14,6 @@ from uuid import UUID
 import keyring
 import keyring.errors
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
 
 from app.sessions.session_backend import AccessMode
 from app.utils.config import cfg
@@ -29,51 +29,166 @@ apply_linux_keyring_patches()
 SESSION_KEYRING_SERVICE_NAME = "XJTUToolBox"
 
 SESSION_AES_KEY_NAME = "session-file-key"
+SESSION_AES_KEY_LENGTH = 32
+SESSION_ENCRYPTION_FORMAT = "xjtutoolbox-session-aes-gcm"
+SESSION_ENCRYPTION_VERSION = 1
+SESSION_GCM_NONCE_LENGTH = 12
 SESSION_METADATA_FILE = "sessions.json"
 SESSION_DATA_DIRECTORY = os.path.join(DATA_DIRECTORY, "data")
+SESSION_METADATA_PURPOSE = "metadata"
+SESSION_COOKIE_PURPOSE = "cookie"
 
 
-def _get_aes_key() -> bytes | None:
-    """从 keyring 获取 AES 密钥。"""
+def _read_aes_key() -> tuple[bytes | None, bool]:
+    """从 keyring 读取 AES 密钥，并返回 keyring 是否可访问。"""
     try:
         key_b64 = keyring.get_password(SESSION_KEYRING_SERVICE_NAME, SESSION_AES_KEY_NAME)
     except keyring.errors.KeyringError:
-        return None
+        return None, False
     if not key_b64:
-        return None
+        return None, True
     try:
-        return base64.b64decode(key_b64)
-    except Exception:
-        return None
+        key = base64.b64decode(key_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return None, True
+    if len(key) != SESSION_AES_KEY_LENGTH:
+        return None, True
+    return key, True
 
 
-def _ensure_aes_key() -> bytes:
-    """获取 AES 密钥，不存在则生成并保存到 keyring。"""
-    key = _get_aes_key()
-    if key is not None:
-        return key
-    key = os.urandom(32)
+def _load_aes_key() -> bytes | None:
+    """从 keyring 获取 AES 密钥。"""
+    key, _keyring_available = _read_aes_key()
+    return key
+
+
+def _create_and_store_aes_key() -> bytes | None:
+    """生成 AES 密钥，并在成功保存到 keyring 后返回。"""
+    key = os.urandom(SESSION_AES_KEY_LENGTH)
     key_b64 = base64.b64encode(key).decode("ascii")
     try:
         keyring.set_password(SESSION_KEYRING_SERVICE_NAME, SESSION_AES_KEY_NAME, key_b64)
     except keyring.errors.KeyringError:
-        pass
+        return None
     return key
 
 
-def _encrypt_bytes(data: bytes) -> bytes:
-    """AES-256-ECB 加密。"""
-    cipher = AES.new(_ensure_aes_key(), AES.MODE_ECB)
-    return cipher.encrypt(pad(data, AES.block_size))
+def _get_or_create_aes_key() -> bytes | None:
+    """获取 AES 密钥，不存在则生成并保存到 keyring。"""
+    key, keyring_available = _read_aes_key()
+    if key is not None:
+        return key
+    if not keyring_available:
+        return None
+    return _create_and_store_aes_key()
 
 
-def _decrypt_bytes(data: bytes) -> bytes:
-    """AES-256-ECB 解密。"""
-    key = _get_aes_key()
-    if key is None:
-        raise ValueError("AES key not found in keyring")
-    cipher = AES.new(key, AES.MODE_ECB)
-    return unpad(cipher.decrypt(data), AES.block_size)
+def _associated_data(account_uuid: str, purpose: str, filename: str) -> bytes:
+    """生成 AES-GCM 认证上下文。"""
+    return f"{SESSION_ENCRYPTION_FORMAT}:{account_uuid}:{purpose}:{filename}".encode("utf-8")
+
+
+def _encrypt_bytes(data: bytes, *, key: bytes, account_uuid: str, purpose: str, filename: str) -> bytes:
+    """使用 AES-256-GCM 加密数据。"""
+    nonce = os.urandom(SESSION_GCM_NONCE_LENGTH)
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    cipher.update(_associated_data(account_uuid, purpose, filename))
+    ciphertext, tag = cipher.encrypt_and_digest(data)
+    payload = {
+        "format": SESSION_ENCRYPTION_FORMAT,
+        "version": SESSION_ENCRYPTION_VERSION,
+        "alg": "AES-256-GCM",
+        "nonce": base64.b64encode(nonce).decode("ascii"),
+        "tag": base64.b64encode(tag).decode("ascii"),
+        "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _json_mapping_from_bytes(data: bytes) -> Mapping[str, object] | None:
+    """从字节内容读取 JSON 字典。"""
+    try:
+        raw = json.loads(data.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, Mapping):
+        return None
+    return cast(Mapping[str, object], raw)
+
+
+def _encrypted_payload_from_bytes(data: bytes) -> Mapping[str, object] | None:
+    """从字节内容读取加密载荷字典。"""
+    payload = _json_mapping_from_bytes(data)
+    if payload is None:
+        return None
+    if _string_value(payload, "format") != SESSION_ENCRYPTION_FORMAT:
+        return None
+    return payload
+
+
+def _is_encrypted_payload(data: bytes) -> bool:
+    """判断字节内容是否是 Session 加密载荷。"""
+    return _encrypted_payload_from_bytes(data) is not None
+
+
+def _base64_field(payload: Mapping[str, object], key: str) -> bytes | None:
+    """从加密载荷中读取 base64 字节字段。"""
+    value = payload.get(key)
+    if not isinstance(value, str):
+        return None
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _decrypt_bytes(data: bytes, *, account_uuid: str, purpose: str, filename: str) -> bytes | None:
+    """使用 AES-256-GCM 解密加密载荷。"""
+    payload = _encrypted_payload_from_bytes(data)
+    if payload is None:
+        return None
+    if _int_value(payload, "version") != SESSION_ENCRYPTION_VERSION:
+        return None
+    if _string_value(payload, "alg") != "AES-256-GCM":
+        return None
+
+    nonce = _base64_field(payload, "nonce")
+    tag = _base64_field(payload, "tag")
+    ciphertext = _base64_field(payload, "ciphertext")
+    key = _load_aes_key()
+    if key is None or nonce is None or tag is None or ciphertext is None:
+        return None
+
+    try:
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        cipher.update(_associated_data(account_uuid, purpose, filename))
+        return cipher.decrypt_and_verify(ciphertext, tag)
+    except ValueError:
+        return None
+
+
+def _decode_persisted_bytes(data: bytes, *, account_uuid: str, purpose: str, filename: str) -> bytes | None:
+    """按文件内容自动识别明文或加密载荷，并返回可解析字节。"""
+    if not _is_encrypted_payload(data):
+        return data
+    return _decrypt_bytes(data, account_uuid=account_uuid, purpose=purpose, filename=filename)
+
+
+def _write_bytes_atomically(path: str, data: bytes) -> None:
+    """原子写入字节内容到目标路径。"""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".session-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(data)
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise
 
 
 @dataclass(frozen=True)
@@ -245,14 +360,17 @@ class SessionPersistenceStore:
         try:
             with open(metadata_path, "rb") as file:
                 raw = file.read()
-            if cfg.useKeyring.value:
-                try:
-                    raw = _decrypt_bytes(raw)
-                except ValueError:
-                    pass
-            text = raw.decode("utf-8")
+            decoded = _decode_persisted_bytes(
+                raw,
+                account_uuid=account.uuid,
+                purpose=SESSION_METADATA_PURPOSE,
+                filename=SESSION_METADATA_FILE,
+            )
+            if decoded is None:
+                return None
+            text = decoded.decode("utf-8")
             snapshot = self._snapshot_from_json(text)
-        except (OSError, json.JSONDecodeError, ValueError):
+        except (OSError, UnicodeError, ValueError):
             return None
         if snapshot is None:
             return None
@@ -264,6 +382,10 @@ class SessionPersistenceStore:
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
 
         use_encryption = cfg.useKeyring.value
+        encryption_key = _get_or_create_aes_key() if use_encryption else None
+        if use_encryption and encryption_key is None:
+            return
+
         file_backends: dict[str, BackendSnapshot] = {}
         for key, backend in snapshot.backends.items():
             access_mode = AccessMode(backend.access_mode)
@@ -271,10 +393,15 @@ class SessionPersistenceStore:
             cookie_path = self._account_file_path(account, cookie_file)
             if backend.cookie_lwp_text is not None:
                 data = backend.cookie_lwp_text.encode("utf-8")
-                if use_encryption:
-                    data = _encrypt_bytes(data)
-                with open(cookie_path, "wb") as file:
-                    file.write(data)
+                if encryption_key is not None:
+                    data = _encrypt_bytes(
+                        data,
+                        key=encryption_key,
+                        account_uuid=account.uuid,
+                        purpose=SESSION_COOKIE_PURPOSE,
+                        filename=cookie_file,
+                    )
+                _write_bytes_atomically(cookie_path, data)
             file_backends[key] = BackendSnapshot(
                 access_mode=backend.access_mode,
                 cookie_lwp_text=None,
@@ -292,10 +419,15 @@ class SessionPersistenceStore:
             sites=snapshot.sites,
         )
         data = json.dumps(file_snapshot.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
-        if use_encryption:
-            data = _encrypt_bytes(data)
-        with open(metadata_path, "wb") as file:
-            file.write(data)
+        if encryption_key is not None:
+            data = _encrypt_bytes(
+                data,
+                key=encryption_key,
+                account_uuid=account.uuid,
+                purpose=SESSION_METADATA_PURPOSE,
+                filename=SESSION_METADATA_FILE,
+            )
+        _write_bytes_atomically(metadata_path, data)
 
     def _delete_file_snapshot(self, account: Account) -> None:
         """删除账号数据文件夹中的快照。"""
@@ -316,9 +448,8 @@ class SessionPersistenceStore:
             except OSError:
                 pass
 
-    def _with_cookie_text(self, account: Account, snapshot: AccountSessionSnapshot) -> AccountSessionSnapshot:
+    def _with_cookie_text(self, account: Account, snapshot: AccountSessionSnapshot) -> AccountSessionSnapshot | None:
         """补齐快照中的 LWP cookie 文本。"""
-        use_encryption = cfg.useKeyring.value
         backends: dict[str, BackendSnapshot] = {}
         for key, backend in snapshot.backends.items():
             cookie_text = backend.cookie_lwp_text
@@ -327,14 +458,17 @@ class SessionPersistenceStore:
                 try:
                     with open(cookie_path, "rb") as file:
                         raw = file.read()
-                    if use_encryption:
-                        try:
-                            raw = _decrypt_bytes(raw)
-                        except ValueError:
-                            pass
-                    cookie_text = raw.decode("utf-8")
-                except OSError:
-                    cookie_text = None
+                    decoded = _decode_persisted_bytes(
+                        raw,
+                        account_uuid=account.uuid,
+                        purpose=SESSION_COOKIE_PURPOSE,
+                        filename=backend.cookie_file,
+                    )
+                    if decoded is None:
+                        return None
+                    cookie_text = decoded.decode("utf-8")
+                except (OSError, UnicodeError):
+                    return None
             backends[key] = BackendSnapshot(
                 access_mode=backend.access_mode,
                 cookie_lwp_text=cookie_text,
