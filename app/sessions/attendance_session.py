@@ -5,8 +5,12 @@ import enum
 from app.sessions.common_session import CommonLoginSession
 from app.sessions.session_backend import AccessMode
 from app.utils import cfg
-from app.utils.interactive_login import login_with_optional_mfa
-from attendance.attendance import AttendanceNewLogin, AttendanceNewWebVPNLogin
+from attendance.attendance import (
+    AttendanceNewLogin,
+    AttendanceNewQRCodeLogin,
+    AttendanceNewWebVPNLogin,
+    AttendanceNewWebVPNQRCodeLogin,
+)
 from auth.new_login import NewLogin
 
 
@@ -19,24 +23,25 @@ class AttendanceSession(CommonLoginSession):
     supports_webvpn = True
 
     class LoginMethod(enum.Enum):
+        """
+        考勤系统登录方式。
+        """
         NORMAL = 0
         WEBVPN = 1
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         is_postgraduate = kwargs.get("is_postgraduate") is True
         login_class = AttendanceNewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else AttendanceNewLogin
-        login_util = login_class(self, is_postgraduate=is_postgraduate, visitor_id=str(cfg.loginId.value))
-        account, mfa_provider = self.get_login_context(kwargs)
+        qrcode_login_class = AttendanceNewWebVPNQRCodeLogin if self.access_mode == AccessMode.WEBVPN else AttendanceNewQRCodeLogin
         account_type = NewLogin.POSTGRADUATE if is_postgraduate else NewLogin.UNDERGRADUATE
-        login_with_optional_mfa(
-            login_util,
+        self.perform_cas_login(
             username,
             password,
-            account,
-            mfa_provider,
+            kwargs=kwargs,
+            password_login_factory=lambda: login_class(self, is_postgraduate=is_postgraduate, visitor_id=str(cfg.loginId.value)),
+            qrcode_login_factory=lambda: qrcode_login_class(self, is_postgraduate=is_postgraduate, visitor_id=str(cfg.loginId.value)),
             account_type=account_type,
-            site_key=self.site_key,
-            site_name=self.site_name,
+            allow_qrcode_login=kwargs.get("allow_qrcode_login") is not False,
         )
 
         self.login_method = self.LoginMethod.WEBVPN if self.access_mode == AccessMode.WEBVPN else self.LoginMethod.NORMAL

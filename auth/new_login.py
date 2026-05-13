@@ -269,6 +269,7 @@ class NewLogin:
         # 获得提交登录信息的地址
         response = self._get(login_url,
                              allow_redirects=True)
+        self.initial_login_page_html = response.text
         self.post_url = response.url
         # 获得 execution 字段
         self.execution_input = extract_execution_value(response.text)

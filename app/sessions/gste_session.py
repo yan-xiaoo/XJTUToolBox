@@ -5,9 +5,9 @@ import enum
 from app.sessions.common_session import CommonLoginSession
 from app.sessions.session_backend import AccessMode
 from app.utils import cfg
-from app.utils.interactive_login import login_with_optional_mfa
 from auth import GSTE_LOGIN_URL
 from auth.new_login import NewLogin, NewWebVPNLogin
+from auth.new_qrcode_login import NewQRCodeLogin, NewWebVPNQRCodeLogin
 
 
 class GSTESession(CommonLoginSession):
@@ -20,22 +20,23 @@ class GSTESession(CommonLoginSession):
     supports_webvpn = True
 
     class LoginMethod(enum.Enum):
+        """
+        评教系统登录方式。
+        """
         NORMAL = 0
         WEBVPN = 1
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin
-        login_util = login_class(GSTE_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
-        account, mfa_provider = self.get_login_context(kwargs)
-        login_with_optional_mfa(
-            login_util,
+        qrcode_login_class = NewWebVPNQRCodeLogin if self.access_mode == AccessMode.WEBVPN else NewQRCodeLogin
+        self.perform_cas_login(
             username,
             password,
-            account,
-            mfa_provider,
+            kwargs=kwargs,
+            password_login_factory=lambda: login_class(GSTE_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value)),
+            qrcode_login_factory=lambda: qrcode_login_class(GSTE_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value)),
             account_type=NewLogin.POSTGRADUATE,
-            site_key=self.site_key,
-            site_name=self.site_name,
+            allow_qrcode_login=kwargs.get("allow_qrcode_login") is not False,
         )
 
         self.login_method = self.LoginMethod.WEBVPN if self.access_mode == AccessMode.WEBVPN else self.LoginMethod.NORMAL

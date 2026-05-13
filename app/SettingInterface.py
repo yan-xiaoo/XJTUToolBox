@@ -228,11 +228,19 @@ class SettingInterface(ScrollArea):
             cfg.useKeyring,
             self.accountGroup
         )
+        self.qrcodeLoginCard = CustomSwitchSettingCard(
+            FIF.CONNECT,
+            self.tr("启用二维码登录"),
+            self.tr("手动访问各系统时弹出二维码扫码登录，定时任务仍使用账号密码"),
+            cfg.enableQRCodeLogin,
+            self.accountGroup
+        )
         self.accountGroup.addSettingCard(self.encryptCard)
         self.accountGroup.addSettingCard(self.decryptCard)
         self.accountGroup.addSettingCard(self.clearCard)
         self.accountGroup.addSettingCard(self.showAvatarCard)
         self.accountGroup.addSettingCard(self.saveKeyringCard)
+        self.accountGroup.addSettingCard(self.qrcodeLoginCard)
 
         self.saveKeyringCard.checkedChanged.connect(self._onSaveKeyringChanged)
         self._onUpdateEncryptStatus()

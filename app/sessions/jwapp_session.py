@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from app.sessions.common_session import CommonLoginSession
 from app.utils import cfg
-from app.utils.interactive_login import login_with_optional_mfa
 from auth.new_login import NewLogin
-from jwapp.util import JwappNewLogin, JwappNewWebVPNLogin
+from jwapp.util import JwappNewLogin, JwappNewQRCodeLogin, JwappNewWebVPNLogin, JwappNewWebVPNQRCodeLogin
 from .session_backend import AccessMode
 
 
@@ -18,17 +17,15 @@ class JwappSession(CommonLoginSession):
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = JwappNewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else JwappNewLogin
-        login_util = login_class(session=self, visitor_id=str(cfg.loginId.value))
-        account, mfa_provider = self.get_login_context(kwargs)
-        login_with_optional_mfa(
-            login_util,
+        qrcode_login_class = JwappNewWebVPNQRCodeLogin if self.access_mode == AccessMode.WEBVPN else JwappNewQRCodeLogin
+        self.perform_cas_login(
             username,
             password,
-            account,
-            mfa_provider,
+            kwargs=kwargs,
+            password_login_factory=lambda: login_class(session=self, visitor_id=str(cfg.loginId.value)),
+            qrcode_login_factory=lambda: qrcode_login_class(session=self, visitor_id=str(cfg.loginId.value)),
             account_type=NewLogin.UNDERGRADUATE,
-            site_key=self.site_key,
-            site_name=self.site_name,
+            allow_qrcode_login=kwargs.get("allow_qrcode_login") is not False,
         )
 
         self.reset_timeout()

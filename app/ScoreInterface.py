@@ -335,9 +335,11 @@ class ScoreInterface(ScrollArea):
         # 只有本科生查询成绩可以选学期；研究生没法选，只能查询所有的
         elif accounts.current.type == accounts.current.UNDERGRADUATE:
             self.scoreThread.term_number = term_number
+            self.scoreThread.allow_qrcode_login = True
             self.scoreThread.start()
             self.processWidget.setVisible(True)
         else:
+            self.graduateScoreThread.allow_qrcode_login = True
             self.graduateScoreThread.start()
             self.graduateProcessWidget.setVisible(True)
 
@@ -368,9 +370,11 @@ class ScoreInterface(ScrollArea):
             if accounts.current.type == accounts.current.UNDERGRADUATE:
                 # 设置查询为当前学期
                 self.scoreThread.term_number = []
+                self.scoreThread.allow_qrcode_login = False
                 self.scoreThread.scores.connect(self.onReceiveScheduledScore)
                 self.scoreThread.start()
             else:
+                self.graduateScoreThread.allow_qrcode_login = False
                 self.graduateScoreThread.scores.connect(self.onReceiveScheduledScore)
                 self.graduateScoreThread.start()
         else:

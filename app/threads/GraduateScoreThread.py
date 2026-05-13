@@ -7,6 +7,7 @@ from ..sessions.gmis_session import GMISSession
 from ..threads.ProcessWidget import ProcessThread
 from ..utils import accounts, logger, cfg
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
+from ..utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 from auth import ServerError, GMIS_LOGIN_URL
 
 
@@ -25,6 +26,7 @@ class GraduateScoreThread(ProcessThread):
         """
         super().__init__(parent)
         self.util = None
+        self.allow_qrcode_login = True
 
     @property
     def session(self) -> GMISSession:
@@ -44,6 +46,7 @@ class GraduateScoreThread(ProcessThread):
             accounts.current.password,
             account=accounts.current,
             mfa_provider=accounts.current.session_manager.mfa_provider,
+            allow_qrcode_login=self.allow_qrcode_login,
         )
         if not self.can_run:
             return False
@@ -78,6 +81,14 @@ class GraduateScoreThread(ProcessThread):
                 return
             result = self.util.grade()
             self.progressChanged.emit(100)
+        except QRCodeLoginCancelledError as e:
+            logger.info("二维码登录已取消：%s", e)
+            self.error.emit(self.tr("扫码登录已取消"), self.tr("已取消扫码登录，本次操作未完成。"))
+            self.canceled.emit()
+        except QRCodeLoginUnavailableError as e:
+            logger.error("二维码登录交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except MFACancelledError as e:
             logger.info("MFA 验证已取消：%s", e)
             self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))

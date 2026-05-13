@@ -344,6 +344,8 @@ class Config(QConfig):
                                    BooleanSerializer())
     keepSessionOnExit = OptionsConfigItem("Settings", "keep_session_on_exit", False,
                                           OptionsValidator([True, False]), BooleanSerializer())
+    enableQRCodeLogin = OptionsConfigItem("Settings", "enable_qrcode_login", False,
+                                          OptionsValidator([True, False]), BooleanSerializer())
     # 同样不是设置项目；这个项目存储登录时使用的 fp_visitor_id，以保证每次启动程序后登录时使用相同的 ID
     loginId = ConfigItem("Settings", "login_id", old_fp_visitor_id(), VisitorIdValidator(), VisitorIdSerializer())
     # 同样不是设置项目；这个项目存储登录时使用的 User-Agent，以保证每次启动程序后登录时使用相同的 UA

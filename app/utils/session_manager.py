@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.utils.account import Account
     from app.sessions.common_session import CommonLoginSession
     from app.utils.mfa import MFAProvider
+    from app.utils.qrcode_login import QRCodeLoginProvider
 
 
 class SessionManager:
@@ -38,6 +39,7 @@ class SessionManager:
         }
         self._pending_site_snapshots: dict[str, SiteSnapshot] = {}
         self.mfa_provider: MFAProvider | None = None
+        self.qrcode_login_provider: QRCodeLoginProvider | None = None
         self._access_probe_result: AccessMode | None = None
         self._access_probe_time = 0.0
         self._access_probe_lock = threading.RLock()
@@ -172,12 +174,14 @@ class SessionManager:
     def ensure_webvpn_login(self, username: str, password: str, *,
                             account: Account | None = None,
                             mfa_provider: MFAProvider | None = None,
-                            is_postgraduate: bool = False) -> None:
+                            is_postgraduate: bool = False,
+                            allow_qrcode_login: bool = True) -> None:
         """确保当前账号的 WebVPN 后端已经登录 WebVPN 本身。"""
         from app.utils.config import cfg
-        from app.utils.interactive_login import login_with_optional_mfa
+        from app.utils.interactive_login import login_with_optional_mfa, login_with_qrcode
         from auth import WEBVPN_LOGIN_URL
         from auth.new_login import NewLogin
+        from auth.new_qrcode_login import NewQRCodeLogin
 
         webvpn_backend = self.backends[AccessMode.WEBVPN]
         with webvpn_backend.login_lock:
@@ -189,18 +193,33 @@ class SessionManager:
                     return
                 webvpn_backend.clear_auth_state()
 
-            account_type = NewLogin.POSTGRADUATE if self._is_postgraduate_account(account, is_postgraduate) else NewLogin.UNDERGRADUATE
-            login_util = NewLogin(WEBVPN_LOGIN_URL, session=webvpn_backend.session, visitor_id=str(cfg.loginId.value))
-            login_with_optional_mfa(
-                login_util,
-                username,
-                password,
-                account,
-                mfa_provider or self.mfa_provider,
-                account_type=account_type,
-                site_key="webvpn",
-                site_name="WebVPN",
+            account_type = (
+                NewLogin.POSTGRADUATE
+                if self._is_postgraduate_account(account, is_postgraduate)
+                else NewLogin.UNDERGRADUATE
             )
+            if cfg.enableQRCodeLogin.value and allow_qrcode_login:
+                login_with_qrcode(
+                    NewQRCodeLogin(WEBVPN_LOGIN_URL, session=webvpn_backend.session, visitor_id=str(cfg.loginId.value)),
+                    account,
+                    self.qrcode_login_provider,
+                    mfa_provider or self.mfa_provider,
+                    account_type=account_type,
+                    site_key="webvpn",
+                    site_name="WebVPN",
+                )
+            else:
+                login_util = NewLogin(WEBVPN_LOGIN_URL, session=webvpn_backend.session, visitor_id=str(cfg.loginId.value))
+                login_with_optional_mfa(
+                    login_util,
+                    username,
+                    password,
+                    account,
+                    mfa_provider or self.mfa_provider,
+                    account_type=account_type,
+                    site_key="webvpn",
+                    site_name="WebVPN",
+                )
             webvpn_backend.mark_login_validated()
 
     def validate_webvpn_backend(self) -> bool:
@@ -231,6 +250,12 @@ class SessionManager:
         设置当前账号会话管理器使用的 MFA 交互提供者。
         """
         self.mfa_provider = provider
+
+    def set_qrcode_login_provider(self, provider: QRCodeLoginProvider | None) -> None:
+        """
+        设置当前账号会话管理器使用的二维码登录交互提供者。
+        """
+        self.qrcode_login_provider = provider
 
     def restore_persisted_state(self, account: Account) -> None:
         """恢复当前账号持久化保存的 Session 状态。"""

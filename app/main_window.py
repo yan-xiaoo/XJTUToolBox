@@ -30,6 +30,7 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sub_interfaces import LoginInterface
+from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
 from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.EmptyRoomInterface import EmptyRoomInterface
@@ -39,7 +40,7 @@ from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
 from .threads.UpdateThread import UpdateThread, UpdateStatus
 from .utils import cfg, accounts, MyFluentIcon, SessionManager, logger, migrate_all, QtMFAProvider, MFAAction, \
-    MFAActionType, MFARequest
+    MFAActionType, MFARequest, QtQRCodeLoginProvider, QRCodeLoginAction, QRCodeLoginActionType, QRCodeLoginRequest
 from .utils.config import TraySetting
 
 
@@ -88,9 +89,16 @@ class MainWindow(MSFluentWindow):
         self.mfaProvider.requestMFA.connect(self.show_mfa_dialog)
         # 通过 QtMFAProvider 的 sendResult 信号收到验证码发送结果，在对话框中显示给用户  
         self.mfaProvider.sendResult.connect(self.on_mfa_send_result)
+        self.qrcodeLoginProvider = QtQRCodeLoginProvider(self)
+        self.qrcodeLoginProvider.requestQRCode.connect(self.show_qrcode_login_dialog)
+        self.qrcodeLoginProvider.imageReady.connect(self.on_qrcode_image_ready)
+        self.qrcodeLoginProvider.statusChanged.connect(self.on_qrcode_status_changed)
+        self.qrcodeLoginProvider.finished.connect(self.on_qrcode_login_finished)
         # MFA 验证是要一个个来的，不能并行，因此这里都是单例
         self._current_mfa_dialog: VerifyCodeDialog | None = None
         self._current_mfa_request: MFARequest | None = None
+        self._current_qrcode_dialog: QRCodeLoginDialog | None = None
+        self._current_qrcode_request: QRCodeLoginRequest | None = None
         # 为当前已知账户安装全局 MFA provider, 这样每个 session 都能找到它来处理 MFA 请求了
         self._install_mfa_provider_for_accounts()
         accounts.accountAdded.connect(self._install_mfa_provider_for_accounts)
@@ -196,6 +204,7 @@ class MainWindow(MSFluentWindow):
         """
         for account in accounts:
             account.session_manager.set_mfa_provider(self.mfaProvider)
+            account.session_manager.set_qrcode_login_provider(self.qrcodeLoginProvider)
 
     def _start_access_probe_for_current_account(self) -> None:
         """
@@ -244,6 +253,55 @@ class MainWindow(MSFluentWindow):
         if request != self._current_mfa_request or self._current_mfa_dialog is None:
             return
         self._current_mfa_dialog.reportSendResult(success, message)
+
+    @pyqtSlot(object)
+    def show_qrcode_login_dialog(self, request: object) -> None:
+        """
+        显示二维码登录对话框，并将用户动作转交给 QtQRCodeLoginProvider。
+        """
+        if not isinstance(request, QRCodeLoginRequest):
+            return
+
+        dialog = QRCodeLoginDialog(request, self)
+        self._current_qrcode_dialog = dialog
+        self._current_qrcode_request = request
+        dialog.refreshSignal.connect(
+            lambda: self.qrcodeLoginProvider.submit_action(QRCodeLoginAction(QRCodeLoginActionType.REFRESH))
+        )
+        dialog.cancelSignal.connect(
+            lambda: self.qrcodeLoginProvider.submit_action(QRCodeLoginAction(QRCodeLoginActionType.CANCEL))
+        )
+        dialog.exec()
+        if self._current_qrcode_dialog is dialog:
+            self._current_qrcode_dialog = None
+            self._current_qrcode_request = None
+
+    @pyqtSlot(object, object)
+    def on_qrcode_image_ready(self, request: object, image: object) -> None:
+        """
+        将二维码图片反馈给当前二维码登录对话框。
+        """
+        if request != self._current_qrcode_request or self._current_qrcode_dialog is None:
+            return
+        self._current_qrcode_dialog.reportImage(image)
+
+    @pyqtSlot(object, str)
+    def on_qrcode_status_changed(self, request: object, status: str) -> None:
+        """
+        将二维码状态反馈给当前二维码登录对话框。
+        """
+        if request != self._current_qrcode_request or self._current_qrcode_dialog is None:
+            return
+        self._current_qrcode_dialog.reportStatus(status)
+
+    @pyqtSlot(object)
+    def on_qrcode_login_finished(self, request: object) -> None:
+        """
+        在扫码登录完成后关闭当前二维码登录对话框。
+        """
+        if request != self._current_qrcode_request or self._current_qrcode_dialog is None:
+            return
+        self._current_qrcode_dialog.finish()
 
     def initNavigation(self):
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))

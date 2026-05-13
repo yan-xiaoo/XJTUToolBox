@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import datetime
 
 from auth import JWAPP_URL, NewLogin, NewWebVPNLogin, ServerError
+from auth.new_qrcode_login import QRCodeLoginMixin
 
 
 class JwappNewLogin(NewLogin):
@@ -35,6 +38,33 @@ class JwappNewWebVPNLogin(NewWebVPNLogin):
         self.session.headers.update({"Authorization": token})
 
         return self.session
+
+
+class JwappNewQRCodeLogin(QRCodeLoginMixin, JwappNewLogin):
+    """
+    使用二维码登录移动教务系统，并复用移动教务 token 提取逻辑。
+    """
+
+    def __init__(self, session: object | None = None, visitor_id: str | None = None) -> None:
+        """
+        创建移动教务二维码登录器。
+        """
+        super().__init__(session=session, visitor_id=visitor_id)
+
+
+class JwappNewWebVPNQRCodeLogin(QRCodeLoginMixin, JwappNewWebVPNLogin):
+    """
+    通过 WebVPN 使用二维码登录移动教务系统，并复用移动教务 token 提取逻辑。
+    """
+
+    def __init__(self, session: object | None = None, visitor_id: str | None = None) -> None:
+        """
+        创建移动教务 WebVPN 二维码登录器。
+        """
+        super().__init__(session=session, visitor_id=visitor_id)
+
+
+JwappNewQRCodeWebVPNLogin = JwappNewWebVPNQRCodeLogin
 
 
 class JwappUtil:

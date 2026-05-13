@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 
 import math
@@ -8,6 +10,7 @@ import requests
 
 from auth import ATTENDANCE_URL, ATTENDANCE_WEBVPN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL, ServerError
 from auth.new_login import NewLogin, NewWebVPNLogin
+from auth.new_qrcode_login import QRCodeLoginMixin
 from schedule import Schedule, WeekSchedule, Lesson
 
 
@@ -135,6 +138,35 @@ class AttendanceNewWebVPNLogin(NewWebVPNLogin):
         self.session.headers.update({"Synjones-Auth": "bearer " + token})
 
         return self.session
+
+
+class AttendanceNewQRCodeLogin(QRCodeLoginMixin, AttendanceNewLogin):
+    """
+    使用二维码登录考勤系统，并复用考勤系统 token 提取逻辑。
+    """
+
+    def __init__(self, session: requests.Session | None = None, is_postgraduate: bool = False,
+                 visitor_id: str | None = None) -> None:
+        """
+        创建考勤系统二维码登录器。
+        """
+        super().__init__(session=session, is_postgraduate=is_postgraduate, visitor_id=visitor_id)
+
+
+class AttendanceNewWebVPNQRCodeLogin(QRCodeLoginMixin, AttendanceNewWebVPNLogin):
+    """
+    通过 WebVPN 使用二维码登录考勤系统，并复用考勤系统 token 提取逻辑。
+    """
+
+    def __init__(self, session: requests.Session | None = None, is_postgraduate: bool = False,
+                 visitor_id: str | None = None) -> None:
+        """
+        创建考勤系统 WebVPN 二维码登录器。
+        """
+        super().__init__(session=session, is_postgraduate=is_postgraduate, visitor_id=visitor_id)
+
+
+AttendanceNewQRCodeWebVPNLogin = AttendanceNewWebVPNQRCodeLogin
 
 
 def _getNowTime():

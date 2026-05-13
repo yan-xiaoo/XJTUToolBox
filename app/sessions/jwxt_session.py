@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from auth.constant import JWXT_LOGIN_URL
 from auth.new_login import NewLogin, NewWebVPNLogin
-from app.utils.interactive_login import login_with_optional_mfa
+from auth.new_qrcode_login import NewQRCodeLogin, NewWebVPNQRCodeLogin
 from .common_session import CommonLoginSession
 from .session_backend import AccessMode
 from ..utils import cfg
@@ -18,16 +18,14 @@ class JWXTSession(CommonLoginSession):
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin
-        login_util = login_class(JWXT_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value))
-        account, mfa_provider = self.get_login_context(kwargs)
-        login_with_optional_mfa(
-            login_util,
+        qrcode_login_class = NewWebVPNQRCodeLogin if self.access_mode == AccessMode.WEBVPN else NewQRCodeLogin
+        self.perform_cas_login(
             username,
             password,
-            account,
-            mfa_provider,
-            site_key=self.site_key,
-            site_name=self.site_name,
+            kwargs=kwargs,
+            password_login_factory=lambda: login_class(JWXT_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value)),
+            qrcode_login_factory=lambda: qrcode_login_class(JWXT_LOGIN_URL, session=self, visitor_id=str(cfg.loginId.value)),
+            allow_qrcode_login=kwargs.get("allow_qrcode_login") is not False,
         )
 
         self.reset_timeout()

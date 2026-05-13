@@ -4,4 +4,5 @@
 
 from .util import get_timestamp, getVPNUrl, getOrdinaryUrl, getPlaintext, getCiphertext, get_session, ServerError, generate_fp_visitor_id
 from .new_login import LoginState, NewLogin, NewWebVPNLogin, extract_account_choices, extract_alert_message, extract_execution_value, extract_mfa_enabled, is_safety_verify_page
+from .new_qrcode_login import QRCodeCometResult, QRCodeLoginMixin, QRCodeLoginStatus, NewQRCodeLogin, NewQRCodeWebVPNLogin, NewWebVPNQRCodeLogin
 from .constant import *

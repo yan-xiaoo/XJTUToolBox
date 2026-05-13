@@ -808,6 +808,7 @@ class LMSInterface(ScrollArea):
                 current_account.password,
                 account=current_account,
                 mfa_provider=current_account.session_manager.mfa_provider,
+                allow_qrcode_login=False,
             )
         except Exception as e:
             return None, str(e)

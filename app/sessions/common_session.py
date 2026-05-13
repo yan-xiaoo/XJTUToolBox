@@ -4,6 +4,7 @@ import threading
 import time
 from urllib.parse import urlparse
 from abc import ABCMeta, abstractmethod
+from collections.abc import Callable
 from collections.abc import Mapping
 from dataclasses import dataclass
 from http.cookiejar import CookieJar
@@ -12,12 +13,13 @@ from typing import TYPE_CHECKING, cast
 import requests
 import requests.structures
 
-from auth import ServerError, is_safety_verify_page
+from auth import NewLogin, QRCodeLoginMixin, ServerError, is_safety_verify_page
 from .session_backend import AccessMode, SessionBackend
 
 if TYPE_CHECKING:
     from app.utils.account import Account
     from app.utils.mfa import MFAProvider
+    from app.utils.qrcode_login import QRCodeLoginProvider
     from app.utils.session_manager import SessionManager
     from app.utils.session_persistence import SiteSnapshot
 
@@ -30,6 +32,7 @@ class LoginContext:
     username: str
     password: str
     account_uuid: str | None
+    allow_qrcode_login: bool
     kwargs: Mapping[str, object]
 
 
@@ -100,38 +103,40 @@ class CommonLoginSession(metaclass=ABCMeta):
             self.backend.has_login = True
 
     def login(self, username: str, password: str, preferred_access_mode: AccessMode | None = None,
-              **kwargs: object) -> None:
+              allow_qrcode_login: bool = True, **kwargs: object) -> None:
         """
         登录指定的网站。
         """
         with self.login_lock:
-            self._remember_login_context(username, password, kwargs)
+            self._remember_login_context(username, password, kwargs, allow_qrcode_login)
             self.choose_backend(preferred=preferred_access_mode, **kwargs)
-            self._ensure_webvpn_backend_login(username, password, **kwargs)
+            self._ensure_webvpn_backend_login(username, password, allow_qrcode_login=allow_qrcode_login, **kwargs)
             self.clear_site_state()
-            self._run_login(username, password, **kwargs)
+            self._run_login(username, password, allow_qrcode_login=allow_qrcode_login, **kwargs)
 
     def ensure_login(self, username: str, password: str, force: bool = False,
-                     preferred_access_mode: AccessMode | None = None, **kwargs: object) -> bool:
+                     preferred_access_mode: AccessMode | None = None,
+                     allow_qrcode_login: bool = True, **kwargs: object) -> bool:
         """
         确保当前业务站点已经具有可用登录态。
 
         :param username: 登录用户名
         :param password: 登录密码
         :param force: 是否跳过现有状态并强制重新登录
+        :param allow_qrcode_login: 是否允许在本次登录中使用二维码扫码登录
         :param kwargs: 传递给具体登录实现的上下文参数
         :return: 如果本次执行了登录流程则返回 True，否则返回 False
         """
         with self.login_lock:
-            self._remember_login_context(username, password, kwargs)
+            self._remember_login_context(username, password, kwargs, allow_qrcode_login)
             self.choose_backend(preferred=preferred_access_mode, **kwargs)
             if not force and self.has_login and self.validate_login():
                 self.mark_login_validated()
                 return False
 
             self.invalidate_login()
-            self._ensure_webvpn_backend_login(username, password, **kwargs)
-            self._run_login(username, password, **kwargs)
+            self._ensure_webvpn_backend_login(username, password, allow_qrcode_login=allow_qrcode_login, **kwargs)
+            self._run_login(username, password, allow_qrcode_login=allow_qrcode_login, **kwargs)
             return True
 
     @abstractmethod
@@ -145,7 +150,7 @@ class CommonLoginSession(metaclass=ABCMeta):
         重新登录指定的网站。
         """
         with self.login_lock:
-            self._remember_login_context(username, password, kwargs)
+            self._remember_login_context(username, password, kwargs, True)
             self.clear_site_state()
             self._run_re_login(username, password, **kwargs)
 
@@ -297,7 +302,8 @@ class CommonLoginSession(metaclass=ABCMeta):
         self.reset_timeout()
         self.backend.mark_login_validated()
 
-    def _ensure_webvpn_backend_login(self, username: str, password: str, **kwargs: object) -> None:
+    def _ensure_webvpn_backend_login(self, username: str, password: str, *,
+                                     allow_qrcode_login: bool = True, **kwargs: object) -> None:
         """在 WebVPN 访问方式下确保 WebVPN 后端本身已经登录。"""
         if self.access_mode != AccessMode.WEBVPN or self.session_manager is None:
             return
@@ -308,6 +314,7 @@ class CommonLoginSession(metaclass=ABCMeta):
             account=account,
             mfa_provider=mfa_provider,
             is_postgraduate=kwargs.get("is_postgraduate") is True,
+            allow_qrcode_login=allow_qrcode_login,
         )
 
     @staticmethod
@@ -335,6 +342,66 @@ class CommonLoginSession(metaclass=ABCMeta):
             provider = account.session_manager.mfa_provider
         return account, provider
 
+    def get_qrcode_login_provider(self, kwargs: dict[str, object]) -> QRCodeLoginProvider | None:
+        """
+        从登录参数或账户会话管理器中提取二维码登录 provider。
+        """
+        provider_value = kwargs.get("qrcode_login_provider")
+        provider = cast("QRCodeLoginProvider | None", provider_value)
+        if provider is not None:
+            return provider
+
+        account_value = kwargs.get("account")
+        from app.utils.account import Account
+
+        if isinstance(account_value, Account):
+            return account_value.session_manager.qrcode_login_provider
+        if self.session_manager is not None:
+            return self.session_manager.qrcode_login_provider
+        return None
+
+    def perform_cas_login(
+            self,
+            username: str,
+            password: str,
+            *,
+            kwargs: dict[str, object],
+            password_login_factory: Callable[[], NewLogin],
+            qrcode_login_factory: Callable[[], QRCodeLoginMixin] | None = None,
+            account_type: NewLogin.AccountType = NewLogin.POSTGRADUATE,
+            allow_qrcode_login: bool = True) -> None:
+        """
+        根据配置统一选择账号密码登录或二维码登录，并处理通用认证交互。
+        """
+        from app.utils.config import cfg
+        from app.utils.interactive_login import login_with_optional_mfa, login_with_qrcode
+
+        account, mfa_provider = self.get_login_context(kwargs)
+        if cfg.enableQRCodeLogin.value and allow_qrcode_login:
+            if qrcode_login_factory is None:
+                raise ServerError(102, f"{self.site_name or self.site_key} 暂不支持二维码登录。")
+            login_with_qrcode(
+                qrcode_login_factory(),
+                account,
+                self.get_qrcode_login_provider(kwargs),
+                mfa_provider,
+                account_type=account_type,
+                site_key=self.site_key,
+                site_name=self.site_name,
+            )
+            return
+
+        login_with_optional_mfa(
+            password_login_factory(),
+            username,
+            password,
+            account,
+            mfa_provider,
+            account_type=account_type,
+            site_key=self.site_key,
+            site_name=self.site_name,
+        )
+
     def is_auth_failure_response(self, response: requests.Response) -> bool:
         """
         判断一个响应是否表示当前业务站点登录态已经失效。
@@ -352,12 +419,14 @@ class CommonLoginSession(metaclass=ABCMeta):
         page = response.text
         return is_safety_verify_page(page) or self._is_unified_login_page(page)
 
-    def _remember_login_context(self, username: str, password: str, kwargs: Mapping[str, object]) -> None:
+    def _remember_login_context(self, username: str, password: str, kwargs: Mapping[str, object],
+                                allow_qrcode_login: bool) -> None:
         """保存最近一次登录上下文，供响应兜底恢复使用。"""
         self._login_context = LoginContext(
             username=username,
             password=password,
             account_uuid=self._extract_account_uuid(kwargs),
+            allow_qrcode_login=allow_qrcode_login,
             kwargs=dict(kwargs),
         )
 
@@ -433,7 +502,13 @@ class CommonLoginSession(metaclass=ABCMeta):
         # 理论上不会出现登录态被误用到其他账号的情况，但这里多加一个检查以防万一
         self._ensure_login_context_matches_current_account(context)
         # 尝试重新使用 context 静默登录
-        self.ensure_login(context.username, context.password, force=True, **dict(context.kwargs))
+        self.ensure_login(
+            context.username,
+            context.password,
+            force=True,
+            allow_qrcode_login=context.allow_qrcode_login,
+            **dict(context.kwargs),
+        )
 
         retry_kwargs = dict(request_kwargs)
         if request_headers is not None:

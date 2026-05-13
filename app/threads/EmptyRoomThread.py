@@ -10,6 +10,7 @@ from ..threads.ProcessWidget import ProcessThread
 from ..utils import accounts, logger, cfg
 from ..utils.cache import CacheManager
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
+from ..utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 
 
 class EmptyRoomThread(ProcessThread):
@@ -158,6 +159,14 @@ class EmptyRoomThread(ProcessThread):
                         if single["name"] in result_diction:
                             result_diction[single["name"]]["status"][period - 1] = 0
 
+        except QRCodeLoginCancelledError as e:
+            logger.info("二维码登录已取消：%s", e)
+            self.error.emit(self.tr("扫码登录已取消"), self.tr("已取消扫码登录，本次操作未完成。"))
+            self.canceled.emit()
+        except QRCodeLoginUnavailableError as e:
+            logger.error("二维码登录交互不可用", exc_info=True)
+            self.error.emit(self.tr("登录问题"), str(e))
+            self.canceled.emit()
         except MFACancelledError as e:
             logger.info("MFA 验证已取消：%s", e)
             self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
