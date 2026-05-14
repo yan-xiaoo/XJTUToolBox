@@ -5,9 +5,12 @@
 #      - 如果接口返回一个数据结构的列表，那么返回列表中不会包含这个数据
 #      - 如果接口返回类型为 Optional[xxx]，那么会返回 None
 #      - 其他情况下会抛出 ValueError 异常，表示服务器返回了一个不符合预期格式的结果
+from __future__ import annotations
 
 from enum import Enum
-from typing import Any, List, NotRequired, TypedDict, Optional, Union
+from typing import Any, List, TypedDict, Optional, Union
+
+from typing_extensions import NotRequired
 
 LMSReplayCode = Union[str, int]
 

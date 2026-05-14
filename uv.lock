@@ -3651,6 +3651,7 @@ dependencies = [
     { name = "pytz" },
     { name = "requests" },
     { name = "tqdm" },
+    { name = "typing-extensions" },
     { name = "urllib3" },
 ]
 
@@ -3687,6 +3688,7 @@ requires-dist = [
     { name = "pytz", specifier = "~=2025.2" },
     { name = "requests", specifier = ">=2.33.0" },
     { name = "tqdm", specifier = "~=4.67.1" },
+    { name = "typing-extensions", specifier = ">=4.0.0" },
     { name = "urllib3", specifier = ">=2.7.0" },
 ]
 

@@ -33,6 +33,7 @@ dependencies = [
     "pyobjus>=1.2.4; sys_platform == 'darwin'",
     "urllib3>=2.7.0",
     "pillow>=12.2.0",
+    "typing-extensions>=4.0.0",
 ]
 
 [tool.uv]
