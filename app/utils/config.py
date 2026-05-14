@@ -352,7 +352,7 @@ class Config(QConfig):
     cardLayout = ConfigItem("Settings", "card_layout", [], CardValidator(), CardSerializer())
     useKeyring = OptionsConfigItem("Settings", "use_keyring", True, OptionsValidator([True, False]),
                                    BooleanSerializer())
-    keepSessionOnExit = OptionsConfigItem("Settings", "keep_session_on_exit", False,
+    keepSessionOnExit = OptionsConfigItem("Settings", "keep_session_on_exit", True,
                                           OptionsValidator([True, False]), BooleanSerializer())
     sessionKeepAliveEnabled = OptionsConfigItem("Settings", "session_keep_alive_enabled", True,
                                                OptionsValidator([True, False]), BooleanSerializer())
