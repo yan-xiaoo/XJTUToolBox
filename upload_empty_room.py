@@ -172,9 +172,7 @@ def login(username: str, password: str, fp_visitor_id: str) -> Any:
     """
     登录 Ehall 并且获得一个 Session
     """
-    webvpn_util = NewLogin(WEBVPN_LOGIN_URL, visitor_id=fp_visitor_id)
-    webvpn_session = webvpn_util.login_or_raise(username, password, account_type=NewLogin.AccountType.UNDERGRADUATE)
-    util = NewWebVPNLogin(JWXT_LOGIN_URL, visitor_id=fp_visitor_id, session=webvpn_session)
+    util = NewLogin(JWXT_LOGIN_URL, visitor_id=fp_visitor_id)
     return util.login_or_raise(username, password, account_type=NewLogin.AccountType.UNDERGRADUATE)
 
 
