@@ -175,12 +175,44 @@ class SessionManager:
             self._access_probe_result = None
             self._access_probe_time = 0.0
 
+    def handle_access_policy_changed(self, preferred: AccessMode | None = None) -> None:
+        """在访问策略切换后清理依赖旧访问方式的站点恢复态。"""
+        self.clear_access_probe_cache()
+        with ExitStack() as stack:
+            for session in self.instances.values():
+                if session is not None:
+                    stack.enter_context(session.login_lock)
+            for backend in self.backends.values():
+                stack.enter_context(backend.login_lock)
+
+            self._pending_site_snapshots.clear()
+            for session in self.instances.values():
+                if session is None:
+                    continue
+                if preferred is not None:
+                    target_mode = preferred
+                    if target_mode == AccessMode.WEBVPN and not session.supports_webvpn:
+                        target_mode = AccessMode.NORMAL
+                    if target_mode != session.access_mode:
+                        session.set_backend(self.backends[target_mode])
+                session.clear_site_state()
+
+            webvpn_backend = self.backends[AccessMode.WEBVPN]
+            if len(list(webvpn_backend.session.cookies)) > 0:
+                webvpn_backend.mark_restored_candidate()
+            else:
+                webvpn_backend.clear_auth_state()
+
     def can_reach_campus_network(self, *, timeout: float = 10.0) -> bool:
-        """通过访问教务系统首页判断当前网络是否可以直连校内系统。"""
+        """通过访问考勤系统判断当前网络是否可以直连校内系统。"""
+        from auth import ATTENDANCE_WEBVPN_URL
+
         try:
-            response = requests.get("https://jwxt.xjtu.edu.cn/", timeout=timeout)
-            response.close()
-            return True
+            response = requests.get(ATTENDANCE_WEBVPN_URL, allow_redirects=False, timeout=timeout)
+            try:
+                return response.status_code < 500
+            finally:
+                response.close()
         except requests.RequestException:
             return False
 

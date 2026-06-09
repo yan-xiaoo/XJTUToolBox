@@ -21,6 +21,7 @@ from .utils.account import KEYRING_SERVICE_NAME
 from .utils.auto_start import add_to_startup, delete_from_startup
 from .utils.config import cfg, TraySetting
 from .utils import accounts, LOG_DIRECTORY, DEFAULT_ACCOUNT_PATH
+from .sessions.session_backend import AccessMode
 from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
 from .cards.scheduled_notice_card import ScheduledNoticeCard
@@ -573,10 +574,16 @@ class SettingInterface(ScrollArea):
 
     @pyqtSlot(int)
     def _onCampusAccessPolicyChanged(self, index: int) -> None:
-        """校园网访问策略改变时清理自动探测缓存。"""
-        cfg.set(cfg.campusAccessPolicy, cfg.NetworkAccessPolicy(index))
+        """校园网访问策略改变时清理依赖旧访问方式的登录候选态。"""
+        policy = cfg.NetworkAccessPolicy(index)
+        cfg.set(cfg.campusAccessPolicy, policy)
+        preferred_access_mode = None
+        if policy == cfg.NetworkAccessPolicy.DIRECT:
+            preferred_access_mode = AccessMode.NORMAL
+        elif policy == cfg.NetworkAccessPolicy.WEBVPN:
+            preferred_access_mode = AccessMode.WEBVPN
         for account in accounts:
-            account.session_manager.clear_access_probe_cache()
+            account.session_manager.handle_access_policy_changed(preferred=preferred_access_mode)
 
     @pyqtSlot()
     def _onClearSessionsClicked(self):
