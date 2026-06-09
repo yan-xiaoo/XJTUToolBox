@@ -15,7 +15,10 @@
     "docs:preview": "vitepress preview docs"
   },
   "overrides": {
-    "esbuild": "0.25.12"
+    "esbuild": "0.25.12",
+    "pdfjs": {
+      "uuid": "11.1.1"
+    }
   },
   "dependencies": {
     "vitepress-plugin-comment-with-giscus": "^1.1.15"
