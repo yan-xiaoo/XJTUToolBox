@@ -146,34 +146,55 @@ export default withMermaid(defineConfig({
     // },
     nav: [
       { text: '主页', link: '/' },
-      { text: '用户手册', link: '/tutorial/quick-start' },
-      { text: '开发指南', link: '/development/setup' }
+      { text: '用户手册', link: '/tutorial/quick-start', activeMatch: '^/tutorial/' },
+      { text: '开发指南', link: '/development/setup', activeMatch: '^/development/' }
     ],
 
-    sidebar: [
-      {
-        text: '用户手册',
-        items: [
-          { text: '快速开始', link: '/tutorial/quick-start' },
-          { text: '常见问题', link: '/tutorial/faq' },
-          { text: '登录与账户管理', link: '/tutorial/account' },
-          { text: '课表与考勤', link: '/tutorial/schedule' },
-          { text: '考勤流水', link: '/tutorial/attendance' },
-          { text: '成绩查询与计算', link: '/tutorial/score' },
-          { text: '一键评教', link: '/tutorial/judge' },
-          { text: '通知查询', link: '/tutorial/notice' },
-          { text: '定时查询', link: '/tutorial/scheduled-event' },
-          { text: '空闲教室', link: '/tutorial/empty-room' },
-          { text: '设置', link: '/tutorial/setting' },
-        ]
-      },
-      {
-        text: '开发指南',
-        items: [
-          { text: '开发环境搭建', link: '/development/setup' }
-        ]
-      }
-    ],
+    sidebar: {
+      '/tutorial/': [
+        {
+          text: '用户手册',
+          items: [
+            { text: '快速开始', link: '/tutorial/quick-start' },
+            { text: '常见问题', link: '/tutorial/faq' },
+            { text: '登录与账户管理', link: '/tutorial/account' },
+            { text: '课表与考勤', link: '/tutorial/schedule' },
+            { text: '考勤流水', link: '/tutorial/attendance' },
+            { text: '成绩查询与计算', link: '/tutorial/score' },
+            { text: '一键评教', link: '/tutorial/judge' },
+            { text: '通知查询', link: '/tutorial/notice' },
+            { text: '定时查询', link: '/tutorial/scheduled-event' },
+            { text: '空闲教室', link: '/tutorial/empty-room' },
+            { text: '设置', link: '/tutorial/setting' },
+          ]
+        }
+      ],
+      '/development/': [
+        {
+          text: '基础与机制',
+          items: [
+            { text: '开发环境搭建', link: '/development/setup' },
+            { text: '软件模块介绍', link: '/development/introduction' },
+            { text: '认证与登录系统', link: '/development/auth' },
+            { text: 'Session 管理设计', link: '/development/session' },
+            { text: '子线程与进度反馈', link: '/development/thread' },
+            { text: '界面开发入门', link: '/development/interface' },
+            { text: '文档站维护', link: '/development/docs-site' }
+          ]
+        },
+        {
+          text: '业务模块',
+          items: [
+            { text: '考勤系统', link: '/development/attendance' },
+            { text: '本科教务系统', link: '/development/jwxt' },
+            { text: '研究生管理信息系统', link: '/development/gmis' },
+            { text: '移动教务', link: '/development/jwapp' },
+            { text: '通知系统', link: '/development/notification' },
+            { text: '新师生服务大厅', link: '/development/ywtb' }
+          ]
+        }
+      ]
+    },
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/yan-xiaoo/XJTUToolBox' }
