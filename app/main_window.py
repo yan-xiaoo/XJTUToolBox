@@ -103,7 +103,7 @@ class MainWindow(MSFluentWindow):
         # 为当前已知账户安装全局 MFA provider, 这样每个 session 都能找到它来处理 MFA 请求了
         self._install_mfa_provider_for_accounts()
         accounts.accountAdded.connect(self._install_mfa_provider_for_accounts)
-        self._start_access_probe_for_current_account()
+        QTimer.singleShot(1500, self._start_access_probe_for_current_account)
 
         self.light_icon = QIcon("assets/icons/toolbox_light.png")
         self.dark_icon = QIcon("assets/icons/toolbox_dark.png")

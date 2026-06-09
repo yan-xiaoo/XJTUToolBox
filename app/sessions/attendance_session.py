@@ -19,6 +19,7 @@ class AttendanceSession(CommonLoginSession):
     site_key = "attendance"
     site_name = "考勤系统"
     supports_webvpn = True
+    use_webvpn_when_off_campus = True
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         is_postgraduate = kwargs.get("is_postgraduate") is True

@@ -986,7 +986,7 @@ class LMSInterface(ScrollArea):
         current_account = accounts.current
         if current_account is not None:
             try:
-                access_mode = current_account.session_manager.resolve_access_mode()
+                access_mode = current_account.session_manager.resolve_cached_access_mode_for_site(LMSSession)
                 if access_mode == AccessMode.WEBVPN and url.startswith(("http://", "https://")):
                     url = getVPNUrl(url)
             except Exception:

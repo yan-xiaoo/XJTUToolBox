@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+import threading
 import unittest
 
 from requests.cookies import create_cookie
@@ -7,6 +9,7 @@ from requests.cookies import create_cookie
 from app.sessions.common_session import CommonLoginSession
 from app.sessions.session_backend import AccessMode
 from auth import ATTENDANCE_WEBVPN_URL
+from app.utils.config import cfg
 from app.utils.session_manager import SessionManager
 import app.utils.session_manager as session_manager_module
 from app.utils.session_persistence import SiteSnapshot
@@ -39,6 +42,21 @@ class WebVPNTestSession(CommonLoginSession):
         """模拟重新登录流程。"""
 
 
+class DirectOffCampusTestSession(CommonLoginSession):
+    """用于验证自动校外默认直连的测试 Session。"""
+
+    site_key = "direct_off_campus_test"
+    default_access_mode = AccessMode.NORMAL
+    supports_webvpn = True
+    use_webvpn_when_off_campus = False
+
+    def _login(self, username: str, password: str, **kwargs: object) -> None:
+        """模拟登录流程。"""
+
+    def _re_login(self, username: str, password: str, **kwargs: object) -> None:
+        """模拟重新登录流程。"""
+
+
 class ProbeResponse:
     """用于模拟校园网探测请求响应。"""
 
@@ -56,8 +74,14 @@ class SessionManagerTestCase(unittest.TestCase):
     def setUp(self) -> None:
         # 清除类变量里累计注册的 session
         SessionManager.sessions.clear()
+        self._original_access_policy = cfg.campusAccessPolicy.value
         self.s1 = SessionManager()
         self.s2 = SessionManager()
+
+    def tearDown(self) -> None:
+        """恢复测试修改过的全局配置。"""
+        cfg.campusAccessPolicy.value = self._original_access_policy
+        SessionManager.sessions.clear()
 
     def test_add(self) -> None:
         self.s1.register(NormalTestSession, "normal")
@@ -177,6 +201,154 @@ class SessionManagerTestCase(unittest.TestCase):
 
         self.assertFalse(result)
         self.assertTrue(response.closed)
+
+    def test_auto_off_campus_uses_site_policy(self) -> None:
+        """自动检测为校外时应按站点策略选择直连或 WebVPN。"""
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.AUTO
+        self.s1.can_reach_campus_network = lambda timeout=10.0: False
+
+        direct_session = DirectOffCampusTestSession(backend=self.s1.get_backend(AccessMode.NORMAL))
+        direct_session.session_manager = self.s1
+        webvpn_session = WebVPNTestSession(backend=self.s1.get_backend(AccessMode.NORMAL))
+        webvpn_session.session_manager = self.s1
+
+        self.assertEqual(direct_session.choose_backend(), AccessMode.NORMAL)
+        self.assertEqual(webvpn_session.choose_backend(), AccessMode.WEBVPN)
+
+    def test_forced_policy_overrides_site_policy(self) -> None:
+        """强制访问策略应覆盖自动校外站点默认值。"""
+        direct_session = DirectOffCampusTestSession(backend=self.s1.get_backend(AccessMode.NORMAL))
+        direct_session.session_manager = self.s1
+        webvpn_session = WebVPNTestSession(backend=self.s1.get_backend(AccessMode.WEBVPN))
+        webvpn_session.session_manager = self.s1
+
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.WEBVPN
+        self.assertEqual(direct_session.choose_backend(), AccessMode.WEBVPN)
+
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.DIRECT
+        self.assertEqual(webvpn_session.choose_backend(), AccessMode.NORMAL)
+
+    def test_site_class_access_resolver_uses_site_policy(self) -> None:
+        """传入站点类时也应按站点策略解析访问方式。"""
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.AUTO
+        self.s1.can_reach_campus_network = lambda timeout=10.0: False
+
+        self.assertEqual(
+            self.s1.resolve_access_mode_for_site(DirectOffCampusTestSession),
+            AccessMode.NORMAL,
+        )
+        self.assertEqual(
+            self.s1.resolve_access_mode_for_site(WebVPNTestSession),
+            AccessMode.WEBVPN,
+        )
+
+    def test_cached_access_probe_result_respects_expiration(self) -> None:
+        """自动访问探测缓存只应在有效期内返回。"""
+        self.s1._access_probe_result = AccessMode.NORMAL
+        self.s1._access_probe_time = time.time()
+
+        self.assertEqual(self.s1.get_cached_access_probe_result(), AccessMode.NORMAL)
+
+        self.s1._access_probe_time = time.time() - 5 * 60
+
+        self.assertIsNone(self.s1.get_cached_access_probe_result())
+
+    def test_refresh_access_probe_result_forces_probe(self) -> None:
+        """强制刷新接口应更新自动访问探测缓存。"""
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.AUTO
+        self.s1.can_reach_campus_network = lambda timeout=10.0: False
+
+        result = self.s1.refresh_access_probe_result()
+
+        self.assertEqual(result, AccessMode.WEBVPN)
+        self.assertEqual(self.s1.get_cached_access_probe_result(), AccessMode.WEBVPN)
+
+    def test_cached_probe_read_does_not_wait_for_refresh_network_io(self) -> None:
+        """读取探测缓存不应等待正在进行的后台网络探测。"""
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.AUTO
+        self.s1._access_probe_result = AccessMode.NORMAL
+        self.s1._access_probe_time = time.time()
+        probe_started = threading.Event()
+        release_probe = threading.Event()
+
+        def slow_probe(timeout: float = 10.0) -> bool:
+            """模拟一次很慢的校内网络探测。"""
+            probe_started.set()
+            release_probe.wait(timeout=2.0)
+            return False
+
+        self.s1.can_reach_campus_network = slow_probe
+        refresh_thread = threading.Thread(target=self.s1.refresh_access_probe_result)
+        refresh_thread.start()
+        self.assertTrue(probe_started.wait(timeout=1.0))
+
+        started_at = time.monotonic()
+        cached_result = self.s1.get_cached_access_probe_result()
+        elapsed = time.monotonic() - started_at
+
+        release_probe.set()
+        refresh_thread.join(timeout=1.0)
+
+        self.assertEqual(cached_result, AccessMode.NORMAL)
+        self.assertLess(elapsed, 0.2)
+        self.assertFalse(refresh_thread.is_alive())
+
+    def test_stale_probe_does_not_write_after_cache_clear(self) -> None:
+        """清理缓存后，尚未结束的旧探测不应重新写回结果。"""
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.AUTO
+        probe_started = threading.Event()
+        release_probe = threading.Event()
+
+        def slow_probe(timeout: float = 10.0) -> bool:
+            """模拟一次稍后才返回的旧探测。"""
+            probe_started.set()
+            release_probe.wait(timeout=2.0)
+            return False
+
+        self.s1.can_reach_campus_network = slow_probe
+        refresh_thread = threading.Thread(target=self.s1.refresh_access_probe_result)
+        refresh_thread.start()
+        self.assertTrue(probe_started.wait(timeout=1.0))
+
+        self.s1.clear_access_probe_cache()
+        release_probe.set()
+        refresh_thread.join(timeout=1.0)
+
+        self.assertFalse(refresh_thread.is_alive())
+        self.assertIsNone(self.s1.get_cached_access_probe_result())
+
+    def test_cached_site_resolver_does_not_probe_without_cache(self) -> None:
+        """只读站点解析在自动无缓存时不应发起网络探测。"""
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.AUTO
+        probe_calls = 0
+
+        def probe(timeout: float = 10.0) -> bool:
+            """记录意外探测调用。"""
+            nonlocal probe_calls
+            probe_calls += 1
+            return False
+
+        self.s1.can_reach_campus_network = probe
+
+        result = self.s1.resolve_cached_access_mode_for_site(WebVPNTestSession)
+
+        self.assertIsNone(result)
+        self.assertEqual(probe_calls, 0)
+
+    def test_cached_site_resolver_uses_cached_probe_and_site_policy(self) -> None:
+        """只读站点解析有缓存时应按站点策略返回访问方式。"""
+        cfg.campusAccessPolicy.value = cfg.NetworkAccessPolicy.AUTO
+        self.s1._access_probe_result = AccessMode.WEBVPN
+        self.s1._access_probe_time = time.time()
+
+        self.assertEqual(
+            self.s1.resolve_cached_access_mode_for_site(WebVPNTestSession),
+            AccessMode.WEBVPN,
+        )
+        self.assertEqual(
+            self.s1.resolve_cached_access_mode_for_site(DirectOffCampusTestSession),
+            AccessMode.NORMAL,
+        )
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@ from jwxt import Questionnaire, QuestionnaireTemplate
 from gste.judge import GraduateQuestionnaire, GraduateQuestionnaireData
 from auth import getVPNUrl
 from app.sessions.session_backend import AccessMode
+from app.sessions.gste_session import GSTESession
+from app.sessions.jwxt_session import JWXTSession
 from .GraduateJudgeOptionInterface import GraduateJudgeOptionMessageBox
 from .JudgeOptionInterface import JudgeOptionMessageBox
 from .JudgeAllOptionInterface import JudgeAllOptionMessageBox
@@ -196,15 +198,15 @@ class AutoJudgeInterface(ScrollArea):
     @pyqtSlot()
     def onViewEhallTriggered(self):
         if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
-            self._open_campus_url("http://gste.xjtu.edu.cn/")
+            self._open_campus_url("http://gste.xjtu.edu.cn/", GSTESession)
         else:
-            self._open_campus_url("https://ehall.xjtu.edu.cn/")
+            self._open_campus_url("https://ehall.xjtu.edu.cn/", JWXTSession)
 
-    def _open_campus_url(self, url: str) -> None:
+    def _open_campus_url(self, url: str, site: type[JWXTSession] | type[GSTESession]) -> None:
         """根据当前访问策略打开校内系统链接。"""
         if accounts.current is not None:
             try:
-                access_mode = accounts.current.session_manager.resolve_access_mode()
+                access_mode = accounts.current.session_manager.resolve_cached_access_mode_for_site(site)
                 if access_mode == AccessMode.WEBVPN:
                     url = getVPNUrl(url)
             except Exception:

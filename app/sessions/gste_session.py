@@ -16,6 +16,7 @@ class GSTESession(CommonLoginSession):
     site_key = "gste"
     site_name = "研究生评教系统"
     supports_webvpn = True
+    use_webvpn_when_off_campus = True
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin

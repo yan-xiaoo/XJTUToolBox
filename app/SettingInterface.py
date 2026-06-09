@@ -1,10 +1,11 @@
 import os
 import sys
 import shlex
+import threading
 
 import keyring
 import keyring.errors
-from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal
+from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTimer
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
     InfoBadge, LineEdit, SwitchButton, IndicatorPosition, BodyLabel, HyperlinkLabel
@@ -22,6 +23,7 @@ from .utils.auto_start import add_to_startup, delete_from_startup
 from .utils.config import cfg, TraySetting
 from .utils import accounts, LOG_DIRECTORY, DEFAULT_ACCOUNT_PATH
 from .sessions.session_backend import AccessMode
+from .utils.session_manager import SessionManager
 from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
 from .cards.scheduled_notice_card import ScheduledNoticeCard
@@ -187,6 +189,7 @@ class SettingInterface(ScrollArea):
     """设置界面"""
     # 当自身的「检查更新」按钮被点击时，发出此信号，用于消除主界面的提醒元素
     updateClicked = pyqtSignal()
+    _campusAccessProbeFinished = pyqtSignal(str)
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
@@ -196,6 +199,8 @@ class SettingInterface(ScrollArea):
         self.view.setObjectName("scrollWidget")
 
         self.main_window = main_window
+        self._campusAccessProbeRunning = False
+        self._campusAccessProbePending = False
 
         self.expandLayout = ExpandLayout(self.view)
 
@@ -437,6 +442,8 @@ class SettingInterface(ScrollArea):
             self._onCampusAccessPolicyChanged
         )
         cfg.traySetting.valueChanged.connect(self._onTraySettingChanged)
+        accounts.currentAccountChanged.connect(self._onCurrentAccountChanged)
+        self._campusAccessProbeFinished.connect(self._onCampusAccessProbeFinished)
         self.encryptCard.clicked.connect(self.onEncryptAccountClicked)
         self.decryptCard.clicked.connect(self._onCancelEncryptClicked)
         self.clearCard.clicked.connect(self._onClearAccountsClicked)
@@ -462,6 +469,8 @@ class SettingInterface(ScrollArea):
             self.aboutGroup.cardLayout.removeWidget(self.autoStartCard)
             self.aboutGroup.adjustSize()
         self._onSessionKeepAliveChanged(cfg.sessionKeepAliveEnabled.value)
+        self._updateCampusAccessPolicyContent()
+        QTimer.singleShot(1500, self._requestCampusAccessProbe)
 
     @pyqtSlot()
     def _onTraySettingChanged(self):
@@ -572,6 +581,77 @@ class SettingInterface(ScrollArea):
         if hasattr(self.sessionKeepAliveCard, "comboBox"):
             self.sessionKeepAliveCard.comboBox.setEnabled(checked)
 
+    @pyqtSlot()
+    def _onCurrentAccountChanged(self) -> None:
+        """当前账号改变时刷新自动访问检测文案。"""
+        self._requestCampusAccessProbe()
+
+    def _setCampusAccessPolicyContent(self, content: str) -> None:
+        """更新校园网访问方式卡片的说明文案。"""
+        self.campusAccessPolicyCard.setContent(content)
+
+    def _campusAccessPolicyContent(self) -> str:
+        """根据当前设置和探测缓存生成校园网访问方式文案。"""
+        policy = cfg.campusAccessPolicy.value
+        if policy == cfg.NetworkAccessPolicy.DIRECT:
+            return self.tr("已强制直连：校内系统将优先直连。")
+        if policy == cfg.NetworkAccessPolicy.WEBVPN:
+            return self.tr("已强制 WebVPN：校内系统将通过 WebVPN 连接。")
+
+        current_account = accounts.current
+        if current_account is None:
+            return self.tr("自动检测：暂无当前账号，登录后检测网络环境。")
+
+        cached_result = current_account.session_manager.get_cached_access_probe_result()
+        if cached_result is None:
+            return self.tr("自动检测：正在检测当前网络环境...")
+        if cached_result == AccessMode.NORMAL:
+            return self.tr("自动检测：当前为校内网络，校内系统将优先直连。")
+        return self.tr("自动检测：当前为校外网络，考勤将通过 WebVPN 连接。")
+
+    def _updateCampusAccessPolicyContent(self) -> None:
+        """立刻用当前缓存刷新校园网访问方式文案。"""
+        self._setCampusAccessPolicyContent(self._campusAccessPolicyContent())
+
+    def _requestCampusAccessProbe(self) -> None:
+        """按需在后台刷新自动访问探测结果并更新文案。"""
+        self._updateCampusAccessPolicyContent()
+        if cfg.campusAccessPolicy.value != cfg.NetworkAccessPolicy.AUTO:
+            return
+
+        current_account = accounts.current
+        if current_account is None:
+            return
+
+        if self._campusAccessProbeRunning:
+            self._campusAccessProbePending = True
+            return
+
+        self._campusAccessProbeRunning = True
+        self._campusAccessProbePending = False
+        account_uuid = current_account.uuid
+        session_manager = current_account.session_manager
+
+        def worker(manager: SessionManager, target_account_uuid: str) -> None:
+            """在后台线程刷新当前账号的网络探测结果。"""
+            try:
+                manager.refresh_access_probe_result()
+            finally:
+                self._campusAccessProbeFinished.emit(target_account_uuid)
+
+        thread = threading.Thread(target=worker, args=(session_manager, account_uuid), daemon=True)
+        thread.start()
+
+    @pyqtSlot(str)
+    def _onCampusAccessProbeFinished(self, account_uuid: str) -> None:
+        """后台网络探测结束后刷新文案并处理排队请求。"""
+        self._campusAccessProbeRunning = False
+        self._updateCampusAccessPolicyContent()
+
+        if self._campusAccessProbePending:
+            self._campusAccessProbePending = False
+            self._requestCampusAccessProbe()
+
     @pyqtSlot(int)
     def _onCampusAccessPolicyChanged(self, index: int) -> None:
         """校园网访问策略改变时清理依赖旧访问方式的登录候选态。"""
@@ -584,6 +664,7 @@ class SettingInterface(ScrollArea):
             preferred_access_mode = AccessMode.WEBVPN
         for account in accounts:
             account.session_manager.handle_access_policy_changed(preferred=preferred_access_mode)
+        self._requestCampusAccessProbe()
 
     @pyqtSlot()
     def _onClearSessionsClicked(self):

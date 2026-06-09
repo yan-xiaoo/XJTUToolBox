@@ -15,6 +15,7 @@ class GMISSession(CommonLoginSession):
     site_key = "gmis"
     site_name = "研究生管理信息系统"
     supports_webvpn = True
+    use_webvpn_when_off_campus = False
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin

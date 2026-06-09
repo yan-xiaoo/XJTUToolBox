@@ -15,6 +15,7 @@ class LMSSession(CommonLoginSession):
     site_key = "lms"
     site_name = "思源学堂"
     supports_webvpn = True
+    use_webvpn_when_off_campus = False
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_url = LMS_LOGIN_URL

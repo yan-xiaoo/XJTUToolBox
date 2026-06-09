@@ -67,6 +67,7 @@ class SessionManager:
         self.qrcode_login_provider: QRCodeLoginProvider | None = None
         self._access_probe_result: AccessMode | None = None
         self._access_probe_time = 0.0
+        self._access_probe_generation = 0
         self._access_probe_lock = threading.RLock()
 
     def register(self, class_: type[CommonLoginSession], name: str, allow_override: bool = True) -> None:
@@ -163,15 +164,82 @@ class SessionManager:
             now = time.time()
             if not force_refresh and self._access_probe_result is not None and now - self._access_probe_time < 5 * 60:
                 return self._access_probe_result
+            if force_refresh:
+                self._access_probe_generation += 1
+            generation = self._access_probe_generation
 
-            mode = AccessMode.NORMAL if self.can_reach_campus_network() else AccessMode.WEBVPN
+        mode = AccessMode.NORMAL if self.can_reach_campus_network() else AccessMode.WEBVPN
+        with self._access_probe_lock:
+            if generation != self._access_probe_generation:
+                return mode
             self._access_probe_result = mode
-            self._access_probe_time = now
-            return mode
+            self._access_probe_time = time.time()
+        return mode
+
+    def resolve_access_mode_for_site(self, site: CommonLoginSession | type[CommonLoginSession], *,
+                                     force_refresh: bool = False,
+                                     preferred: AccessMode | None = None) -> AccessMode:
+        """根据用户设置、网络探测和站点策略解析站点访问方式。"""
+        from app.utils.config import cfg
+
+        if preferred is not None:
+            return self._normalize_site_access_mode(site, preferred)
+
+        policy = cfg.campusAccessPolicy.value
+        if policy == cfg.NetworkAccessPolicy.DIRECT:
+            return AccessMode.NORMAL
+        if policy == cfg.NetworkAccessPolicy.WEBVPN:
+            return self._normalize_site_access_mode(site, AccessMode.WEBVPN)
+
+        detected_mode = self.resolve_access_mode(force_refresh=force_refresh)
+        if detected_mode == AccessMode.NORMAL:
+            return AccessMode.NORMAL
+        if self._site_uses_webvpn_when_off_campus(site):
+            return self._normalize_site_access_mode(site, AccessMode.WEBVPN)
+        return AccessMode.NORMAL
+
+    def get_cached_access_probe_result(self) -> AccessMode | None:
+        """读取有效期内的自动访问探测缓存。"""
+        with self._access_probe_lock:
+            now = time.time()
+            if self._access_probe_result is None or now - self._access_probe_time >= 5 * 60:
+                return None
+            return self._access_probe_result
+
+    def refresh_access_probe_result(self) -> AccessMode:
+        """强制刷新自动访问探测结果。"""
+        return self.resolve_access_mode(force_refresh=True)
+
+    def resolve_cached_access_mode_for_site(
+            self,
+            site: CommonLoginSession | type[CommonLoginSession],
+            *,
+            preferred: AccessMode | None = None) -> AccessMode | None:
+        """只使用设置和探测缓存解析站点访问方式，不发起网络探测。"""
+        from app.utils.config import cfg
+
+        if preferred is not None:
+            return self._normalize_site_access_mode(site, preferred)
+
+        policy = cfg.campusAccessPolicy.value
+        if policy == cfg.NetworkAccessPolicy.DIRECT:
+            return AccessMode.NORMAL
+        if policy == cfg.NetworkAccessPolicy.WEBVPN:
+            return self._normalize_site_access_mode(site, AccessMode.WEBVPN)
+
+        cached_mode = self.get_cached_access_probe_result()
+        if cached_mode is None:
+            return None
+        if cached_mode == AccessMode.NORMAL:
+            return AccessMode.NORMAL
+        if self._site_uses_webvpn_when_off_campus(site):
+            return self._normalize_site_access_mode(site, AccessMode.WEBVPN)
+        return AccessMode.NORMAL
 
     def clear_access_probe_cache(self) -> None:
         """清理自动访问模式的网络探测缓存。"""
         with self._access_probe_lock:
+            self._access_probe_generation += 1
             self._access_probe_result = None
             self._access_probe_time = 0.0
 
@@ -202,6 +270,23 @@ class SessionManager:
                 webvpn_backend.mark_restored_candidate()
             else:
                 webvpn_backend.clear_auth_state()
+
+    @staticmethod
+    def _site_supports_webvpn(site: CommonLoginSession | type[CommonLoginSession]) -> bool:
+        """判断站点是否支持 WebVPN 访问。"""
+        return bool(getattr(site, "supports_webvpn", False))
+
+    @staticmethod
+    def _site_uses_webvpn_when_off_campus(site: CommonLoginSession | type[CommonLoginSession]) -> bool:
+        """判断站点在自动检测为校外时是否应使用 WebVPN。"""
+        return bool(getattr(site, "use_webvpn_when_off_campus", True))
+
+    def _normalize_site_access_mode(self, site: CommonLoginSession | type[CommonLoginSession],
+                                    access_mode: AccessMode) -> AccessMode:
+        """根据站点能力修正访问方式。"""
+        if access_mode == AccessMode.WEBVPN and not self._site_supports_webvpn(site):
+            return AccessMode.NORMAL
+        return access_mode
 
     def can_reach_campus_network(self, *, timeout: float = 10.0) -> bool:
         """通过访问考勤系统判断当前网络是否可以直连校内系统。"""

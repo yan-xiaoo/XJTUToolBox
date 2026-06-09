@@ -14,6 +14,7 @@ class JwappSession(CommonLoginSession):
     site_key = "jwapp"
     site_name = "移动教务系统"
     supports_webvpn = True
+    use_webvpn_when_off_campus = False
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = JwappNewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else JwappNewLogin

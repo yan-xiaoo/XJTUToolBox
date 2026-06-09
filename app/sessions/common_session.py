@@ -62,6 +62,8 @@ class CommonLoginSession(metaclass=ABCMeta):
     default_access_mode = AccessMode.NORMAL
     # 当前站点是否支持 WebVPN。子类应当重写这个变量
     supports_webvpn = False
+    # 自动检测为校外网络时，当前站点是否需要通过 WebVPN 访问。
+    use_webvpn_when_off_campus = True
 
     def __init__(self, backend: SessionBackend | None = None, site_key: str | None = None,
                  timeout: int = 15 * 60) -> None:
@@ -218,9 +220,7 @@ class CommonLoginSession(metaclass=ABCMeta):
         if self.session_manager is None:
             return self.access_mode
 
-        target_mode = self.session_manager.resolve_access_mode(preferred=preferred)
-        if target_mode == AccessMode.WEBVPN and not self.supports_webvpn:
-            target_mode = AccessMode.NORMAL
+        target_mode = self.session_manager.resolve_access_mode_for_site(self, preferred=preferred)
 
         if target_mode != self.access_mode:
             self.set_backend(self.session_manager.get_backend(target_mode))
