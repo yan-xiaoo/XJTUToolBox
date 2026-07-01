@@ -25,7 +25,6 @@ from .ToolBoxInterface import ToolBoxInterface
 from .TrayInterface import TrayInterface
 from .sessions.attendance_session import AttendanceSession
 from .sessions.jwxt_session import JWXTSession
-from .sessions.js_session import JsSession
 from .sessions.gmis_session import GMISSession
 from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
@@ -53,7 +52,6 @@ def registerSession():
     # 教务系统：jwxt.xjtu.edu.cn 所用的 session
     SessionManager.global_register(JWXTSession, "jwxt")
     SessionManager.global_register(AttendanceSession, "attendance")
-    SessionManager.global_register(JsSession, "js")
     SessionManager.global_register(JwappSession, "jwapp")
     SessionManager.global_register(GMISSession, "gmis")
     SessionManager.global_register(GSTESession, "gste")

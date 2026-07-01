@@ -1,153 +1,90 @@
-import concurrent.futures
-
 import requests
 from PyQt5.QtCore import pyqtSignal
 
 from auth import ServerError
+from jwxt.schedule import Schedule
 from .ProcessWidget import ProcessThread
-from ..sessions.attendance_session import AttendanceSession
 from ..sessions.jwxt_session import JWXTSession
-from ..sessions.js_session import JsSession
-from ..utils import logger, accounts
+from ..utils import logger, cfg
+from ..utils.account import accounts
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
 from ..utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
-from attendance import Attendance
-from jwxt.schedule import Schedule
 
 
 class ScheduleThread(ProcessThread):
     """
-    获取课表相关信息的线程。
-    课表来源优先级：考勤系统 (bkkq) > 教学服务平台 (js.xjtu.edu.cn)
-    考试来源：教务系统 (jwxt)
+    获取课表相关信息的线程
     """
+    # 获得课表成功后发送的数据
+    # {"lessons": 课表信息, "term_number": 学期编号, "start_date": 学期开始日期}
     schedule = pyqtSignal(dict)
     exam = pyqtSignal(dict)
 
     def __init__(self, term_number=None, parent=None):
+        """
+        创建一个获取课表的线程
+        :param term_number: 需要获取的课表的学期编号
+        :param parent: 父对象
+        """
         super().__init__(parent)
+        self.util = None
         self.term_number = term_number
-        self._attendance = None
 
     @property
-    def attendance_session(self) -> AttendanceSession:
-        return accounts.current.session_manager.get_session("attendance")
-
-    @property
-    def jwxt_session(self) -> JWXTSession:
+    def session(self) -> JWXTSession:
+        """
+        获取当前账户用于访问教务系统的 session
+        """
         return accounts.current.session_manager.get_session("jwxt")
 
-    @property
-    def js_session(self) -> JsSession:
-        return accounts.current.session_manager.get_session("js")
-
-    def login_attendance(self) -> bool:
-        self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在登录考勤系统..."))
-        self.attendance_session.ensure_login(
-            accounts.current.username, accounts.current.password,
-            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
-            account=accounts.current,
-            mfa_provider=accounts.current.session_manager.mfa_provider,
-        )
-        if not self.can_run:
-            return False
-        self._attendance = Attendance(
-            self.attendance_session,
-            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
-        )
-        self.setIndeterminate.emit(False)
-        return True
-
-    def login_jwxt(self):
+    def login(self):
+        """
+        使当前账户的 session 登录教务系统
+        """
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
-        self.jwxt_session.ensure_login(
-            accounts.current.username, accounts.current.password,
+        self.session.ensure_login(
+            accounts.current.username,
+            accounts.current.password,
             account=accounts.current,
             mfa_provider=accounts.current.session_manager.mfa_provider,
         )
         if not self.can_run:
             return False
-        self._jwxt_schedule = Schedule(self.jwxt_session)
+
+        # 进入课表页面
+        self.util = Schedule(self.session)
         self.setIndeterminate.emit(False)
+
         return True
 
-    def try_bkkq(self, term_name: str) -> list | None:
-        """尝试从 bkkq 获取课表，30 秒超时后返回 None。"""
-        try:
-            self.messageChanged.emit("正在通过考勤系统获取课表...")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(self._attendance.getScheduleLessons, term_name=term_name)
-                return future.result(timeout=30)
-        except concurrent.futures.TimeoutError:
-            logger.warning("bkkq 课表超时 (30s)，切换至回退方案")
-            return None
-        except Exception as e:
-            logger.warning("bkkq 课表获取失败: %s", e)
-            return None
-
-    def try_js(self, term_name: str) -> list | None:
-        """从 js.xjtu.edu.cn 获取课表（回退方案）。"""
-        try:
-            self.messageChanged.emit("正在通过教学服务平台获取课表...")
-            self.js_session.ensure_login(
-                accounts.current.username,
-                accounts.current.password,
-                account=accounts.current,
-                mfa_provider=accounts.current.session_manager.mfa_provider,
-            )
-            return self.js_session.get_schedule_lessons(term_name)
-        except (MFACancelledError, QRCodeLoginCancelledError,
-                MFAUnavailableError, QRCodeLoginUnavailableError):
-            raise
-        except Exception as e:
-            logger.warning("js 课表获取失败: %s", e)
-            return None
-
     def run(self):
+        # 强制重置可运行状态
         self.can_run = True
+        # 判断当前是否存在账户
         if accounts.current is None:
             self.error.emit(self.tr("未登录"), self.tr("请先添加一个账户"))
             self.canceled.emit()
             return
 
         try:
-            # ---- 课表来源：bkkq → js 回退 ----
-            term_name = self.term_number
-            self.progressChanged.emit(25)
-
-            # Step 1: 尝试 bkkq
-            bkkq_ok = self.login_attendance()
-            lessons = None
-            term_info = None
-            if bkkq_ok:
-                lessons = self.try_bkkq(term_name)
-                if lessons is not None:
-                    term_info = self._attendance.getNearTerm()
-
-            # Step 2: bkkq 失败 → js 回退
-            if lessons is None:
-                lessons = self.try_js(term_name)
-
-            if lessons is None:
-                raise ServerError(500, self.tr("无法获取课表：所有数据源均失败"))
-
-            start_date = term_info["startdate"] if term_info else None
-            term_number = term_name or (term_info["name"] if term_info else "")
+            result = self.login()
+            if not result:
+                self.canceled.emit()
+                return
 
             self.progressChanged.emit(66)
+            self.messageChanged.emit("正在获取课表信息...")
+            result = self.util.getSchedule(timestamp=self.term_number)
 
-            # ---- 考试信息：走 jwxt ----
+            self.progressChanged.emit(77)
             self.messageChanged.emit("正在获取考试时间...")
-            exam = {}
-            exam_term = ""
-            try:
-                if self.login_jwxt():
-                    exam = self._jwxt_schedule.getExamSchedule(timestamp=self.term_number)
-                    exam_term = self.term_number or self._jwxt_schedule.termString
-            except Exception as e:
-                logger.warning("获取考试信息失败，跳过考试查询：%s", e)
+            exam = self.util.getExamSchedule(timestamp=self.term_number)
+
+            self.progressChanged.emit(88)
+            self.messageChanged.emit("正在获取学期开始时间...")
+
+            date = self.util.getStartOfTerm(timestamp=self.term_number)
 
             self.progressChanged.emit(100)
 
@@ -189,12 +126,12 @@ class ScheduleThread(ProcessThread):
             self.canceled.emit()
         else:
             self.schedule.emit({
-                "lessons": lessons,
-                "term_number": term_number,
-                "start_date": start_date,
+                "lessons": result,
+                "term_number": self.term_number if self.term_number is not None else self.util.termString,
+                "start_date": date
             })
             self.exam.emit({
                 "exams": exam,
-                "term_number": exam_term,
+                "term_number": self.term_number if self.term_number is not None else self.util.termString
             })
             self.hasFinished.emit()
