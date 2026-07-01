@@ -504,6 +504,80 @@ class Attendance:
             schedule.set_week_lessons(week, week_schedule.lessons)
         return schedule
 
+    def getScheduleLessons(self, term_name: str = None) -> list:
+        """
+        获取整学期课表，返回与 jwxt 兼容的课程 dict 列表。
+        每个 dict 包含 KCM/SKJS/JASMC/SKXQ/KSJC/JSJC/SKZC/XNXQDM 字段，
+        可直接用于 schedule_service.getCourseGroupFromJson。
+
+        :param term_name: 学期名称，如 '2025-2026-2'。None 表示当前学期。
+        :return: 课程 dict 列表
+        """
+        # 查找学期对应的 bh 和总周数
+        current = self.getNearTerm()
+        if term_name is None or term_name == current["name"]:
+            bh = current["bh"]
+            weeks = current["weeks"]
+        else:
+            # 查历史学期列表获取 bh 和 weeks
+            mapping_response = self._post("/attendance-student/global/getBeforeTodayTerm")
+            mapping_data = mapping_response.json()
+            if not mapping_data["success"]:
+                raise ServerError(mapping_data["code"], mapping_data["msg"])
+            bh = None
+            weeks = None
+            for item in mapping_data["data"]:
+                if item["name"] == term_name:
+                    bh = item["bh"]
+                    weeks = item["weeks"]
+                    break
+            if bh is None:
+                raise ValueError(f"未找到学期 {term_name}")
+
+        lesson_map: dict[tuple, list[int]] = {}
+
+        for week in range(1, weeks + 1):
+            response = self._post(
+                "/attendance-student/rankClass/getWeekSchedule2",
+                json={"week": week, "termNo": bh},
+            )
+            data = response.json()
+            if not data["success"]:
+                raise ServerError(data["code"], data["msg"])
+
+            for course in data["data"]:
+                jt_no = course.get("accountJtNo")
+                if not isinstance(jt_no, str) or "-" not in jt_no:
+                    continue
+                periods = jt_no.split("-")
+                key = (
+                    course["subjectSName"],
+                    course["teachNameList"],
+                    f"{course['buildName']}-{course['roomRoomnum']}",
+                    int(course["accountWeeknum"]),
+                    int(periods[0]),
+                    int(periods[1]),
+                )
+                lesson_map.setdefault(key, []).append(week)
+
+        lessons = []
+        for (name, teacher, location, day, ks, js), week_list in lesson_map.items():
+            skzc = ["0"] * weeks
+            for w in week_list:
+                skzc[w - 1] = "1"
+            lessons.append({
+                "KCM": name,
+                "SKJS": teacher,
+                "JASMC": location,
+                "SKXQ": str(day),
+                "KSJC": str(ks),
+                "JSJC": str(js),
+                "SKZC": "".join(skzc),
+                "XNXQDM": term_name or current["name"],
+            })
+
+        return lessons
+
     def getFlowRecordByTime(self, start_date: str, end_date: str = None):
         """
         根据时间段查询考勤流水信息。
