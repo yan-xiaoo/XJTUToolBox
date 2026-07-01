@@ -52,9 +52,20 @@ class TrayInterface(QSystemTrayIcon):
         self.setContextMenu(self.menu)
         self.setIcon(icon)
 
+        self.activated.connect(self.onActivated)
+
     @pyqtSlot()
     def quit(self):
         """
         退出主界面
         """
         QApplication.instance().quit()
+
+    @pyqtSlot(QSystemTrayIcon.ActivationReason)
+    def onActivated(self, reason):
+        """
+        托盘图标被点击时触发。
+        双击时显示主界面。
+        """
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.main_interface.emit()
