@@ -1045,7 +1045,7 @@ class LMSInterface(ScrollArea):
     def onBatchDownloadRequested(self, selected_activities: list[dict]):
         """处理批量下载请求。
 
-        弹出对话框让用户选择，确认后获取活动详情、收集文件并启动批量下载。
+        弹出对话框让用户选择，确认后直接启动后台线程登录、收集文件并下载。
 
         :param selected_activities: 用户选中的活动字典列表。
         :return: 无返回值。
@@ -1059,7 +1059,6 @@ class LMSInterface(ScrollArea):
             if isinstance(a, dict) and str(a.get("type") or "") == activity_type
         )
 
-        # 弹对话框
         dialog = LMSBatchDownloadDialog(
             activity_type=activity_type,
             selected_activities=selected_activities,
@@ -1071,229 +1070,45 @@ class LMSInterface(ScrollArea):
         if dialog.exec() != QDialog.Accepted:
             return
 
-        # 登录
-        session, error = self.ensure_lms_login()
-        if session is None:
-            self.error(self.tr("未登录"), error or self.tr("请先添加一个账户"), parent=self)
+        current_account = accounts.current
+        if current_account is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
             return
 
-        util = self._get_lms_util()
-        if util is None:
-            self.error(self.tr("错误"), self.tr("无法获取 LMS 工具实例"), parent=self)
-            return
-
-        # 收集文件
-        files: list[tuple[str, str, str]] = []
-
-        for activity in selected_activities:
-            if not isinstance(activity, dict):
-                continue
-            activity_id = activity.get("id")
-            activity_title = str(activity.get("title") or "-")
-            safe_title = self.sanitize_filename(activity_title)
-            act_type = str(activity.get("type") or "")
-
-            detail = self._get_cached_activity_detail(activity_id, util)
-            if detail is None:
-                self.error(
-                    self.tr("跳过活动"),
-                    self.tr("无法获取「{0}」的详情，跳过").format(activity_title),
-                    parent=self,
-                )
-                continue
-
-            if act_type == ActivityType.HOMEWORK.value:
-                if dialog.download_uploads:
-                    self._collect_uploads(files, detail, safe_title, dialog, activity_title)
-                if dialog.download_submissions:
-                    self._collect_submission_uploads(
-                        files, detail, safe_title, dialog, activity_title, session, util
-                    )
-                if dialog.download_marked:
-                    self._collect_marked_attachments(
-                        files, detail, safe_title, dialog, activity_title, session, util
-                    )
-            elif act_type == ActivityType.MATERIAL.value:
-                self._collect_uploads(files, detail, safe_title, dialog, activity_title)
-            elif act_type == ActivityType.LESSON.value:
-                self._collect_replay_videos(files, detail, safe_title, dialog, activity_title)
-
-        if not files:
-            self.error(self.tr("无可下载文件"), self.tr("没有找到任何可下载的文件"), parent=self)
-            return
-
-        self._start_batch_download(files, session)
-
-    def _get_cached_activity_detail(self, activity_id: int, util) -> dict | None:
-        """获取活动的详细数据（含 uploads）。
-
-        优先使用缓存的活动列表数据（如果已有 uploads），
-        否则请求详情 API。
-        """
-        for one in self._current_activities:
-            if isinstance(one, dict) and one.get("id") == activity_id:
-                uploads = one.get("uploads")
-                if isinstance(uploads, list):
-                    return one
-                break
-
-        try:
-            detail = util.get_activity_detail(activity_id)
-            if isinstance(detail, dict):
-                return detail
-        except Exception:
-            pass
-        return None
-
-    @staticmethod
-    def _collect_uploads(
-        files: list, detail: dict, safe_title: str,
-        dialog: LMSBatchDownloadDialog, activity_title: str
-    ):
-        """收集活动附件。"""
-        uploads = detail.get("uploads", [])
-        if not isinstance(uploads, list):
-            return
-        for upload in uploads:
-            if not isinstance(upload, dict):
-                continue
-            url = upload.get("download_url") or upload.get("preview_url")
-            if not isinstance(url, str) or not url:
-                continue
-            file_name = str(upload.get("name") or "file")
-            file_label = f"{activity_title}_{file_name}"
-            output_path = LMSBatchDownloadThread._build_output_path(
-                file_name, safe_title, dialog.target_dir, dialog.layout_mode
-            )
-            files.append((url, output_path, file_label))
-
-    @staticmethod
-    def _collect_submission_uploads(
-        files: list, detail: dict, safe_title: str,
-        dialog: LMSBatchDownloadDialog, activity_title: str,
-        session, util
-    ):
-        """收集提交附件。"""
-        submission_list = detail.get("submission_list", {})
-        if not isinstance(submission_list, dict):
-            return
-        all_uploads: list[dict] = []
-        sub_uploads = submission_list.get("uploads")
-        if isinstance(sub_uploads, list):
-            all_uploads.extend(u for u in sub_uploads if isinstance(u, dict))
-        sub_items = submission_list.get("list")
-        if isinstance(sub_items, list):
-            for item in sub_items:
-                if not isinstance(item, dict):
-                    continue
-                item_uploads = item.get("uploads")
-                if isinstance(item_uploads, list):
-                    all_uploads.extend(u for u in item_uploads if isinstance(u, dict))
-        for upload in all_uploads:
-            url = upload.get("download_url") or upload.get("preview_url")
-            if not isinstance(url, str) or not url:
-                continue
-            file_name = str(upload.get("name") or "file")
-            file_label = f"{activity_title}_提交_{file_name}"
-            output_path = LMSBatchDownloadThread._build_output_path(
-                f"提交_{file_name}", safe_title, dialog.target_dir, dialog.layout_mode
-            )
-            files.append((url, output_path, file_label))
-
-    def _collect_marked_attachments(
-        self, files: list, detail: dict, safe_title: str,
-        dialog: LMSBatchDownloadDialog, activity_title: str,
-        session, util
-    ):
-        """收集批阅附件。"""
-        submission_list = detail.get("submission_list", {})
-        if not isinstance(submission_list, dict):
-            return
-        sub_items = submission_list.get("list")
-        if not isinstance(sub_items, list):
-            return
-        total_subs = len(sub_items)
-        self.success(
-            self.tr("收集批阅附件"),
-            self.tr("「{0}」共 {1} 次提交，正在检查批阅…").format(activity_title, total_subs),
-            duration=2000,
-            parent=self,
-        )
-        for item in sub_items:
-            if not isinstance(item, dict):
-                continue
-            submission_id = item.get("id")
-            if not isinstance(submission_id, int):
-                continue
-            try:
-                marked_data = util.get_submission_marked_attachments(submission_id)
-            except Exception:
-                continue
-            if not isinstance(marked_data, dict):
-                continue
-            rules = marked_data.get("rules")
-            if not isinstance(rules, list):
-                continue
-            for rule in rules:
-                if not isinstance(rule, dict):
-                    continue
-                url = rule.get("url") or rule.get("marked_attachment_url")
-                if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-                    continue
-                origin_name = rule.get("origin_upload_name") or "批阅文件"
-                safe_origin = self.sanitize_filename(str(origin_name))
-                if "." in safe_origin and not safe_origin.endswith("."):
-                    file_name = safe_origin.rsplit(".", 1)[0] + "_批阅." + safe_origin.rsplit(".", 1)[1]
-                else:
-                    file_name = safe_origin + "_批阅"
-                file_label = f"{activity_title}_批阅_{file_name}"
-                output_path = LMSBatchDownloadThread._build_output_path(
-                    f"批阅_{file_name}", safe_title, dialog.target_dir, dialog.layout_mode
-                )
-                files.append((url, output_path, file_label))
-
-    @staticmethod
-    def _collect_replay_videos(
-        files: list, detail: dict, safe_title: str,
-        dialog: LMSBatchDownloadDialog, activity_title: str
-    ):
-        """收集回放视频。"""
-        replay_videos = detail.get("replay_videos", [])
-        if not isinstance(replay_videos, list):
-            return
-        for video in replay_videos:
-            if not isinstance(video, dict):
-                continue
-            url = video.get("download_url") or video.get("play_url")
-            if not isinstance(url, str) or not url:
-                continue
-            label = format_replay_video_label(video.get("label"))
-            size = video.get("size", 0)
-            size_str = common_format_size(size)
-            file_name = f"{label}_{size_str}.mp4"
-            file_label = f"{activity_title}_{label}"
-            output_path = LMSBatchDownloadThread._build_output_path(
-                file_name, safe_title, dialog.target_dir, dialog.layout_mode
-            )
-            files.append((url, output_path, file_label))
-
-    def _start_batch_download(self, files: list, session):
-        """启动批量下载线程并显示进度条。"""
         bar = ProgressInfoBar(
             title=self.tr("批量下载"),
-            content=self.tr("0 / {0} 个文件").format(len(files)),
+            content=self.tr("正在准备…"),
             parent=self,
             position=InfoBarPosition.BOTTOM_RIGHT,
         )
 
-        thread = LMSBatchDownloadThread(self)
-        for url, output_path, file_label in files:
-            thread.add_job(url, output_path, file_label, session)
+        thread = LMSBatchDownloadThread(
+            selected_activities=selected_activities,
+            activity_type=activity_type,
+            account=current_account,
+            target_dir=dialog.target_dir,
+            layout_mode=dialog.layout_mode,
+            download_uploads=dialog.download_uploads,
+            download_submissions=dialog.download_submissions,
+            download_marked=dialog.download_marked,
+            parent=self,
+        )
 
         bar.connectToThread(thread)
         thread.allCompleted.connect(
-            lambda success, fail: self._onBatchDownloadFinished(success, fail, len(files), bar)
+            lambda success, fail: self._onBatchDownloadFinished(success, fail, bar)
         )
+        thread.fileCompleted.connect(
+            lambda label, ok, msg: (
+                InfoBar.error(
+                    self.tr("下载失败"), f"{label}\n{msg}",
+                    duration=3000,
+                    position=InfoBarPosition.BOTTOM_RIGHT,
+                    parent=self.window(),
+                ) if not ok else None
+            )
+        )
+        thread.error.connect(lambda title, msg: self.error(title, msg, parent=self))
 
         self._download_jobs.append((bar, thread))
         thread.finished.connect(lambda: self._cleanup_download_job(bar, thread))
@@ -1302,8 +1117,9 @@ class LMSInterface(ScrollArea):
         bar.show()
         thread.start()
 
-    def _onBatchDownloadFinished(self, success: int, fail: int, total: int, bar: ProgressInfoBar):
+    def _onBatchDownloadFinished(self, success: int, fail: int, bar: ProgressInfoBar):
         """批量下载全部完成回调。"""
+        total = success + fail
         if fail > 0:
             self.success(
                 self.tr("批量下载完成"),
