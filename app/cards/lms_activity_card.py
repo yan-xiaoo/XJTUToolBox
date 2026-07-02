@@ -5,9 +5,6 @@ from qfluentwidgets import CardWidget, IconWidget, BodyLabel, CaptionLabel, Flue
 from lms.models import ActivityType
 
 
-
-
-
 class LMSActivityCard(CardWidget):
     """LMS 活动通用卡片。"""
     checkedChanged = pyqtSignal(int, bool)  # activity_id, checked
