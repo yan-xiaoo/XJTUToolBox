@@ -280,6 +280,9 @@ class Config(QConfig):
     # 是否启用思源学堂课程/作业缓存
     lmsCacheEnable = OptionsConfigItem("Settings", "lms_cache_enable",
                                        True, OptionsValidator([True, False]), BooleanSerializer())
+    lmsBatchDownloadConcurrency = OptionsConfigItem("Settings", "lms_batch_concurrency",
+                                                    4, OptionsValidator([1, 2, 3, 4, 5, 6]),
+                                                    None)
     autoRetryAttendance = OptionsConfigItem("Settings", "auto_retry_attendance",
                                             True, OptionsValidator([True, False]), BooleanSerializer())
     traySetting = OptionsConfigItem("Settings", "tray_setting",

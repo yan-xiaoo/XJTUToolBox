@@ -6,6 +6,7 @@ from collections import deque
 from PyQt5.QtCore import pyqtSignal, QThread
 
 from ..components.ProgressInfoBar import ProgressBarThread
+from ..utils import cfg
 
 
 class _DownloadJob:
@@ -51,7 +52,9 @@ class LMSBatchDownloadThread(ProgressBarThread):
     # 全部完成时发出 (success_count, fail_count)
     allCompleted = pyqtSignal(int, int)
 
-    MAX_CONCURRENT = 4  # 最大并发数
+    @staticmethod
+    def max_concurrent() -> int:
+        return max(1, min(10, cfg.lmsBatchDownloadConcurrency.value))
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,7 +87,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
         while self._jobs and self.can_run:
             with self._lock:
-                while len(self._active_workers) < self.MAX_CONCURRENT and self._jobs and self.can_run:
+                while len(self._active_workers) < self.max_concurrent() and self._jobs and self.can_run:
                     job = self._jobs.popleft()
                     worker = _WorkerThread(job, self)
                     worker.finished.connect(self._onWorkerFinished)

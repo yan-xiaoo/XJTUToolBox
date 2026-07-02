@@ -324,6 +324,16 @@ class SettingInterface(ScrollArea):
         )
         self.lmsGroup.addSettingCard(self.lmsCacheCard)
 
+        self.lmsConcurrencyCard = ComboBoxSettingCard(
+            cfg.lmsBatchDownloadConcurrency,
+            FIF.SPEED_HIGH,
+            self.tr("批量下载并发数"),
+            self.tr("同时下载的文件数量，数字越大下载越快"),
+            texts=[str(i) for i in range(1, 7)],
+            parent=self.lmsGroup,
+        )
+        self.lmsGroup.addSettingCard(self.lmsConcurrencyCard)
+
         # 通知查询组
         self.noticeGroup = SettingCardGroup(self.tr("定时查询"), self.view)
         self.noticeCard = NoticeSearchCard(self, self.view)
