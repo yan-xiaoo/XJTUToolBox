@@ -1,3 +1,4 @@
+import json
 import os
 
 from ..components.ProgressInfoBar import ProgressBarThread
@@ -29,6 +30,12 @@ class LMSFileDownloadThread(ProgressBarThread):
     def run(self):
         response = None
         try:
+            # 检查路径合法性
+            if not self.output_path or not self.output_path.strip():
+                raise ValueError(self.tr("下载路径为空"))
+            if not os.path.isabs(self.output_path):
+                raise ValueError(self.tr("下载路径不是绝对路径: {0}").format(self.output_path))
+
             self.titleChanged.emit(self.tr("正在下载附件"))
             self.messageChanged.emit(self.tr("准备下载：{0}").format(self.file_label))
             self.maximumChanged.emit(100)
@@ -76,7 +83,16 @@ class LMSFileDownloadThread(ProgressBarThread):
             self.canceled.emit()
         except Exception as e:
             self._remove_partial_file()
-            self.error.emit(self.tr("下载失败"), str(e))
+            msg = str(e)
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    body = e.response.json()
+                    json_msg = body.get("msg", "") if isinstance(body, dict) else ""
+                    if json_msg:
+                        msg = json_msg
+                except Exception:
+                    pass
+            self.error.emit(self.tr("下载失败"), msg)
             self.canceled.emit()
         finally:
             if response is not None:

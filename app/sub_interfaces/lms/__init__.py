@@ -5,6 +5,7 @@ from .activity_page import LMSActivityPage
 from .detail_page import LMSDetailPage
 from .submission_page import LMSSubmissionPage
 from .video_page import LMSVideoPage
+from .batch_download_dialog import LMSBatchDownloadDialog
 
 __all__ = [
     "PageStatus",
@@ -14,4 +15,5 @@ __all__ = [
     "LMSDetailPage",
     "LMSSubmissionPage",
     "LMSVideoPage",
+    "LMSBatchDownloadDialog",
 ]

@@ -8,7 +8,7 @@ from urllib.parse import urlparse, unquote
 
 from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths, QBuffer
 from PyQt5.QtGui import QDesktopServices, QImageReader, QPixmap
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QFileDialog, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QFileDialog, QSizePolicy, QDialog
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, InfoBar, InfoBarPosition, BreadcrumbBar, \
     TransparentToolButton, FluentIcon
 
@@ -21,11 +21,13 @@ from .threads.ProcessWidget import ProcessWidget
 from .utils import StyleSheet, accounts, AccountDataManager, cfg
 from .sub_interfaces.lms import PageStatus, LMSStartPage, LMSCoursePage, LMSActivityPage, LMSDetailPage, LMSSubmissionPage, LMSVideoPage
 from .sub_interfaces.lms.image_preview_dialog import LMSImagePreviewDialog
+from .sub_interfaces.lms.batch_download_dialog import LMSBatchDownloadDialog
 from .sub_interfaces.lms.common import format_size as common_format_size, format_replay_video_label, \
     can_preview_as_image, is_mark_attachment_upload
 from auth import getVPNUrl
 from lms import LMSUtil
 from lms.models import ActivityType
+from .threads.LMSBatchDownloadThread import LMSBatchDownloadThread
 
 
 class LMSInterface(ScrollArea):
@@ -164,6 +166,7 @@ class LMSInterface(ScrollArea):
         self.submissionPage.previewRequested.connect(self.show_attachment_preview)
         self.submissionPage.reviewPreviewRequested.connect(self.show_attachment_review_preview)
         self.submissionPage.markedAttachmentsDebugRequested.connect(self.dump_current_submission_marked_attachments)
+        self.activityPage.batchDownloadRequested.connect(self.onBatchDownloadRequested)
 
     def _initNavigationModel(self):
         """初始化页面与路由键的双向映射。"""
@@ -1037,6 +1040,99 @@ class LMSInterface(ScrollArea):
     def _cleanup_download_job(self, bar: ProgressInfoBar, thread: LMSFileDownloadThread):
         """清理已结束或取消的下载任务引用。"""
         self._download_jobs = [one for one in self._download_jobs if one != (bar, thread)]
+
+    @pyqtSlot(list)
+    def onBatchDownloadRequested(self, selected_activities: list[dict]):
+        """处理批量下载请求。
+
+        弹出对话框让用户选择，确认后直接启动后台线程登录、收集文件并下载。
+
+        :param selected_activities: 用户选中的活动字典列表。
+        :return: 无返回值。
+        """
+        if not selected_activities:
+            return
+
+        activity_type = self.activityPage.activity_type_filter
+        total_count = sum(
+            1 for a in self._current_activities
+            if isinstance(a, dict) and str(a.get("type") or "") == activity_type
+        )
+
+        dialog = LMSBatchDownloadDialog(
+            activity_type=activity_type,
+            selected_activities=selected_activities,
+            course_name=self.selected_course_name,
+            total_count=total_count,
+            parent=self.window(),
+        )
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        current_account = accounts.current
+        if current_account is None:
+            self.error(self.tr("未登录"), self.tr("请先添加一个账户"), parent=self)
+            return
+
+        bar = ProgressInfoBar(
+            title=self.tr("批量下载"),
+            content=self.tr("正在准备…"),
+            parent=self,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+        )
+
+        thread = LMSBatchDownloadThread(
+            selected_activities=selected_activities,
+            activity_type=activity_type,
+            account=current_account,
+            target_dir=dialog.target_dir,
+            layout_mode=dialog.layout_mode,
+            download_uploads=dialog.download_uploads,
+            download_submissions=dialog.download_submissions,
+            download_marked=dialog.download_marked,
+            parent=self,
+        )
+
+        bar.connectToThread(thread)
+        thread.allCompleted.connect(
+            lambda success, fail: self._onBatchDownloadFinished(success, fail, bar)
+        )
+        thread.fileCompleted.connect(
+            lambda label, ok, msg: (
+                InfoBar.error(
+                    self.tr("下载失败"), f"{label}\n{msg}",
+                    duration=3000,
+                    position=InfoBarPosition.BOTTOM_RIGHT,
+                    parent=self.window(),
+                ) if not ok else None
+            )
+        )
+        thread.error.connect(lambda title, msg: self.error(title, msg, parent=self))
+
+        self._download_jobs.append((bar, thread))
+        thread.finished.connect(lambda: self._cleanup_download_job(bar, thread))
+        thread.canceled.connect(lambda: self._cleanup_download_job(bar, thread))
+
+        bar.show()
+        thread.start()
+
+    def _onBatchDownloadFinished(self, success: int, fail: int, bar: ProgressInfoBar):
+        """批量下载全部完成回调。"""
+        total = success + fail
+        if fail > 0:
+            self.success(
+                self.tr("批量下载完成"),
+                self.tr("成功 {0} / {1}，失败 {2} 个").format(success, total, fail),
+                duration=5000,
+                parent=self,
+            )
+        else:
+            self.success(
+                self.tr("批量下载完成"),
+                self.tr("成功下载 {0} 个文件").format(success),
+                parent=self,
+            )
 
     @pyqtSlot(dict, list)
     def show_attachment_preview(self, file_info: dict, uploads: list):

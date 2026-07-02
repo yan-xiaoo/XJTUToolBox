@@ -3,7 +3,7 @@ from datetime import datetime
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QActionGroup, QFrame, QHBoxLayout, QVBoxLayout, QWidget, QSizePolicy
 from qfluentwidgets import Action, BodyLabel, CheckableMenu, FlowLayout, FluentIcon, MenuIndicatorType, Pivot, \
-    TransparentDropDownPushButton
+    TransparentDropDownPushButton, PushButton, PrimaryPushButton, StrongBodyLabel
 
 from lms.models import ActivityType
 from app.cards.lms_activity_card import LMSActivityCard
@@ -17,6 +17,8 @@ class LMSActivityPage(QFrame):
     activityTypeChanged = pyqtSignal(str)
     # 用户点击重试按钮后，请求主容器重新加载活动。
     retryRequested = pyqtSignal()
+    # 用户请求批量下载，携带选中的活动字典列表。
+    batchDownloadRequested = pyqtSignal(list)
 
     def __init__(self, parent=None):
         """初始化活动页组件与筛选器。"""
@@ -26,10 +28,13 @@ class LMSActivityPage(QFrame):
         self._activities: list[dict] = []
         self._filtered_activities: list[dict] = []
         self._activity_cards: list[QWidget] = []
+        self._selection_mode = False
+        self._selected_activity_ids: set[int] = set()
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignTop)
 
+        # ---------- 顶部栏：Pivot + 选择按钮 ----------
         self.topBar = QFrame(self)
         self.topBarLayout = QHBoxLayout(self.topBar)
         self.topBarLayout.setContentsMargins(0, 0, 0, 0)
@@ -61,8 +66,44 @@ class LMSActivityPage(QFrame):
         self.sortMenu.addActions([self.lessonTimeAscAction, self.lessonTimeDescAction])
         self.sortButton.setMenu(self.sortMenu)
 
-        self.topBarLayout.addWidget(self.activityTypePivot, stretch=1)
+        # 固定宽度的文本选择/取消选择按钮（同一位置切换）
+        self.selectButton = PushButton(self.tr("选择"), self.topBar)
+        self.selectButton.setFixedWidth(80)
+        self.selectButton.clicked.connect(self._enterSelectionMode)
 
+        self.cancelSelectButton = PushButton(self.tr("取消选择"), self.topBar)
+        self.cancelSelectButton.setFixedWidth(80)
+        self.cancelSelectButton.setVisible(False)
+        self.cancelSelectButton.clicked.connect(self._exitSelectionMode)
+
+        self.topBarLayout.addWidget(self.activityTypePivot, stretch=1)
+        self.topBarLayout.addWidget(self.selectButton)
+        self.topBarLayout.addWidget(self.cancelSelectButton)
+
+        # ---------- 选择模式控制栏 ----------
+        self.selectionBar = QFrame(self)
+        self.selectionBar.setVisible(False)
+        self.selectionBarLayout = QHBoxLayout(self.selectionBar)
+        self.selectionBarLayout.setContentsMargins(0, 6, 0, 6)
+        self.selectionBarLayout.setSpacing(12)
+
+        self.selectAllCheck = PushButton(self.tr("全选"), self.selectionBar)
+        self.selectAllCheck.setFixedWidth(80)
+        self.selectAllCheck.clicked.connect(self._onSelectAllClicked)
+
+        self.batchDownloadButton = PrimaryPushButton(self.tr("批量下载"), self.selectionBar)
+        self.batchDownloadButton.setEnabled(False)
+        self.batchDownloadButton.clicked.connect(self._onBatchDownloadClicked)
+
+        self.selectionInfoLabel = StrongBodyLabel("", self.selectionBar)
+        self.selectionInfoLabel.setVisible(False)
+
+        self.selectionBarLayout.addWidget(self.selectAllCheck)
+        self.selectionBarLayout.addWidget(self.batchDownloadButton)
+        self.selectionBarLayout.addStretch(1)
+        self.selectionBarLayout.addWidget(self.selectionInfoLabel)
+
+        # ---------- 卡片容器 ----------
         self.cardHost = QWidget(self)
         self.flowLayout = FlowLayout(self.cardHost, needAni=False)
         self.flowLayout.setContentsMargins(0, 0, 0, 0)
@@ -76,7 +117,9 @@ class LMSActivityPage(QFrame):
         self.failFrame.setVisible(False)
         retry_button.clicked.connect(self.retryRequested.emit)
 
+        # ---------- 组装布局 ----------
         layout.addWidget(self.topBar)
+        layout.addWidget(self.selectionBar)
         layout.addWidget(self.sortButton, alignment=Qt.AlignHCenter)
         layout.addWidget(self.cardHost)
         layout.addWidget(self.loadingFrame)
@@ -152,6 +195,13 @@ class LMSActivityPage(QFrame):
         """
         return [one for one in self._activities if isinstance(one, dict)]
 
+    def getSelectedActivities(self) -> list[dict]:
+        """获取当前选中的活动字典列表（在过滤后的结果中查找）。"""
+        return [
+            one for one in self._filtered_activities
+            if isinstance(one, dict) and one.get("id") in self._selected_activity_ids
+        ]
+
     def filterActivities(self, key: str):
         """按活动类型过滤并重绘表格。
 
@@ -178,6 +228,7 @@ class LMSActivityPage(QFrame):
 
         :return: 无返回值。
         """
+        self._exitSelectionMode()
         self._activities = []
         self._filtered_activities = []
         self._clearActivityCards()
@@ -202,8 +253,113 @@ class LMSActivityPage(QFrame):
         """
         self.cardHost.setEnabled(enabled)
 
+    def _enterSelectionMode(self):
+        """进入选择模式。"""
+        self._selection_mode = True
+        self.selectButton.setVisible(False)
+        self.cancelSelectButton.setVisible(True)
+        self.selectionBar.setVisible(True)
+        self.sortButton.setVisible(False)
+        # 通知已有卡片显示勾选框
+        for card in self._activity_cards:
+            if isinstance(card, LMSActivityCard):
+                card.setSelectionMode(True)
+        self._updateSelectionUI()
+
+    def _exitSelectionMode(self):
+        """退出选择模式，清空勾选。"""
+        self._selection_mode = False
+        self._selected_activity_ids.clear()
+        self.selectButton.setVisible(True)
+        self.cancelSelectButton.setVisible(False)
+        self.selectionBar.setVisible(False)
+        self.batchDownloadButton.setEnabled(False)
+        self.selectionInfoLabel.setVisible(False)
+        self._updateSortButtonVisibility(self.activity_type_filter)
+        # 更新所有卡片退出选择模式
+        for card in self._activity_cards:
+            if isinstance(card, LMSActivityCard):
+                card.setSelectionMode(False)
+
+    def _updateSelectionUI(self):
+        """根据选择状态刷新按钮和信息栏。"""
+        count = len(self._selected_activity_ids)
+        total = len([c for c in self._activity_cards if isinstance(c, LMSActivityCard) and c.activity_id is not None])
+
+        self.batchDownloadButton.setEnabled(count > 0)
+        if count > 0:
+            self.selectionInfoLabel.setText(self.tr("已选择 {0} / {1} 个活动").format(count, total))
+            self.selectionInfoLabel.setVisible(True)
+        else:
+            self.selectionInfoLabel.setText(self.tr("共 {0} 个活动").format(total))
+            self.selectionInfoLabel.setVisible(True)
+
+        # 更新「全选」按钮文本
+        all_selected = count == total if total > 0 else False
+        self.selectAllCheck.setText(self.tr("取消全选") if all_selected else self.tr("全选"))
+
+    def _onSelectAllClicked(self):
+        """处理全选/取消全选。"""
+        total = len([c for c in self._activity_cards if isinstance(c, LMSActivityCard) and c.activity_id is not None])
+        all_selected = len(self._selected_activity_ids) == total if total > 0 else False
+
+        if all_selected:
+            # 取消全选
+            self._selected_activity_ids.clear()
+            for card in self._activity_cards:
+                if isinstance(card, LMSActivityCard):
+                    card.setChecked(False)
+        else:
+            # 全选
+            self._selected_activity_ids = {
+                card.activity_id for card in self._activity_cards
+                if isinstance(card, LMSActivityCard) and card.activity_id is not None
+            }
+            for card in self._activity_cards:
+                if isinstance(card, LMSActivityCard):
+                    card.setChecked(True)
+
+        self._updateSelectionUI()
+
+    def _onCardCheckedChanged(self, activity_id: int, checked: bool):
+        """处理卡片勾选状态变化。"""
+        if checked:
+            self._selected_activity_ids.add(activity_id)
+        else:
+            self._selected_activity_ids.discard(activity_id)
+        self._updateSelectionUI()
+
+    def _onActivityClicked(self, activity: dict):
+        """处理活动点击事件。
+        选择模式下：切换勾选。
+        正常模式下：进入详情页。
+        """
+        if self._selection_mode:
+            # 在选择模式下，找到对应卡片并切换勾选
+            activity_id = activity.get("id") if isinstance(activity, dict) else None
+            for card in self._activity_cards:
+                if isinstance(card, LMSActivityCard) and card.activity_id == activity_id:
+                    card.setChecked(not card.isChecked())
+                    return
+            return
+
+        if not isinstance(activity, dict):
+            return
+        activity_id = activity.get("id")
+        if not isinstance(activity_id, int):
+            return
+        self.activitySelected.emit(activity_id, str(activity.get("title") or "-"))
+
+    def _onBatchDownloadClicked(self):
+        """处理批量下载按钮点击。"""
+        selected = self.getSelectedActivities()
+        if not selected:
+            return
+        self.batchDownloadRequested.emit(selected)
+
     def _onActivityTypeChanged(self, key: str):
-        """处理 Pivot 类型切换并发出类型变化信号。"""
+        """处理 Pivot 类型切换：退出选择模式并发出类型变化信号。"""
+        self._exitSelectionMode()
         self.activity_type_filter = key
         self.filterActivities(key)
         self.activityTypeChanged.emit(key)
@@ -214,7 +370,10 @@ class LMSActivityPage(QFrame):
 
     def _updateSortButtonVisibility(self, key: str):
         """仅在课程回放分类下显示排序按钮。"""
-        self.sortButton.setVisible(key == ActivityType.LESSON.value)
+        if self._selection_mode:
+            self.sortButton.setVisible(False)
+        else:
+            self.sortButton.setVisible(key == ActivityType.LESSON.value)
 
     def _sortActivities(self, activities: list[dict], key: str) -> list[dict]:
         """按当前筛选类型返回排序后的活动列表。"""
@@ -259,23 +418,22 @@ class LMSActivityPage(QFrame):
         # 在没有活动时，显示一个简单的提示
         if not self._filtered_activities:
             label = BodyLabel(self.tr("当前分类下暂无内容"), self.cardHost)
-            # 将这个 label 加到 activity_card 中，这样就可以跟随活动切换而消失了
             self.flowLayout.addWidget(label)
             self._activity_cards.append(label)
+            return
 
         for activity in self._filtered_activities:
             card = LMSActivityCard(activity, self.cardHost)
+            card.checkedChanged.connect(self._onCardCheckedChanged)
             card.clicked.connect(lambda _=False, one=activity: self._onActivityClicked(one))
+
+            # 如果是选择模式，保持勾选状态
+            if self._selection_mode:
+                card.setSelectionMode(True)
+                if isinstance(activity, dict) and activity.get("id") in self._selected_activity_ids:
+                    card.setChecked(True)
+
             self.flowLayout.addWidget(card)
             self._activity_cards.append(card)
 
         self.cardHost.adjustSize()
-
-    def _onActivityClicked(self, activity: dict):
-        """处理活动点击事件并发出活动选择信号。"""
-        if not isinstance(activity, dict):
-            return
-        activity_id = activity.get("id")
-        if not isinstance(activity_id, int):
-            return
-        self.activitySelected.emit(activity_id, str(activity.get("title") or "-"))
