@@ -177,6 +177,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
         :param safe_activity_title: 已清理非法字符的活动标题。
         :return: 完整的输出文件绝对路径。
         """
+        safe = self._sanitize_filename(file_name)
         if self._layout_mode == "hierarchical":
             sub = os.path.join(self._target_dir, safe_activity_title)
             os.makedirs(sub, exist_ok=True)
@@ -270,6 +271,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     def _download_all(self, files: list):
         """执行多文件并发下载。"""
+        self._total_jobs = len(files)
         self._success_count = self._fail_count = self._completed_jobs = 0
 
         self.titleChanged.emit(self.tr("正在下载"))
@@ -309,6 +311,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     def _onWorkerFinished(self):
         """单个工作线程完成回调。"""
+        w = self.sender()
         if w is None:
             return
         with self._lock:
