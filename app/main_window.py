@@ -30,12 +30,14 @@ from .sessions.gmis_session import GMISSession
 from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
+from .sessions.venue_session import VenueSession
 from .sub_interfaces import LoginInterface
 from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
 from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
 from .sub_interfaces import AutoJudgeInterface
 from .sub_interfaces.EmptyRoomInterface import EmptyRoomInterface
 from app.LMSInterface import LMSInterface
+from app.VenueInterface import VenueInterface
 from .sub_interfaces.NoticeInterface import NoticeInterface
 from .sub_interfaces.NoticeSettingInterface import NoticeSettingInterface
 from .sub_interfaces.WebVPNConvertInterface import WebVPNConvertInterface
@@ -58,6 +60,7 @@ def registerSession():
     SessionManager.global_register(GMISSession, "gmis")
     SessionManager.global_register(GSTESession, "gste")
     SessionManager.global_register(LMSSession, "lms")
+    SessionManager.global_register(VenueSession, "venue")
 
 
 class MacReopenFilter(QObject):
@@ -195,6 +198,8 @@ class MainWindow(MSFluentWindow):
         QApplication.processEvents()
         self.lms_interface = LMSInterface(self)
         QApplication.processEvents()
+        self.venue_interface = VenueInterface(self)
+        QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
         self.tray_interface.main_interface.connect(lambda: self.show())
@@ -318,6 +323,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
         self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
         self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
+        self.addSubInterface(self.venue_interface, FIF.LOCATION, self.tr("体育场馆"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",
