@@ -132,7 +132,14 @@ class LMSBatchDownloadDialog(MessageBoxBase):
         self.uploadCheck.stateChanged.connect(self._onCheckChanged)
         self.submissionCheck.stateChanged.connect(self._onCheckChanged)
         self.markedCheck.stateChanged.connect(self._onCheckChanged)
-        self.yesButton.clicked.connect(self._onConfirm)
+
+    def validate(self) -> bool:
+        """确认前校验：必须选择目标目录。"""
+        if not self.target_dir:
+            self.dirEdit.setError(True)
+            self.dirEdit.setFocus()
+            return False
+        return True
 
     def _onLocationChanged(self, mode: str):
         self.layout_mode = mode
@@ -152,11 +159,3 @@ class LMSBatchDownloadDialog(MessageBoxBase):
         self.download_uploads = self.uploadCheck.isChecked()
         self.download_submissions = self.submissionCheck.isChecked()
         self.download_marked = self.markedCheck.isChecked()
-
-    def _onConfirm(self):
-        """确认下载前检查参数完整性。"""
-        if not self.target_dir:
-            self.dirEdit.setError(True)
-            self.dirEdit.setFocus()
-            return
-        self.accept()
