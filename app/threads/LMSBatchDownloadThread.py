@@ -9,8 +9,7 @@ from PyQt5.QtCore import pyqtSignal, QThread
 
 from ..components.ProgressInfoBar import ProgressBarThread
 from ..sub_interfaces.lms.common import format_size as common_format_size, format_replay_video_label
-from ..utils import cfg, accounts
-from ..sessions.lms_session import LMSSession
+from ..utils import cfg
 from lms import LMSUtil
 from lms.models import ActivityType
 
@@ -42,7 +41,18 @@ class LMSBatchDownloadThread(ProgressBarThread):
                  target_dir, layout_mode,
                  download_uploads=True, download_submissions=True, download_marked=False,
                  parent=None):
-        super().__init__(parent)
+        """初始化批量下载线程。
+
+        :param selected_activities: 用户选中的活动字典列表。
+        :param activity_type: 当前 tab 的活动类型。
+        :param account: 当前登录账户对象。
+        :param target_dir: 下载目标目录。
+        :param layout_mode: "flat" 统一存放，"hierarchical" 按活动存放。
+        :param download_uploads: 是否下载作业附件。
+        :param download_submissions: 是否下载提交附件。
+        :param download_marked: 是否下载批阅附件。
+        :param parent: 父级控件。
+        """
         self._selected_activities = [dict(a) for a in selected_activities if isinstance(a, dict)]
         self._activity_type = activity_type
         self._account = account
@@ -111,7 +121,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
     # ──────────── Phase 1: 收集 ────────────
 
     def _collect_all(self) -> list:
-        total = len(self._selected_activities)
+        """遍历选中活动，逐一获取详情并收集附件文件列表。"""
         files: list = []
 
         for idx, activity in enumerate(self._selected_activities, start=1):
@@ -155,12 +165,18 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     @staticmethod
     def _sanitize_filename(name: str) -> str:
+        """清理文件名中的非法字符。"""
         cleaned = re.sub(r'[\\/:*?"<>|]+', "_", name)
         cleaned = cleaned.strip().strip(".")
         return cleaned or "file"
 
     def _output_path(self, file_name: str, safe_activity_title: str) -> str:
-        safe = self._sanitize_filename(file_name)
+        """根据布局模式构建输出路径。
+
+        :param file_name: 文件名。
+        :param safe_activity_title: 已清理非法字符的活动标题。
+        :return: 完整的输出文件绝对路径。
+        """
         if self._layout_mode == "hierarchical":
             sub = os.path.join(self._target_dir, safe_activity_title)
             os.makedirs(sub, exist_ok=True)
@@ -169,6 +185,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     @staticmethod
     def _collect_uploads(files, detail, safe_title, activity_title):
+        """收集活动附件（教师上传的题目附件）。"""
         for upload in (detail.get("uploads") or []):
             if not isinstance(upload, dict):
                 continue
@@ -180,6 +197,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     @staticmethod
     def _collect_submission_uploads(files, detail, safe_title, activity_title):
+        """收集提交附件（学生提交的作业文件）。"""
         sl = detail.get("submission_list")
         if not isinstance(sl, dict):
             return
@@ -204,6 +222,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     @staticmethod
     def _collect_marked_attachments(files, detail, safe_title, activity_title, util):
+        """收集批阅附件（老师批改后的标注文件）。"""
         sl = detail.get("submission_list")
         if not isinstance(sl, dict):
             return
@@ -236,6 +255,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     @staticmethod
     def _collect_replay_videos(files, detail, safe_title, activity_title):
+        """收集回放视频。"""
         for v in (detail.get("replay_videos") or []):
             if not isinstance(v, dict):
                 continue
@@ -249,7 +269,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
     # ──────────── Phase 2: 下载 ────────────
 
     def _download_all(self, files: list):
-        self._total_jobs = len(files)
+        """执行多文件并发下载。"""
         self._success_count = self._fail_count = self._completed_jobs = 0
 
         self.titleChanged.emit(self.tr("正在下载"))
@@ -288,7 +308,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
         self.hasFinished.emit()
 
     def _onWorkerFinished(self):
-        w = self.sender()
+        """单个工作线程完成回调。"""
         if w is None:
             return
         with self._lock:
@@ -305,7 +325,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
         self.fileCompleted.emit(w.job.file_label, w.success, w.error_msg)
 
     def onStopSignal(self):
-        super().onStopSignal()
+        """停止所有下载。"""
         with self._lock:
             workers = list(self._active_workers)
         for w in workers:
@@ -327,6 +347,8 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
 
 class _WorkerThread(QThread):
+    """单个文件下载工作线程。"""
+
     def __init__(self, job: _DownloadJob, parent=None):
         super().__init__(parent)
         self.job = job
@@ -335,6 +357,7 @@ class _WorkerThread(QThread):
         self._can_run = True
 
     def stop(self):
+        """请求停止当前下载。"""
         self._can_run = False
 
     def run(self):
@@ -370,6 +393,7 @@ class _WorkerThread(QThread):
                 resp.close()
 
     def _cleanup(self):
+        """删除下载过程中残留的不完整文件。"""
         if self.job.output_path and os.path.exists(self.job.output_path):
             try:
                 os.remove(self.job.output_path)
