@@ -53,6 +53,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
         :param download_marked: 是否下载批阅附件。
         :param parent: 父级控件。
         """
+        super().__init__(parent)
         self._selected_activities = [dict(a) for a in selected_activities if isinstance(a, dict)]
         self._activity_type = activity_type
         self._account = account
@@ -122,6 +123,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     def _collect_all(self) -> list:
         """遍历选中活动，逐一获取详情并收集附件文件列表。"""
+        total = len(self._selected_activities)
         files: list = []
 
         for idx, activity in enumerate(self._selected_activities, start=1):
