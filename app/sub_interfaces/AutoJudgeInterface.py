@@ -115,11 +115,9 @@ class AutoJudgeInterface(ScrollArea):
         self.thread_.error.connect(self.onThreadError)
         self.thread_.submitSuccess.connect(self.onSubmitSuccess)
         self.thread_.editSuccess.connect(self.onEditSuccess)
-        self.thread_.started.connect(self.onThreadStarted)
         self.thread_.finished.connect(self.unlockAllCards)
 
         self.gradateThread = GraduateJudgeThread(accounts.current, choice=GraduateJudgeChoice.GET_COURSES)
-        self.gradateThread.started.connect(self.onGradateThreadStarted)
         self.gradateThread.error.connect(self.onThreadError)
         self.gradateThread.questionnaires.connect(self.onGetQuestionnaireFinish)
         self.gradateThread.questionnaireData.connect(self._onGetGraduateQuestionnaireData)
@@ -127,8 +125,16 @@ class AutoJudgeInterface(ScrollArea):
         self.gradateThread.submitSuccess.connect(self.onGraduateSubmitSuccess)
         self.gradateThread.allSubmitSuccess.connect(self.onStartButtonClicked)
 
-        self.processWidget = None
-        self.graduateProcessWidget = None
+        self.processWidget = ProcessWidget(
+            self.thread_, self.view, stoppable=True, hide_on_end=True
+        )
+        self.processWidget.setVisible(False)
+        self.graduateProcessWidget = ProcessWidget(
+            self.gradateThread, self.view, stoppable=True, hide_on_end=True
+        )
+        self.graduateProcessWidget.setVisible(False)
+        self.vBoxLayout.addWidget(self.processWidget, alignment=Qt.AlignHCenter)
+        self.vBoxLayout.addWidget(self.graduateProcessWidget, alignment=Qt.AlignHCenter)
 
         accounts.currentAccountChanged.connect(self.onCurrentAccountChanged)
 
@@ -174,26 +180,6 @@ class AutoJudgeInterface(ScrollArea):
 
         # 初始化本科生/研究生不同的内容
         self.onCurrentAccountChanged()
-
-    @pyqtSlot()
-    def onThreadStarted(self):
-        # 在使用前初始化进度条组件，否则会出现奇怪的问题
-        if self.processWidget is None:
-            self.processWidget = ProcessWidget(self.thread_, stoppable=True, hide_on_end=True)
-            # 将组件插入在 Commandbar 后面，Frame 前面
-            self.vBoxLayout.insertWidget(1, self.processWidget, alignment=Qt.AlignTop | Qt.AlignHCenter)
-
-        self.processWidget.setVisible(True)
-
-    @pyqtSlot()
-    def onGradateThreadStarted(self):
-        # 在使用前初始化进度条组件，否则会出现奇怪的问题
-        if self.graduateProcessWidget is None:
-            self.graduateProcessWidget = ProcessWidget(self.gradateThread, stoppable=True, hide_on_end=True)
-            # 将组件插入在 Commandbar 后面，Frame 前面
-            self.vBoxLayout.insertWidget(1, self.graduateProcessWidget, alignment=Qt.AlignTop | Qt.AlignHCenter)
-
-        self.graduateProcessWidget.setVisible(True)
 
     @pyqtSlot()
     def onViewEhallTriggered(self):
@@ -247,8 +233,8 @@ class AutoJudgeInterface(ScrollArea):
                 self.gradateThread.questionnaire = questionnaire
                 self.gradateThread.choice = GraduateJudgeChoice.GET_DATA
                 self.lockAllCards()
-                self.gradateThread.start()
                 self.graduateProcessWidget.setVisible(True)
+                self.gradateThread.start()
 
     def addQuestionnaire(self, questionnaire: Union[Questionnaire, GraduateQuestionnaire], finished=False):
         if accounts.current.type == accounts.current.UNDERGRADUATE:
@@ -281,8 +267,8 @@ class AutoJudgeInterface(ScrollArea):
                 self.gradateThread.questionnaire_data = questionnaire
                 self.gradateThread.score = dev_interface.interface.currentLevel()
                 self.gradateThread.answer_dict = dev_interface.interface.textsByQuestionId()
-                self.gradateThread.start()
                 self.graduateProcessWidget.setVisible(True)
+                self.gradateThread.start()
 
     def clearWidgets(self):
         for widget in self.questionnaireWidgets:
@@ -324,9 +310,11 @@ class AutoJudgeInterface(ScrollArea):
 
         if accounts.current is not None and accounts.current.type == accounts.current.POSTGRADUATE:
             self.gradateThread.choice = GraduateJudgeChoice.GET_COURSES
+            self.graduateProcessWidget.setVisible(True)
             self.gradateThread.start()
         else:
             self.thread_.choice = JudgeChoice.GET_COURSES
+            self.processWidget.setVisible(True)
             self.thread_.start()
 
     @pyqtSlot(bool)
@@ -372,11 +360,13 @@ class AutoJudgeInterface(ScrollArea):
                     self.gradateThread.score = score
                     self.gradateThread.single_answer = text
                     self.gradateThread.choice = GraduateJudgeChoice.JUDGE_ALL
+                    self.graduateProcessWidget.setVisible(True)
                     self.gradateThread.start()
                 else:
                     self.thread_.msgAll = text
                     self.thread_.scoreAll = score
                     self.thread_.choice = JudgeChoice.JUDGE_ALL
+                    self.processWidget.setVisible(True)
                     self.thread_.start()
             else:
                 self.onThreadError(self.tr("未登录"), self.tr("请先添加一个账号"))
