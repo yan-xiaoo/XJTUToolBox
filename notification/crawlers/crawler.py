@@ -4,6 +4,7 @@ import random
 import re
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from http.cookiejar import Cookie, CookieJar
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
@@ -15,62 +16,173 @@ from lxml import etree
 from notification.notification import Notification
 
 
-def extract_challenge_id_from_html(html: str) -> Tuple[Optional[str], Optional[int]]:
-    """从类似 website.html 的人机验证页面中提取 challengeId 与 answer。
+@dataclass(frozen=True)
+class WebsiteChallenge:
+    """保存从验证页面中解析出的挑战参数。"""
 
-    解析逻辑：
-    1) 使用 lxml 解析 HTML，提取所有 <script> 标签的文本；
-    2) 对脚本文本使用正则匹配形如 `var challengeId = "...";` 或 `challengeId = '...';` 的赋值语句。
+    challenge_id: str
+    answer: Optional[int]
+    requires_hash: bool
 
-    :param html: 页面 HTML 字符串（建议已按正确编码解码）。
-    :return: (challengeId, answer)。任意一个未找到则为 None。
-    """
+
+def _extract_website_challenge(html: str) -> Optional[WebsiteChallenge]:
+    """解析新旧两种验证页面中的挑战参数。"""
     if not html:
-        return None, None
+        return None
 
     try:
         root = etree.HTML(html)
     except Exception:
-        return None, None
+        return None
 
     if root is None:
-        return None, None
+        return None
 
-    # 兼容：var/let/const 可有可无；等号两侧可有空格；字符串可用单/双引号
     challenge_id_pattern = re.compile(
         r"\b(?:var|let|const)?\s*challengeId\s*=\s*(['\"])(?P<id>[^'\"]+)\1",
         re.MULTILINE,
     )
-
-    # answer 通常是数字字面量（website.html 示例为整数）
     answer_pattern = re.compile(
         r"\b(?:var|let|const)?\s*answer\s*=\s*(?P<answer>-?\d+)\b",
         re.MULTILINE,
     )
+    operand_patterns = {
+        name: re.compile(
+            rf"\b(?:var|let|const)?\s*{name}\s*=\s*(?P<value>-?\d+)\b",
+            re.MULTILINE,
+        )
+        for name in ("a", "b")
+    }
+    operator_pattern = re.compile(
+        r"\b(?:var|let|const)?\s*operator\s*=\s*(['\"])(?P<operator>[+\-*])\1",
+        re.MULTILINE,
+    )
 
-    challenge_id: Optional[str] = None
-    answer: Optional[int] = None
-
-    for script_text in root.xpath("//script/text()"):
-        if not script_text:
+    script_texts = [
+        script_text
+        for script_text in root.xpath("//script/text()")
+        if script_text
+    ]
+    for script_text in script_texts:
+        challenge_id_match = challenge_id_pattern.search(script_text)
+        if challenge_id_match is None:
             continue
-        if challenge_id is None:
-            match = challenge_id_pattern.search(script_text)
-            if match:
-                challenge_id = match.group("id")
 
-        if answer is None:
-            match = answer_pattern.search(script_text)
-            if match:
-                try:
-                    answer = int(match.group("answer"))
-                except ValueError:
-                    answer = None
+        challenge_id = challenge_id_match.group("id")
+        operand_matches = {
+            name: pattern.search(script_text)
+            for name, pattern in operand_patterns.items()
+        }
+        operator_match = operator_pattern.search(script_text)
+        if (
+            operand_matches["a"] is not None
+            and operand_matches["b"] is not None
+            and operator_match is not None
+        ):
+            a = int(operand_matches["a"].group("value"))
+            b = int(operand_matches["b"].group("value"))
+            operator = operator_match.group("operator")
 
-        if challenge_id is not None and answer is not None:
-            break
+            # 页面目前只会生成以下三种简单算式。这里明确列出允许的运算，
+            # 比直接执行网站返回的 JavaScript 更容易理解，也更加安全。
+            if operator == "+":
+                answer = a + b
+            elif operator == "-":
+                answer = a - b
+            else:
+                answer = a * b
 
-    return challenge_id, answer
+            return WebsiteChallenge(
+                challenge_id=challenge_id,
+                answer=answer,
+                requires_hash=True,
+            )
+
+        # 旧版页面可能把 challengeId 和 answer 放在不同的 script 标签中，
+        # 所以仍像原实现一样检查页面中的所有脚本。
+        for candidate_script in script_texts:
+            answer_match = answer_pattern.search(candidate_script)
+            if answer_match is not None:
+                return WebsiteChallenge(
+                    challenge_id=challenge_id,
+                    answer=int(answer_match.group("answer")),
+                    requires_hash=False,
+                )
+
+        return WebsiteChallenge(
+            challenge_id=challenge_id,
+            answer=None,
+            requires_hash=False,
+        )
+
+    return None
+
+
+def extract_challenge_id_from_html(html: str) -> Tuple[Optional[str], Optional[int]]:
+    """从人机验证页面中提取 challengeId 与计算后的 answer。
+
+    解析逻辑：
+    1) 使用 lxml 解析 HTML，提取所有 <script> 标签的文本；
+    2) 兼容旧版的 `answer = 数字`；
+    3) 兼容新版的 `a`、`b` 和 `operator` 算式。
+
+    :param html: 页面 HTML 字符串（建议已按正确编码解码）。
+    :return: (challengeId, answer)。任意一个未找到则为 None。
+    """
+    challenge = _extract_website_challenge(html)
+    if challenge is None:
+        return None, None
+    return challenge.challenge_id, challenge.answer
+
+
+def javascript_simple_hash(value: str) -> int:
+    """用 Python 复现验证页面中 JavaScript simpleHash 的行为。"""
+    hash_value = 0
+
+    # JavaScript 的 charCodeAt() 按 UTF-16 编码单元读取字符。Python 直接
+    # 遍历字符串时遇到 emoji 等字符会得到不同的数值，因此先显式转成 UTF-16。
+    utf16 = value.encode("utf-16-le")
+    for index in range(0, len(utf16), 2):
+        code_unit = utf16[index] | (utf16[index + 1] << 8)
+
+        # JS 位运算会把结果截断为 32 位有符号整数。先保留低 32 位，
+        # 循环结束后再把它还原成对应的有符号整数。
+        hash_value = (hash_value * 31 + code_unit) & 0xFFFFFFFF
+
+    if hash_value & 0x80000000:
+        hash_value -= 0x100000000
+
+    return abs(hash_value)
+
+
+def _build_legacy_browser_info(user_agent: str) -> dict[str, object]:
+    """构造旧版验证页面使用的浏览器信息。"""
+    return {
+        "cookieEnabled": True,
+        "deviceMemory": random.choice([4, 8, 16, 32]),
+        "hardwareConcurrency": random.choice([4, 8, 16]),
+        "language": "zh-CN",
+        "platform": get_system_platform(),
+        "timezone": "Asia/Shanghai",
+        "userAgent": user_agent,
+    }
+
+
+def _build_dynamic_browser_info(user_agent: str) -> dict[str, object]:
+    """构造新版动态验证页面使用的浏览器信息。"""
+    return {
+        "userAgent": user_agent,
+        "language": "zh-CN",
+        "platform": get_system_platform(),
+        "screen": {
+            "width": 1920,
+            "height": 1080,
+            "colorDepth": 24,
+        },
+        # 西安所在的 UTC+8 时区在浏览器中返回 -480。
+        "timezoneOffset": -480,
+        "hasTouchEvents": False,
+    }
 
 
 def generate_user_agent() -> str:
@@ -219,48 +331,55 @@ def pass_challenge_for_website(website_url: str, challenge_url: str) -> requests
         set_cookie(session.cookies, "client_id", cached_client_id, website_domain)
 
     response = session.get(website_url)
-    challenge_id, answer = extract_challenge_id_from_html(response.text)
-    # 需要人机验证
-    if challenge_id is not None and answer is not None:
-        response = session.post(challenge_url, headers={
-            "Referer": website_url
-        }, json={
-            "answer": answer,
-            "challenge_id": challenge_id,
-            "browser_info": {
-                # 总之假装自己和个浏览器一样
-                "cookieEnabled": True,
-                # 设备内存随机从 4, 8, 16, 32 里面选
-                "deviceMemory": random.choice([4, 8, 16, 32]),
-                # CPU 核心数量，同样随机一个
-                "hardwareConcurrency": random.choice([4, 8, 16]),
-                "language": "zh-CN",
-                "platform": get_system_platform(),
-                "timezone": "Asia/Shanghai",
-                "userAgent": session.headers["User-Agent"]
-            }
-        }
-                                )
-        if response.status_code == 200:
-            try:
-                # 服务器可能会发回一个 client_id 字段
-                # 如果发回了，就存起来并更新 cookie
-                client_id = response.json().get("client_id")
-                if client_id is not None:
-                    # 存储整个 cookie jar
-                    set_cookie(session.cookies, "client_id", str(client_id), website_domain)
-                    set_client_id(website_url, str(client_id))
-            except Exception:
-                # 还有一种情况是，服务器返回了一个 set_cookie header
-                # 此时 requests 应该会帮我们自动在 session 中设置这个 cookie
-                # 我们只需要检查一下
-                client_id = get_cookie_value(session.cookies, "client_id")
-                if client_id is None:
-                    raise ValueError("无法通过教务处网站的人机验证，请稍后再尝试。如果问题一直存在，请联系开发者。")
-                else:
-                    set_client_id(website_url, client_id)
-        else:
-            raise ValueError("无法通过教务处网站的人机验证，请稍后再尝试。如果问题一直存在，请联系开发者。")
+    challenge = _extract_website_challenge(response.text)
+    if challenge is None:
+        return session
+    if challenge.answer is None:
+        raise ValueError("网站返回了无法识别的人机验证，请更新软件后再尝试。")
+
+    user_agent = session.headers["User-Agent"]
+    request_data: dict[str, object] = {
+        "answer": challenge.answer,
+        "challenge_id": challenge.challenge_id,
+    }
+    if challenge.requires_hash:
+        request_data["browser_info"] = _build_dynamic_browser_info(user_agent)
+        hash_input = f"{challenge.challenge_id}{challenge.answer}{user_agent[:10]}"
+        request_data["hash"] = javascript_simple_hash(hash_input)
+    else:
+        request_data["browser_info"] = _build_legacy_browser_info(user_agent)
+
+    response = session.post(
+        challenge_url,
+        headers={"Referer": website_url},
+        json=request_data,
+    )
+    if response.status_code != 200:
+        raise ValueError("无法通过教务处网站的人机验证，请稍后再尝试。如果问题一直存在，请联系开发者。")
+
+    try:
+        response_data = response.json()
+    except ValueError:
+        response_data = None
+
+    client_id: Optional[str] = None
+    if isinstance(response_data, dict):
+        if response_data.get("success") is False:
+            raise ValueError("网站拒绝了人机验证，请稍后再尝试。")
+        response_client_id = response_data.get("client_id")
+        if response_client_id is not None:
+            client_id = str(response_client_id)
+
+    if client_id is None:
+        # 旧版接口有时只通过 Set-Cookie 返回 client_id。只检查本次响应，
+        # 避免把 session 中已经失效的缓存 cookie 误认为新的验证结果。
+        client_id = get_cookie_value(response.cookies, "client_id")
+
+    if client_id is None:
+        raise ValueError("无法通过教务处网站的人机验证，请稍后再尝试。如果问题一直存在，请联系开发者。")
+
+    set_cookie(session.cookies, "client_id", client_id, website_domain)
+    set_client_id(website_url, client_id)
 
     return session
 

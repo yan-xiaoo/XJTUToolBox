@@ -100,15 +100,16 @@ self.title == other.title and self.link == other.link and self.source == other.s
 | 函数 | 用途 |
 | --- | --- |
 | `pass_challenge_for_website()` | 创建 session、完成动态挑战并返回可访问通知页的 session |
-| `extract_challenge_id_from_html()` | 从挑战页面脚本中提取 `challengeId` 和 `answer` |
+| `extract_challenge_id_from_html()` | 从挑战页面脚本中提取 `challengeId`，并读取或计算 `answer` |
+| `javascript_simple_hash()` | 使用 Python 复现挑战页面的 JavaScript 32 位哈希 |
 | `generate_user_agent()` | 按当前系统生成随机浏览器 User-Agent |
 | `get_system_platform()` | 生成类似浏览器 `navigator.platform` 的平台字符串 |
 | `get_client_id()` | 读取缓存的 `client_id` |
 | `set_client_id()` | 保存新的 `client_id` |
 
-挑战流程会模拟浏览器信息提交 `answer`、`challenge_id` 和 `browser_info`。服务端返回新的 `client_id` 时，代码会写入 session cookie，并通过 `cacheManager.write_expire_json("client_id.json", ...)` 缓存。缓存有效期按 1 天处理。
+挑战流程兼容新旧两种页面：旧版直接读取 `answer`，新版读取 `a`、`b` 和 `operator` 后计算答案，并提交与页面一致的 `hash` 和浏览器信息。服务端返回新的 `client_id` 时，代码会写入 session cookie，并通过 `cacheManager.write_expire_json("client_id.json", ...)` 缓存。缓存有效期按 1 天处理。
 
-维护这部分时，重点检查挑战页脚本中的 `challengeId` 和 `answer` 赋值格式，以及服务端挑战接口是否仍返回 `client_id`。
+维护这部分时，重点检查挑战页脚本中的 `challengeId`、算式变量和哈希格式，以及服务端挑战接口是否仍返回 `success` 与 `client_id`。
 
 ## 过滤器
 
