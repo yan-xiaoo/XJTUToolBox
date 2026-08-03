@@ -2,7 +2,7 @@
 
 `auth` 模块封装西安交通大学统一身份认证、WebVPN 网址转换与扫码登录能力。它的核心任务是从一个会触发统一认证的目标地址出发，推进登录流程，并最终得到一个已经认证的 `requests.Session`。
 
-当前登录实现以 `auth/new_login.py` 与 `auth/new_qrcode_login.py` 为准。本页聚焦当前登录链路；历史实现 `auth/login.py` 仅作为旧代码保留。
+当前登录实现以 `auth/new_login.py` 与 `auth/new_qrcode_login.py` 为准。本页聚焦当前登录链路。
 
 ## 职责边界
 

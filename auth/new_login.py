@@ -1,5 +1,6 @@
 # 此文件实现了 2025 年 7 月 17 日后西安交通大学新统一认证系统的登录，即 login.xjtu.edu.cn。
 # 此文件会尽可能与登录页面前端实现保持一致，不会尝试利用设计漏洞等方式绕过验证码、两步验证等安全措施。
+# 为什么这个类不叫 Login 呢……因为曾经旧的登录系统类叫做 Login，而它已经被删除了……
 from __future__ import annotations
 
 import base64
@@ -441,12 +442,16 @@ class NewLogin:
         :param login_response: 登录或后续认证提交返回的响应
         :return: 登录状态和对应的附带信息
         """
+        message = extract_alert_message(login_response.text)
+
         if login_response.status_code == 401:
+            # 密码错误是一种不会警告的错误……很奇怪，因此我们只能拿它做默认值
+            # 没有检测到网页显示任何错误时，就认为是用户名/密码错误
+            error_message = message['title'] if message else "登录失败，用户名或密码错误。"
             self.fail_count += 1
-            return LoginState.FAIL, "登录失败，用户名或密码错误。"
+            return LoginState.FAIL, error_message
 
         login_response.raise_for_status()
-        message = extract_alert_message(login_response.text)
         if message:
             self.fail_count += 1
             return LoginState.FAIL, f"登录失败: {message['title']}"

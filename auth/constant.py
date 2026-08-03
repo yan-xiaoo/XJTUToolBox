@@ -1,6 +1,6 @@
 # 一些西安交通大学常用网页的登录地址
 # 直接使用 requests 对这些地址发起 get 请求即可跳转到统一身份认证登录页面。
-# 这些网址可以用在 Login 类构造函数的那个 "url" 参数中。
+# 这些网址可以用在 NewLogin 类构造函数的那个 "url" 参数中。
 
 # 新教务系统的登录地址
 JWXT_LOGIN_URL = "https://jwxt.xjtu.edu.cn/jwapp/sys/homeapp/index.do"

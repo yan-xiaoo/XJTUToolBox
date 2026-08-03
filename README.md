@@ -9,6 +9,7 @@
 - 考勤查询：查询整学期的考勤流水
 - 课表查询：查询整学期的课表，并查看每节课程的考勤信息
 - 成绩查询：查询多个学期的成绩，平均分，自选课程计算绩点
+- 思源学堂：访问思源学堂，查看课程作业，下载课程回放
 - 通知订阅：订阅教务处、各个学院的消息，设置定时推送，快速查看网站的新通知
 - 空闲教室查询：查询任意校区的空闲教室，并导出为图片
 
@@ -36,8 +37,6 @@
 > 你也可以查看文档站中更加详细的说明文档：[用户手册](https://yan-xiaoo.github.io/XJTUToolBox/tutorial/quick-start)
 
 你可以从 [Release](https://github.com/yan-xiaoo/XJTUToolBox/releases) 页面下载最新版本的安装包。
-
-使用 GNU/Linux 发行版的用户请参考「源码运行」部分，通过克隆源代码运行程序。
 
 > 本项目的二进制安装包全部由 Github Actions 直接从源代码生成，请放心使用
 
@@ -86,7 +85,7 @@ macOS 用户需要将应用程序拖到访达侧栏的「应用程序」文件�
 本项目的完成离不开如下开源项目的帮助：
 - [qfluentwidgets (PyQt5 界面库)](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
 - [March7thAssistant（项目结构、自动更新功能）](https://github.com/moesnow/March7thAssistant)
-- [better-ehall (交大登录示例项目)](https://github.com/guitaoliu/xjtu-grade)
+- [better-ehall (曾是交大登录示例，学校登录方式已更新，不再适用)](https://github.com/guitaoliu/xjtu-grade)
 - [webvpn-dlut (WebVPN 网址转换)](https://github.com/ESWZY/webvpn-dlut)
 - [xidian-script（Ehall 开发实例）](https://github.com/xdlinux/xidian-scripts)
 - [chine-holiday-calendar（节假日日历接口）](https://github.com/lanceliao/china-holiday-calender)
