@@ -334,6 +334,17 @@ class SettingInterface(ScrollArea):
         )
         self.lmsGroup.addSettingCard(self.lmsConcurrencyCard)
 
+        # 体育场馆组
+        self.venueGroup = SettingCardGroup(self.tr("体育场馆"), self.view)
+        self.venueCacheCard = CustomSwitchSettingCard(
+            FIF.SYNC,
+            self.tr("启用缓存"),
+            self.tr("优先显示缓存场馆数据，并在后台刷新"),
+            cfg.venueCacheEnable,
+            self.venueGroup
+        )
+        self.venueGroup.addSettingCard(self.venueCacheCard)
+
         # 通知查询组
         self.noticeGroup = SettingCardGroup(self.tr("定时查询"), self.view)
         self.noticeCard = NoticeSearchCard(self, self.view)
@@ -434,6 +445,7 @@ class SettingInterface(ScrollArea):
         self.expandLayout.addWidget(self.attendanceGroup)
         self.expandLayout.addWidget(self.scoreGroup)
         self.expandLayout.addWidget(self.lmsGroup)
+        self.expandLayout.addWidget(self.venueGroup)
         self.expandLayout.addWidget(self.noticeGroup)
         self.expandLayout.addWidget(self.personalGroup)
         self.expandLayout.addWidget(self.aboutGroup)

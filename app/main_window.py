@@ -323,7 +323,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
         self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
         self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
-        self.addSubInterface(self.venue_interface, FIF.LOCATION, self.tr("体育场馆"))
+        self.addSubInterface(self.venue_interface, FIF.BASKETBALL, self.tr("体育场馆"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",
