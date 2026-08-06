@@ -1039,23 +1039,31 @@ class AIInterface(QFrame):
         except Exception as error:
             InfoBar.error(self.tr("无法读取已授权数据"), str(error), parent=self)
             return
-        if local_context.unavailable:
-            names = [one.name for one in CAPABILITIES if one.id in local_context.unavailable]
-            self.capabilityStatusLabel.setText(self.tr("本机暂无可用数据：") + "、".join(names))
-            InfoBar.warning(
-                self.tr("已授权数据不可用"),
-                self.tr("以下缓存当前不存在或损坏，已停止发送，避免模型在没有数据时猜测：") + "、".join(names),
-                parent=self,
-                duration=6000,
-            )
-            return
+        unavailable_names = [
+            one.name for one in CAPABILITIES if one.id in local_context.unavailable
+        ]
         counts = dict(local_context.counts)
         loaded = [
             f"{one.name} {counts[one.id]} 条"
             for one in CAPABILITIES if one.id in counts
         ]
+        status_parts = []
         if loaded:
-            self.capabilityStatusLabel.setText(self.tr("本次实际载入：") + "、".join(loaded))
+            status_parts.append(self.tr("本次实际载入：") + "、".join(loaded))
+        if unavailable_names:
+            status_parts.append(self.tr("本机暂无可用数据：") + "、".join(unavailable_names))
+        if status_parts:
+            self.capabilityStatusLabel.setText("；".join(status_parts))
+        if unavailable_names:
+            InfoBar.warning(
+                self.tr("部分已授权数据不可用") if loaded else self.tr("已授权数据不可用"),
+                self.tr(
+                    "以下缓存当前不存在、损坏或读取失败；本次消息仍会发送，"
+                    "并已告知模型不得根据缺失数据猜测："
+                ) + "、".join(unavailable_names),
+                parent=self,
+                duration=6000,
+            )
 
         config = self._providerConfig()
         session = self._activeSession()

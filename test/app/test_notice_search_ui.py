@@ -716,21 +716,55 @@ class AIInterfaceSmokeTest(unittest.TestCase):
         app.sendPostedEvents(None, 0)
         app.processEvents()
 
-    def test_missing_selected_cache_stops_before_provider_thread_is_created(self):
+    def test_missing_selected_cache_warns_but_starts_provider_thread(self):
         widget = self.create_interfaces()
         widget.inputEdit.setPlainText("我的均分多少")
         context = SimpleNamespace(
-            text="", counts={}, unavailable=("scores",),
+            text=(
+                "以下内容来自用户明确勾选的本机数据能力。\n\n"
+                "## 我的成绩（本机缓存不可用）\n"
+                "- 缓存不存在、损坏或读取失败；本次没有获得成绩数据；不得据此猜测。"
+            ),
+            counts=(),
+            unavailable=("scores",),
         )
         with patch.object(widget, "saveConfiguration", return_value=True), \
              patch.object(widget, "_localCapabilityContext", return_value=context), \
              patch("app.AIInterface._AIRequestThread") as request_thread, \
-             patch("app.AIInterface.InfoBar.warning"):
+             patch("app.AIInterface.InfoBar.warning") as warning:
             widget._sendMessageFrom(widget.inputEdit)
-        request_thread.assert_not_called()
-        self.assertFalse(widget.messages)
-        self.assertEqual(widget.inputEdit.toPlainText(), "我的均分多少")
+
+        request_thread.assert_called_once()
+        self.assertEqual(request_thread.call_args.kwargs["local_context"], context.text)
+        request_thread.return_value.start.assert_called_once_with()
+        warning.assert_called_once()
+        self.assertEqual(widget.messages[-1].content, "我的均分多少")
         self.assertIn("成绩", widget.capabilityStatusLabel.text())
+
+    def test_available_and_missing_selected_caches_both_reach_request(self):
+        widget = self.create_interfaces()
+        widget.inputEdit.setPlainText("结合通知看看下周课表")
+        context = SimpleNamespace(
+            text=(
+                "以下内容来自用户明确勾选的本机数据能力。\n\n"
+                "## 公开通知（已查询，0 条）\n- 本机缓存当前暂无记录。\n\n"
+                "## 我的课表（本机缓存不可用）\n- 本次没有获得课表数据；不得据此猜测。"
+            ),
+            counts=(("public_notices", 0),),
+            unavailable=("schedule",),
+        )
+        with patch.object(widget, "saveConfiguration", return_value=True), \
+             patch.object(widget, "_localCapabilityContext", return_value=context), \
+             patch("app.AIInterface._AIRequestThread") as request_thread, \
+             patch("app.AIInterface.InfoBar.warning") as warning:
+            widget._sendMessageFrom(widget.inputEdit)
+
+        request_thread.assert_called_once()
+        self.assertEqual(request_thread.call_args.kwargs["local_context"], context.text)
+        warning.assert_called_once()
+        status = widget.capabilityStatusLabel.text()
+        self.assertIn("公开通知 0 条", status)
+        self.assertIn("课表", status)
 
     def test_selected_empty_cache_context_starts_request_and_reaches_thread(self):
         widget = self.create_interfaces()
@@ -872,6 +906,41 @@ class AIInterfaceSmokeTest(unittest.TestCase):
             sent = "\n".join(one.content for one in client.messages)
             self.assertIn("我的成绩（已查询，0 条）", sent)
             self.assertIn("暂无记录", sent)
+            self.assertIn("不得据此猜测", sent)
+
+    def test_missing_cache_status_reaches_final_provider_messages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context = collect_local_context(
+                ("schedule", "scores"), account_directory=directory
+            )
+
+            class CapturingClient:
+                def __init__(self):
+                    self.messages = None
+                    self.session = SimpleNamespace(close=lambda: None)
+
+                def complete(self, messages, _config):
+                    self.messages = list(messages)
+                    return SimpleNamespace(
+                        text="ok", model="fixture", input_tokens=1, output_tokens=1
+                    )
+
+            thread = _AIRequestThread(
+                [ChatMessage("system", "base"), ChatMessage("user", "查询本周安排")],
+                ProviderConfig("openai", "https://api.example/v1", "fixture", "key"),
+                local_context=context.text,
+            )
+            client = CapturingClient()
+            thread.ai_client = client
+            outcomes = []
+            thread.succeeded.connect(outcomes.append)
+            thread.run()
+
+            self.assertTrue(outcomes)
+            sent = "\n".join(one.content for one in client.messages)
+            self.assertIn("我的课表（本机缓存不可用）", sent)
+            self.assertIn("我的成绩（本机缓存不可用）", sent)
+            self.assertIn("不存在、损坏或读取失败", sent)
             self.assertIn("不得据此猜测", sent)
 
     def test_empty_message_does_not_start_request(self):
