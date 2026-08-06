@@ -14,6 +14,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # 去除广告 (静默导入业务逻辑)
 with contextlib.redirect_stdout(None):
     from app.main_window import MainWindow, MacReopenFilter
+    from app.ctrl_c import install_ctrl_c_handler
     from app.utils import accounts, cfg, logger
     from app.utils.single_app import SingleApplication
     from app.utils.linux_compat import apply_linux_env_patches
@@ -47,6 +48,7 @@ if __name__ == '__main__':
         sys.exit(0)
 
     window = MainWindow()
+    ctrl_c_controller = install_ctrl_c_handler(app)
 
     # 将窗口的控制权交给单例管理器
     app.activation_window = window
@@ -59,6 +61,8 @@ if __name__ == '__main__':
     try:
         app.exec_()
     finally:
+        if ctrl_c_controller is not None:
+            ctrl_c_controller.restore()
         try:
             persist_session_state_on_exit()
         except Exception:
