@@ -317,7 +317,7 @@ class CapabilityAndMarkdownTest(unittest.TestCase):
             self.assertGreaterEqual(context.text.count("暂无记录"), 4)
             self.assertIn("不得据此猜测", context.text)
 
-    def test_missing_or_damaged_cache_is_not_misreported_as_empty(self):
+    def test_missing_or_damaged_cache_is_reported_without_claiming_zero_records(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "score.json").write_text("not-json", encoding="utf-8")
@@ -335,7 +335,32 @@ class CapabilityAndMarkdownTest(unittest.TestCase):
                 set(context.unavailable),
                 {"public_notices", "schedule", "scores", "attendance"},
             )
-            self.assertEqual(context.text, "")
+            self.assertFalse(context.counts)
+            for heading in ("公开通知", "我的课表", "我的成绩", "我的考勤"):
+                self.assertIn(f"## {heading}（本机缓存不可用）", context.text)
+            self.assertNotIn("已查询，0 条", context.text)
+            self.assertIn("不存在、损坏或读取失败", context.text)
+            self.assertIn("不得据此猜测", context.text)
+
+    def test_available_empty_and_missing_cache_statuses_share_one_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            notice = root / "notification.json"
+            notice.write_text("[]", encoding="utf-8")
+
+            context = collect_local_context(
+                ("public_notices", "schedule"),
+                notification_path=notice,
+                account_directory=root,
+            )
+
+            self.assertEqual(context.included, ("public_notices",))
+            self.assertEqual(context.unavailable, ("schedule",))
+            self.assertEqual(dict(context.counts), {"public_notices": 0})
+            self.assertIn("## 公开通知（已查询，0 条）", context.text)
+            self.assertIn("## 我的课表（本机缓存不可用）", context.text)
+            self.assertIn("暂无记录", context.text)
+            self.assertIn("不存在、损坏或读取失败", context.text)
 
     def test_all_real_cache_shapes_share_the_budget_and_reach_context(self):
         with tempfile.TemporaryDirectory() as directory:
