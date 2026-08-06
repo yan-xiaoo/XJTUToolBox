@@ -347,8 +347,64 @@ class FailureIsolationTest(unittest.TestCase):
             result = manager.get_notifications()
 
         self.assertEqual(result, [good])
-        self.assertIn("gs/pygz", manager.last_errors)
-        self.assertNotIn("dean/jxtz", manager.last_errors)
+        self.assertEqual(manager.last_errors, {
+            "gs/pygz": "RuntimeError: temporary failure",
+        })
+        self.assertEqual(manager.last_skipped, {})
+
+    def test_unavailable_sources_are_skipped_without_crawl_errors(self):
+        base = source_registry.require("dean/jxtz")
+        descriptors = {
+            "test/empty": replace(base, id="test/empty", status="empty", default_on=False),
+            "test/candidate": replace(
+                base, id="test/candidate", status="candidate", default_on=False
+            ),
+        }
+
+        with patch(
+            "notification.notification_manager.source_registry.get",
+            side_effect=descriptors.get,
+        ), patch("notification.notification_manager.create_crawler") as create_crawler:
+            manager = NotificationManager([
+                "test/unknown",
+                "test/empty",
+                "test/candidate",
+            ])
+            result = manager.get_notifications()
+
+        self.assertEqual(result, [])
+        self.assertEqual(manager.last_errors, {})
+        self.assertEqual(set(manager.last_skipped), {
+            "test/unknown",
+            "test/empty",
+            "test/candidate",
+        })
+        self.assertIn("跳过抓取", manager.last_skipped["test/unknown"])
+        self.assertIn("当前为空", manager.last_skipped["test/empty"])
+        self.assertIn("尚未通过", manager.last_skipped["test/candidate"])
+        create_crawler.assert_not_called()
+
+    def test_fetch_status_is_reset_before_each_run(self):
+        manager = NotificationManager(["test/unknown"])
+        manager.get_notifications()
+        self.assertTrue(manager.last_skipped)
+
+        good = Notification("可用通知", "https://example.test/good", "dean/jxtz")
+
+        class StubCrawler:
+            @staticmethod
+            def get_notifications():
+                return [good]
+
+        manager.subscription = ["dean/jxtz"]
+        with patch(
+            "notification.notification_manager.create_crawler",
+            return_value=StubCrawler(),
+        ):
+            self.assertEqual(manager.get_notifications(), [good])
+
+        self.assertEqual(manager.last_errors, {})
+        self.assertEqual(manager.last_skipped, {})
 
 
 class ChallengeCacheTest(unittest.TestCase):
