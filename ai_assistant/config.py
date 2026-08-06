@@ -19,7 +19,13 @@ from urllib.parse import urlparse
 import keyring
 import platformdirs
 
-from .providers import PRESET_BY_ID, Protocol, preset_for
+from .providers import (
+    DEPRECATED_DEEPSEEK_MODELS,
+    PRESET_BY_ID,
+    Protocol,
+    is_official_deepseek_endpoint,
+    preset_for,
+)
 from .capabilities import validate_capability_ids
 from .web_search import DUCKDUCKGO_ENDPOINT, validate_search_settings
 
@@ -90,6 +96,8 @@ def validate_profile(profile: AIProfile) -> AIProfile:
     model = str(profile.model).strip()
     if not model or len(model) > 200:
         raise ValueError("请填写有效的模型 ID")
+    if is_official_deepseek_endpoint(profile.base_url) and model.lower() in DEPRECATED_DEEPSEEK_MODELS:
+        raise ValueError("旧 DeepSeek 模型 ID 已停用，请改用 deepseek-v4-flash 或 deepseek-v4-pro")
     capability_ids = validate_capability_ids(profile.capability_ids)
     search_engine, search_endpoint = validate_search_settings(
         profile.search_engine,
@@ -203,13 +211,18 @@ class AIConfigStore:
 
     @staticmethod
     def _migrate_legacy_branding(profile: AIProfile) -> AIProfile:
-        """Rename only untouched legacy defaults; preserve user custom text."""
+        """Migrate retired untouched defaults while preserving custom settings."""
 
         updates = {}
         if profile.name == LEGACY_ASSISTANT_NAME:
             updates["name"] = DEFAULT_ASSISTANT_NAME
         if profile.system_prompt == LEGACY_SYSTEM_PROMPT:
             updates["system_prompt"] = DEFAULT_SYSTEM_PROMPT
+        if (
+            is_official_deepseek_endpoint(profile.base_url)
+            and profile.model.strip().lower() in DEPRECATED_DEEPSEEK_MODELS
+        ):
+            updates["model"] = preset_for("deepseek").default_model
         return replace(profile, **updates) if updates else profile
 
     @staticmethod

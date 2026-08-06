@@ -11,7 +11,7 @@ from ai_assistant.config import AIConfigStore, AIProfile, SCHEMA_VERSION, valida
 from ai_assistant.conversations import ConversationStore, MAX_CONTENT_CHARACTERS
 from ai_assistant.markdown_render import render_markdown_fragment
 from ai_assistant.model_catalog import ModelCatalogClient, ModelOperationCancelled
-from ai_assistant.providers import ProviderConfig
+from ai_assistant.providers import PRESETS, ProviderConfig, validate_config
 from ai_assistant.web_search import (
     SearchHumanVerificationRequired,
     WebSearchClient,
@@ -89,6 +89,27 @@ class IndependentProtocolConfigTest(unittest.TestCase):
             self.assertEqual(loaded.capability_ids, ())
             store.save_profiles([loaded])
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], SCHEMA_VERSION)
+
+    def test_retired_deepseek_models_are_migrated_and_blocked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profiles.json"
+            legacy = replace(AIProfile.default(), model="deepseek-chat")
+            path.write_text(
+                json.dumps({"version": SCHEMA_VERSION, "profiles": [legacy.__dict__]}),
+                encoding="utf-8",
+            )
+            loaded = AIConfigStore(path, keyring_backend=object()).load_profiles()[0]
+
+        self.assertEqual(loaded.model, "deepseek-v4-flash")
+        self.assertTrue(all(preset.default_model != "deepseek-chat" for preset in PRESETS))
+        with self.assertRaisesRegex(ValueError, "已停用"):
+            validate_config(ProviderConfig(
+                "openai",
+                "https://api.deepseek.com/v1",
+                "deepseek-chat",
+                "secret",
+            ))
+
 
 class ModelCatalogTest(unittest.TestCase):
     def test_lists_ollama_models_and_uses_official_tags_endpoint(self):
