@@ -67,6 +67,7 @@ class NoticeChoiceInterface(QFrame):
         self._ruleButtonCopies: dict[str, list[TransparentToolButton]] = defaultdict(list)
         self._classificationItemCopies: dict[tuple[str, str], list[QTreeWidgetItem]] = defaultdict(list)
         self._classificationSearchValuesByItem: dict[int, tuple[object, ...]] = {}
+        self._searchExpansionState: list[tuple[QTreeWidgetItem, bool]] | None = None
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(24, 18, 24, 18)
@@ -505,6 +506,22 @@ class NoticeChoiceInterface(QFrame):
     @pyqtSlot(str)
     def onSearchChanged(self, query: str) -> None:
         has_query = bool(query.strip())
+        tree_items: list[QTreeWidgetItem] = []
+
+        def collect(item: QTreeWidgetItem) -> None:
+            tree_items.append(item)
+            for child_index in range(item.childCount()):
+                collect(item.child(child_index))
+
+        for index in range(self.tree.topLevelItemCount()):
+            collect(self.tree.topLevelItem(index))
+
+        restore_expansion = not has_query and self._searchExpansionState is not None
+        if has_query and self._searchExpansionState is None:
+            self._searchExpansionState = [
+                (item, item.isExpanded())
+                for item in tree_items
+            ]
 
         def values_for(item: QTreeWidgetItem) -> tuple[object, ...]:
             payload = item.data(0, Qt.UserRole)
@@ -533,6 +550,11 @@ class NoticeChoiceInterface(QFrame):
 
         for index in range(self.tree.topLevelItemCount()):
             visit(self.tree.topLevelItem(index))
+
+        if restore_expansion and self._searchExpansionState is not None:
+            for item, was_expanded in self._searchExpansionState:
+                item.setExpanded(was_expanded)
+            self._searchExpansionState = None
 
     @pyqtSlot()
     def onReturnButtonClicked(self) -> None:
