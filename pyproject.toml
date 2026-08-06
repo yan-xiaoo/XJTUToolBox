@@ -21,6 +21,7 @@ dependencies = [
     "icalendar~=6.1.0",
     "packaging~=24.2",
     "markdown~=3.7",
+    "pygments>=2.18,<3",
     "colorama~=0.4.6",
     "psutil~=7.0.0",
     "tqdm~=4.67.1",
@@ -33,6 +34,7 @@ dependencies = [
     "pyobjus>=1.2.4; sys_platform == 'darwin'",
     "urllib3>=2.7.0",
     "pillow>=12.3.0",
+    "numpy>=2.2,<3",
     "typing-extensions>=4.0.0",
 ]
 

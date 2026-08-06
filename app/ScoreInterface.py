@@ -19,6 +19,7 @@ from app.threads.ProcessWidget import ProcessWidget
 from app.threads.ScoreThread import ScoreThread
 from app.utils import StyleSheet, cfg, AccountDataManager, accounts, logger, DATA_DIRECTORY
 from app.utils.notification import notify
+from score_statistics import calculate_score_statistics
 
 
 class ScoreInterface(ScrollArea):
@@ -707,42 +708,13 @@ class ScoreInterface(ScrollArea):
         except IndexError:
             return
 
-        credits_ = [score["coursePoint"] for score in scores]
-        total_credit = sum(credits_)
+        statistics = calculate_score_statistics(scores)
         # 0 学分课程无法计算绩点和平均分，直接返回
-        if total_credit == 0:
+        if statistics is None:
             return
-        gpa_sum_list = []
-        # 有的课程没有 gpa（强行从成绩单提取的成绩），因此需要判断
-        # 我们忽略这些没有 gpa 的课程
-        # 没有 gpa 的课程都是实验课程（成绩单只有 A/A+ 这样的符号）
-        # 我们为它们的均分计算也做适配
-        score_sum_list = []
-        inaccurate_warning = False
-        inaccurate_count = 0
-        for score in scores:
-            if score["gpa"] is not None:
-                gpa_sum_list.append(score["gpa"] * score["coursePoint"])
-            else:
-                inaccurate_warning = True
-                inaccurate_count += 1
-                continue
-            # 忽略成绩不是数字的课程
-            if isinstance(score["score"], int) or isinstance(score["score"], float):
-                score_sum_list.append(score["score"] * score["coursePoint"])
-            else:
-                inaccurate_warning = True
-                inaccurate_count += 1
-                continue
-
-        gpa = sum(gpa_sum_list) / (total_credit - inaccurate_count)
-        average = sum(score_sum_list) / (total_credit - inaccurate_count)
-
-        self.statisticTable.setItem(0, 0, QTableWidgetItem(str(total_credit)))
-        # 如果存在无法计算均分/gpa 的课程，则提示不精确
-        if not inaccurate_warning:
-            self.statisticTable.setItem(0, 1, QTableWidgetItem(str(round(gpa, 3))))
-            self.statisticTable.setItem(0, 2, QTableWidgetItem(str(round(average, 3))))
-        else:
-            self.statisticTable.setItem(0, 1, QTableWidgetItem(f"{round(gpa, 3)}（不精确）"))
-            self.statisticTable.setItem(0, 2, QTableWidgetItem(f"{round(average, 3)}（不精确）"))
+        self.statisticTable.setItem(0, 0, QTableWidgetItem(str(statistics.total_credit)))
+        suffix = self.tr("（不精确）") if statistics.incomplete_count else ""
+        gpa = "" if statistics.weighted_gpa is None else str(round(statistics.weighted_gpa, 3)) + suffix
+        average = "" if statistics.weighted_average is None else str(round(statistics.weighted_average, 3)) + suffix
+        self.statisticTable.setItem(0, 1, QTableWidgetItem(gpa))
+        self.statisticTable.setItem(0, 2, QTableWidgetItem(average))

@@ -8,6 +8,7 @@ url="https://github.com/yan-xiaoo/XJTUToolBox"
 license=('GPL3')
 provides=('xjtutoolbox')
 conflicts=('xjtutoolbox')
+depends=('glibc')
 
 # 区分不同架构下载对应的 zst 包
 source_x86_64=("https://github.com/yan-xiaoo/XJTUToolBox/releases/download/v${pkgver}/XJTUToolbox-linux-x86_64.pkg.tar.zst")

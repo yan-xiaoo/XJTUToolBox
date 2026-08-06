@@ -2,6 +2,7 @@
 import platform
 import random
 import re
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -10,7 +11,10 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from fake_useragent import UserAgent
+try:
+    from fake_useragent import UserAgent
+except ImportError:  # keep source-registry tooling usable in a minimal environment
+    UserAgent = None
 from lxml import etree
 
 from notification.notification import Notification
@@ -190,6 +194,11 @@ def generate_user_agent() -> str:
     根据当前的操作系统，随机生成一个该系统上浏览器的 UA
     """
     os_name = platform.system()
+    if UserAgent is None:
+        return (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+        )
     if not os_name:
         # 默认用 Windows 的 UA
         return UserAgent(os=["Windows"]).random
@@ -266,13 +275,19 @@ def load_client_id() -> dict:
     """
     读取 client_id.txt 文件中的 Client ID
     """
-    from app.utils.cache import cacheManager
-    data = cacheManager.read_expire_json("client_id.json", expire_day=1)
-    return data or {}
+    try:
+        from app.utils.cache import cacheManager
+        data = cacheManager.read_expire_json("client_id.json", expire_day=1)
+        return data or {}
+    except (ImportError, OSError, ValueError, TypeError):
+        # Crawler unit tests and command-line smoke checks do not need the GUI
+        # cache layer.  The challenge still works; only cookie reuse is skipped.
+        return {}
 
 
 # 加载缓存的 client_id cookie 记录
 client_id_dictionary = load_client_id()
+_client_id_lock = threading.RLock()
 
 
 def get_client_id(website_url: str, diction: Optional[dict] = None) -> Optional[str]:
@@ -294,19 +309,24 @@ def set_client_id(website_url: str, client_id: str, diction: Optional[dict] = No
     """
     if diction is None:
         diction = client_id_dictionary
-    diction[website_url] = {
-        "client_id": client_id,
-        "expire_time": time.time()
-    }
-    write_client_id(diction)
+    with _client_id_lock:
+        diction[website_url] = {
+            "client_id": client_id,
+            "expire_time": time.time()
+        }
+        write_client_id(diction)
 
 
 def write_client_id(client_id_dict: dict):
     """
     将 Client ID 写入 client_id.txt 文件
     """
-    from app.utils.cache import cacheManager
-    cacheManager.write_expire_json("client_id.json", client_id_dict, allow_overwrite=True)
+    with _client_id_lock:
+        try:
+            from app.utils.cache import cacheManager
+            cacheManager.write_expire_json("client_id.json", client_id_dict, allow_overwrite=True)
+        except (ImportError, OSError, ValueError, TypeError):
+            pass
 
 
 def pass_challenge_for_website(website_url: str, challenge_url: str) -> requests.Session:

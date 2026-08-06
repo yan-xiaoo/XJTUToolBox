@@ -33,7 +33,12 @@ depends=(
     'python-tqdm'
     'python-pytz'
     'python-markdown'
+    'python-pygments'
     'python-colorama'
+    'python-platformdirs'
+    'python-packaging'
+    'python-psutil'
+    'python-typing_extensions'
     'libnotify'
     'qt5-base'
     'qt5-svg'
@@ -41,6 +46,7 @@ depends=(
     'python-fake-useragent'
     'python-plyer'
     'python-darkdetect'
+    'python-xcffib'
 )
 
 makedepends=('git' 'python-pip')

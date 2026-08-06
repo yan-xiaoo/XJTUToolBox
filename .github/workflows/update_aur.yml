@@ -81,6 +81,10 @@ jobs:
             cd /work/aur/xjtutoolbox-git
             # Git 包的 checksums 通常是 SKIP，但运行 updpkgsums 是安全且规范的
             su builder -c 'updpkgsums && makepkg --printsrcinfo > .SRCINFO'
+
+            # 依赖必须能在 Arch 官方仓库或 AUR RPC 中解析，任何未知包都阻止发布。
+            cd /work
+            su builder -c 'python scripts/verify_aur_dependencies.py'
           "
 
       # 4. 发布到三个不同的 AUR 仓库

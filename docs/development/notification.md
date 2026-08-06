@@ -9,8 +9,8 @@
 `notification` 模块当前支持：
 
 - 定义统一的通知数据对象。
-- 管理通知来源枚举和来源 URL。
-- 爬取教务处、研究生院、软件学院通知。
+- 管理 78 个声明式通知栏目、稳定来源 ID 和分类信息。
+- 通过通用爬虫抓取校级部门、学院学部、书院和医学教育站点。
 - 处理教务处和软件学院通知页的动态挑战。
 - 按标题和标签筛选通知。
 - 保存和加载订阅源、过滤规则和已获取通知。
@@ -23,11 +23,13 @@
 | 文件 | 职责 |
 | --- | --- |
 | `notification/notification.py` | `Notification` 数据对象 |
-| `notification/source.py` | 通知来源枚举与来源 URL |
+| `notification/source.py` | 来源注册表模型、校验与旧配置迁移 |
+| `notification/sources.json` | 78 个栏目的稳定 ID、分类、URL 和声明式选择器 |
 | `notification/filter.py` | 标题和标签过滤器 |
 | `notification/ruleset.py` | 规则组 |
 | `notification/notification_manager.py` | 订阅、筛选、加载和保存 |
 | `notification/crawlers/crawler.py` | 爬虫基类、动态挑战、User-Agent 与 `client_id` 缓存 |
+| `notification/crawlers/generic.py` | 通用 HTML/RSS/JSON 抓取、日期解析和配置驱动的详情页日期补全 |
 | `notification/crawlers/jwc.py` | 教务处通知爬虫 |
 | `notification/crawlers/gs.py` | 研究生院通知爬虫 |
 | `notification/crawlers/se.py` | 软件学院通知爬虫 |
@@ -44,7 +46,7 @@
 | --- | --- |
 | `title` | 通知标题 |
 | `link` | 通知详情页链接 |
-| `source` | 来源网站，对应 `Source` 枚举 |
+| `source` | 稳定来源 ID，例如 `dean/jxtz` |
 | `description` | 通知描述，当前通常为空 |
 | `tags` | 通知标签集合 |
 | `date` | 发布日期 |
@@ -62,15 +64,19 @@ self.title == other.title and self.link == other.link and self.source == other.s
 
 ## 通知来源
 
-`Source` 枚举定义当前支持的通知来源。
+`notification/sources.json` 定义当前来源目录。每个可独立订阅的栏目拥有稳定的
+`site_id/channel_id` ID；中文显示名、URL、分类、适用学生层次、验证状态和解析选择器与 ID 分离。
+`SourceRegistry` 负责加载与校验，`get_source_name()` 和 `get_source_url()` 负责界面显示。
+旧 `Source.JWC/GS/SE` 仅作为兼容常量保留，新代码应直接使用字符串 ID。
 
-| 枚举 | 官网 | 用途 |
-| --- | --- | --- |
-| `Source.JWC` | `dean.xjtu.edu.cn` | 教务处通知 |
-| `Source.GS` | `gs.xjtu.edu.cn` | 研究生院通知 |
-| `Source.SE` | `se.xjtu.edu.cn` | 软件学院通知 |
+站点可用可选的 `placements` 声明多个目录展示位置。例如钱学森学院在“学院与学部 / 工学”下
+保留主项，同时以“钱学森书院”显示在书院目录；两个 UI 项引用同一个 `bjb/tzgg`，勾选状态
+双向同步，抓取、规则和持久化均不会复制。当前书院目录因此覆盖官网 9 个机构，但仍只有 8 个
+唯一站点和 8 个独立频道。
 
-`SOURCE_URL_MAP` 保存来源到官网通知页的映射，`get_source_url(source)` 返回某个来源的通知页面地址。设置界面可以用这些信息展示订阅源。
+注册表在加载阶段严格校验 ID、HTTP(S) URL、状态、学生层次、学院学科、爬虫类型、核验日期、
+标签、目录位置及重复项、选择器字段、详情请求上限和 XPath 语法。带凭据 URL、未知字段、非法 XPath、错误学科或
+未配详情选择器却设置详情请求上限都会立即报出配置错误，避免问题延迟到用户在线抓取时才出现。
 
 ## 爬虫结构
 
@@ -83,15 +89,19 @@ self.title == other.title and self.link == other.link and self.source == other.s
 
 `clear_repeat=True` 时，爬虫会按 `Notification.__eq__()` 清理重复通知。
 
-当前爬虫实现如下：
+来源统一由 `GenericListCrawler` 调度。它支持 XJTU CMS 启发式 HTML 解析、注册表声明式 XPath、
+RSS 与 JSON 四种形式，并覆盖完整日期、年月+日、月日+年和英文月份日期。声明了
+`needs_challenge` 的站点会复用 `pass_challenge_for_website()`。研究生院六个子栏目现在是六个独立
+feed，栏目名作为默认标签保留。
 
-| 爬虫 | 来源 | 解析内容 |
-| --- | --- | --- |
-| `JWC` | 教务处 | 标题、链接、日期、标签 |
-| `GS` | 研究生院 | 标题、链接、日期、子栏目标签 |
-| `SE` | 软件学院 | 标题、链接、日期 |
+英文月份使用模块内静态月份映射，`08/03 2026` 等数字混合格式也按明确的月/日/年规则解析，
+不调用依赖进程 `LC_TIME` 的 `strptime`。这是必要约束：Qt 创建 `QApplication` 时可能改变全局
+locale；日期解析必须在源码测试环境和真实 GUI 进程中保持相同结果，也不能通过临时切换全局
+locale 引入线程竞态。
 
-`JWC` 和 `SE` 会先调用 `pass_challenge_for_website()` 获取可访问通知页的 session，再解析页面。`GS` 会聚合研究生院多个子栏目，包括招生工作、培养工作、国际交流、学位工作、研工工作和综合工作，并把栏目名作为通知标签。
+若列表页只显示月日，可在注册表声明 `detail_date_xpath`。通用爬虫会使用同一 session
+、受限请求数和同源校验读取详情页；任何详情失败只跳过当前条目，不会猜测年份。
+崇实书院即使用此通用能力，Python 代码中没有站点 ID 或 URL 特判。
 
 ## 动态挑战与 client_id 缓存
 
@@ -155,8 +165,9 @@ self.title == other.title and self.link == other.link and self.source == other.s
 
 | 字段 | 含义 |
 | --- | --- |
-| `subscription` | 已订阅来源集合，类型为 `set[Source]` |
-| `ruleset` | 每个来源对应的规则组列表，类型为 `dict[Source, list[Ruleset]]` |
+| `subscription` | 有序来源 ID 列表，类型为 `list[str]` |
+| `ruleset` | 每个来源 ID 对应的规则组列表，类型为 `dict[str, list[Ruleset]]` |
+| `last_errors` | 最近一轮逐来源抓取错误，类型为 `dict[str, str]` |
 
 主要方法：
 
@@ -242,7 +253,16 @@ self.title == other.title and self.link == other.link and self.source == other.s
 | `NoticeSourceCard` | 展示一个订阅源 |
 | `NoticeRuleCard` | 展示一条规则组 |
 
-`NoticeChoiceInterface` 会遍历 `Source` 枚举生成订阅源卡片。用户勾选来源时调用 `manager.add_subscription(source)`，取消勾选时调用 `manager.remove_subscription(source, remove_ruleset=False)`。这里会保留该来源已有规则，方便用户重新订阅后继续使用。
+`NoticeChoiceInterface` 使用 qfluentwidgets 的 `SearchLineEdit` 和 `TreeWidget`，在“西安交通大学”下按
+“校级部门 / 学院与学部 / 书院 / 医学教育”展示；学院与学部再分为“工学 / 理学 /
+人文经管”。站点父项支持 checked / partially checked / unchecked 三态，可对所有子栏目全选或全清。
+首次进入时仅“西安交通大学”根目录默认展开；类别、学科和站点子目录默认收起，搜索命中时再展开匹配路径。
+搜索栏位于树滚动区之外，展开或折叠不会改变页面关键几何。用户勾选来源时调用
+`manager.add_subscription(source_id)`，取消勾选时调用
+`manager.remove_subscription(source_id, remove_ruleset=False)`。待核验来源保留官网入口但不可勾选。
+
+`NoticeInterface` 同样使用 `app/search.py` 的归一化、连续字符串和受限子序列匹配，可按标题、来源、
+标签与日期查找。来源选择和通知列表共用同一搜索实现。
 
 `NoticeSettingInterface.onSettingQuit()` 会在返回通知查询页时保存配置，并按新规则过滤当前已获取通知。
 
@@ -269,25 +289,46 @@ flowchart TD
 
 ## 新增通知来源
 
-如果要增加一个通知来源，可以按以下顺序修改：
+如果要增加一个通知来源：
 
-1. 在 `notification/source.py` 的 `Source` 中增加枚举值。
-2. 在 `SOURCE_URL_MAP` 中增加官网通知页 URL。
-3. 在 `notification/crawlers/` 中新增爬虫类，继承 `Crawler`。
-4. 在 `notification/crawlers/__init__.py` 的 `SOURCE_CRAWLER` 中注册来源到爬虫类的映射。
-5. 确认爬虫返回的 `Notification` 包含标题、链接、来源、日期和必要标签。
-6. 如果页面有动态挑战，评估是否可以复用 `pass_challenge_for_website()`。
-7. 检查 `NoticeChoiceInterface` 中遍历 `Source` 后的订阅源展示效果。
-8. 按需要补充用户手册中的来源说明。
+1. 在 `notification/sources.json` 对应机构的 `channels` 中登记稳定 ID、真实栏目名与官方 URL。
+2. 新栏目先标为 `status: "candidate"` 并填写 `checked_on`；若是 XJTU 站点，按实际情况设置 `needs_challenge`。
+3. 通用启发式无法定位时，在该 channel 中添加 `item_xpath/link_xpath/title_xpath/date_xpath` 等声明式选择器。
+   列表不含年份时可再添加 `detail_date_xpath`、`detail_date_max` 和 `detail_date_retries`，不得用当前年推测。
+4. 运行 `python -m scripts.smoke_notification_sources --include-unverified <source-id>`。
+5. 只有至少成功抽取一条标题、日期、链接后，才把状态改为 `verified`；若栏目 HTTP 正常但列表区确实没有内容，则标为 `empty`，不要伪装成抓取失败或已验证有内容。
+6. 运行通知模块单元测试，并确认新来源默认不开启；新增数据会由 `build.py` 一并打包。
+
+本次相关回归的可复现命令：
+
+```bash
+XDG_STATE_HOME=/tmp/xjtu-test-state \
+XDG_CONFIG_HOME=/tmp/xjtu-test-config \
+XDG_DATA_HOME=/tmp/xjtu-test-data \
+QT_QPA_PLATFORM=offscreen \
+python -m unittest \
+  test.ai_assistant.test_ai_core \
+  test.ai_assistant.test_ai_features \
+  test.app.test_notice_search_ui \
+  test.app.test_ctrl_c \
+  test.auth.test_qrcode_login \
+  test.notification.test_notification_sources \
+  test.test_crawler_challenge
+
+python -m scripts.smoke_notification_sources --workers 8
+```
+
+全仓发现应显式指定顶层目录：`python -m unittest discover -s test -t .`。只写
+`python -m unittest discover -s test` 可能让测试子包遮蔽产品同名包。
 
 新增过滤器时，需要实现 `Filter` 的四个接口，并同时更新 `CLASS_NAME` 和 `NAME_CLASS`。
 
 ## 维护注意事项
 
-- 官网 HTML 结构变化时，优先检查对应爬虫中的 XPath。
-- 教务处和软件学院动态挑战失效时，优先检查挑战页脚本、挑战接口和 `client_id` 缓存。
+- 官网 HTML 结构变化时，先运行逐源 smoke，再检查注册表选择器和通用容器启发式。
+- XJTU 动态挑战失效时，优先检查挑战页脚本、挑战接口和 `client_id` 缓存。
 - 通知去重依赖标题、链接和来源，官网链接格式变化可能影响重复判断。
-- 研究生院通知由多个栏目聚合，标签来自栏目名。
+- 研究生院栏目可独立订阅，标签来自注册表中的栏目配置。
 - 订阅配置和已获取通知分别由 `dataManager` 与 `cacheManager` 保存。
 - 桌面弹窗发送位于 `app/utils/notification.py`，校园通知查询逻辑集中在 `notification/`。
 

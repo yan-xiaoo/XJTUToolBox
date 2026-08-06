@@ -22,6 +22,7 @@ from .ScoreInterface import ScoreInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
 from .ToolBoxInterface import ToolBoxInterface
+from .AIInterface import AIInterface
 from .TrayInterface import TrayInterface
 from .sessions.attendance_session import AttendanceSession
 from .sessions.jwxt_session import JWXTSession
@@ -183,6 +184,7 @@ class MainWindow(MSFluentWindow):
         self.account_interface = AccountInterface(accounts, self, self)
         self.setting_interface = SettingInterface(self, self)
         self.tool_box_interface = ToolBoxInterface(self, self)
+        self.ai_interface = AIInterface(self)
         self.schedule_interface = ScheduleInterface(self)
         self.score_interface = ScoreInterface(self)
         self.judge_interface = AutoJudgeInterface(self)
@@ -349,6 +351,14 @@ class MainWindow(MSFluentWindow):
         notice_card = self.tool_box_interface.addCard(self.notice_interface, FIF.DICTIONARY, self.tr("通知查询"),
                                                       self.tr("在一处查询学校网站的新通知"))
         notice_card.setFixedSize(200, 180)
+
+        ai_card = self.tool_box_interface.addCard(
+            self.ai_interface,
+            FIF.ROBOT,
+            self.tr("问舟"),
+            self.tr("支持 Anthropic 等多协议的通用 AI 助手"),
+        )
+        ai_card.setFixedSize(200, 180)
 
         empty_room_card = self.tool_box_interface.addCard(self.empty_room_interface, FIF.LAYOUT, self.tr("空闲教室"),
                                                           self.tr("查询当前空闲的教室"))

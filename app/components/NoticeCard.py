@@ -1,9 +1,9 @@
 from PyQt5.QtCore import Qt, pyqtSlot, QPoint, pyqtSignal
 from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout
+from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QSizePolicy
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, TransparentToolButton, FluentIcon, RoundMenu, Action
 
-from notification import Notification
+from notification import Notification, get_source_name
 
 
 class NoticeCard(CardWidget):
@@ -21,35 +21,33 @@ class NoticeCard(CardWidget):
         self.notice = notice
 
         self.titleLabel = BodyLabel(notice.title, self)
-        self.contentLabel = CaptionLabel(notice.source.value + "    " + notice.date.isoformat(), self)
+        details = get_source_name(notice.source) + "    " + notice.date.isoformat()
+        if notice.tags:
+            details += "    ·    " + " · ".join(sorted(str(one) for one in notice.tags))
+        self.contentLabel = CaptionLabel(details, self)
 
         self.hBoxLayout = QHBoxLayout(self)
         self.vBoxLayout = QVBoxLayout()
 
         self.setFixedHeight(73)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.titleLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.contentLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.titleLabel.setToolTip(notice.title)
+        self.contentLabel.setToolTip(details)
         self.contentLabel.setTextColor("#606060", "#d2d2d2")
 
         self.hBoxLayout.setContentsMargins(20, 11, 20, 11)
         self.hBoxLayout.setSpacing(15)
 
-        self.hTagLayout = QHBoxLayout()
-        self.hTagLayout.setContentsMargins(0, 0, 0, 0)
-        self.hTagLayout.setSpacing(10)
-        self.hTagLayout.addWidget(self.contentLabel, Qt.AlignLeft)
         self.tagLabels = []
-        for one in notice.tags:
-            tagLabel = CaptionLabel(one, self)
-            tagLabel.setTextColor("#606060", "#d2d2d2")
-            tagLabel.setFixedHeight(20)
-            self.hTagLayout.addWidget(tagLabel, Qt.AlignVCenter)
-            self.tagLabels.append(tagLabel)
 
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
         self.vBoxLayout.setSpacing(0)
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignVCenter)
-        self.vBoxLayout.addLayout(self.hTagLayout)
+        self.vBoxLayout.addWidget(self.contentLabel, 0, Qt.AlignVCenter)
         self.vBoxLayout.setAlignment(Qt.AlignVCenter)
-        self.hBoxLayout.addLayout(self.vBoxLayout)
+        self.hBoxLayout.addLayout(self.vBoxLayout, stretch=1)
 
         self.hBoxLayout.addSpacing(10)
 
