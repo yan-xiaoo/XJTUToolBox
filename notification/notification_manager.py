@@ -17,7 +17,9 @@ class NotificationManager:
     """Manage independently selectable feeds and their filter rules.
 
     A source failure is recorded in :attr:`last_errors` and does not discard
-    notifications fetched successfully from other subscribed sources.
+    notifications fetched successfully from other subscribed sources. Sources
+    that cannot be attempted are recorded separately in :attr:`last_skipped`
+    so callers do not present expected skip states as crawl failures.
     """
 
     def __init__(
@@ -36,6 +38,7 @@ class NotificationManager:
             for source, source_rules in ruleset.items()
         }
         self.last_errors: dict[str, str] = {}
+        self.last_skipped: dict[str, str] = {}
 
     def add_subscription(
         self,
@@ -90,16 +93,17 @@ class NotificationManager:
     def get_notifications(self, pages: int = 1) -> list[Notification]:
         all_notifications: list[Notification] = []
         self.last_errors = {}
+        self.last_skipped = {}
         for source_id in self.subscription:
             descriptor = source_registry.get(source_id)
             if descriptor is None:
-                self.last_errors[source_id] = "通知源不在当前注册表中，已保留配置但跳过抓取"
+                self.last_skipped[source_id] = "通知源不在当前注册表中，已保留配置但跳过抓取"
                 continue
             if not descriptor.verified:
                 if descriptor.status == "empty":
-                    self.last_errors[source_id] = "栏目存在但当前为空，已跳过抓取"
+                    self.last_skipped[source_id] = "栏目存在但当前为空，已跳过抓取"
                 else:
-                    self.last_errors[source_id] = "通知源尚未通过抓取验证"
+                    self.last_skipped[source_id] = "通知源尚未通过抓取验证"
                 continue
             try:
                 notifications = create_crawler(source_id, pages).get_notifications()
