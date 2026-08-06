@@ -19,6 +19,7 @@ def main():
         '--icon=assets/icons/main_icon.ico',        # 图标
         f'--add-data=assets{path_sep}assets',       # 添加资源文件夹
         f'--add-data=jwxt/templates{path_sep}jwxt/templates', # 添加模板文件夹
+        f'--add-data=notification/sources.json{path_sep}notification', # 通知来源注册表
         '--noconfirm',                              # 覆盖输出目录不询问
         '--clean',                                  # 清理缓存
     ]
