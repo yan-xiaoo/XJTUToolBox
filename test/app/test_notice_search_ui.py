@@ -200,13 +200,48 @@ class NoticeChoiceUITest(unittest.TestCase):
 
     def test_fuzzy_search_filters_and_clear_restores_tree(self):
         widget = self.create_widget()
+        widget.siteItems["gs"].setExpanded(True)
+
+        def tree_items():
+            items = []
+
+            def collect(item):
+                items.append(item)
+                for index in range(item.childCount()):
+                    collect(item.child(index))
+
+            for index in range(widget.tree.topLevelItemCount()):
+                collect(widget.tree.topLevelItem(index))
+            return items
+
+        items = tree_items()
+        expansion_before = {id(item): item.isExpanded() for item in items}
         widget.searchEdit.setText("储能 教学")
         app.processEvents()
         self.assertFalse(widget.sourceItems["gjcnpt/jxyx"].isHidden())
         self.assertTrue(widget.sourceItems["math/bkspy"].isHidden())
+        self.assertTrue(any(
+            item.isExpanded() != expansion_before[id(item)]
+            for item in items
+        ))
         widget.searchEdit.clear()
         app.processEvents()
         self.assertTrue(all(not item.isHidden() for item in widget.sourceItems.values()))
+        self.assertEqual(
+            {id(item): item.isExpanded() for item in items},
+            expansion_before,
+        )
+        self.assertIsNone(widget._searchExpansionState)
+
+        widget.searchEdit.setText("数学")
+        app.processEvents()
+        widget.searchEdit.setText("   ")
+        app.processEvents()
+        self.assertEqual(
+            {id(item): item.isExpanded() for item in items},
+            expansion_before,
+        )
+        self.assertIsNone(widget._searchExpansionState)
 
     def test_search_uses_each_cross_listed_display_name(self):
         widget = self.create_widget()
