@@ -61,17 +61,16 @@ def collect_local_context(
     account_directory = Path(account_directory) if account_directory else None
 
     readers = {
-        "public_notices": lambda: _read_notices(Path(notification_path)) if notification_path else [],
-        "schedule": lambda: _read_schedule(account_directory / "schedule.db") if account_directory else [],
-        "scores": lambda: _read_scores(account_directory / "score.json") if account_directory else [],
-        "attendance": lambda: _read_attendance(account_directory / "attendance_flow.json") if account_directory else [],
+        "public_notices": lambda: _read_notices(Path(notification_path)) if notification_path else None,
+        "schedule": lambda: _read_schedule(account_directory / "schedule.db") if account_directory else None,
+        "scores": lambda: _read_scores(account_directory / "score.json") if account_directory else None,
+        "attendance": lambda: _read_attendance(account_directory / "attendance_flow.json") if account_directory else None,
     }
     for capability_id in enabled:
         if capability_id == "web_search":
             continue
         rows = readers[capability_id]()
-        definition = CAPABILITY_BY_ID[capability_id]
-        if not rows:
+        if rows is None:
             unavailable.append(capability_id)
             continue
         included.append(capability_id)
@@ -92,8 +91,14 @@ def collect_local_context(
     counts: list[tuple[str, int]] = []
     for capability_id, rows in collected:
         definition = CAPABILITY_BY_ID[capability_id]
-        header = f"## {definition.name}（已载入 {len(rows)} 条）\n"
-        body = _bounded_rows(rows, max(0, section_budget - len(header)))
+        header = f"## {definition.name}（已查询，{len(rows)} 条）\n"
+        if rows:
+            body = _bounded_rows(rows, max(0, section_budget - len(header)))
+        else:
+            body = (
+                "- 本机缓存当前暂无记录；这不代表学校系统没有数据。"
+                "回答时不得据此猜测，可建议用户先在对应页面刷新。"
+            )
         sections.append(header + body)
         counts.append((capability_id, len(rows)))
     text = (prefix + "\n\n".join(sections))[:max_characters]
@@ -131,10 +136,10 @@ def _clean(value, limit=120) -> str:
     return " ".join(str(value if value is not None else "").split())[:limit]
 
 
-def _read_notices(path: Path) -> list[str]:
+def _read_notices(path: Path) -> list[str] | None:
     payload = _read_json(path)
     if not isinstance(payload, list):
-        return []
+        return None
     rows = []
     for one in payload[-30:]:
         if not isinstance(one, dict):
@@ -145,9 +150,11 @@ def _read_notices(path: Path) -> list[str]:
     return rows[-20:]
 
 
-def _read_scores(path: Path) -> list[str]:
+def _read_scores(path: Path) -> list[str] | None:
     payload = _read_json(path)
-    rows = payload.get("scores", []) if isinstance(payload, dict) else []
+    if not isinstance(payload, dict) or not isinstance(payload.get("scores"), list):
+        return None
+    rows = payload["scores"]
     result = []
     for one in rows[-50:]:
         if not isinstance(one, dict):
@@ -171,10 +178,10 @@ def _read_scores(path: Path) -> list[str]:
     return result
 
 
-def _read_attendance(path: Path) -> list[str]:
+def _read_attendance(path: Path) -> list[str] | None:
     payload = _read_json(path)
     if not isinstance(payload, list):
-        return []
+        return None
     result = []
     for one in payload[-30:]:
         if not isinstance(one, dict):
@@ -187,9 +194,9 @@ def _read_attendance(path: Path) -> list[str]:
     return result
 
 
-def _read_schedule(path: Path) -> list[str]:
+def _read_schedule(path: Path) -> list[str] | None:
     if not path.is_file():
-        return []
+        return None
     try:
         connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=1)
         try:
@@ -200,7 +207,7 @@ def _read_schedule(path: Path) -> list[str]:
         finally:
             connection.close()
     except (OSError, sqlite3.Error):
-        return []
+        return None
     return [
         f"{_clean(name)}｜第{week}周 周{day} 第{start}-{end}节｜{_clean(location) or '地点未知'}｜{_clean(teacher) or '教师未知'}"
         for name, day, start, end, week, location, teacher in rows

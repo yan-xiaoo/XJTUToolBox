@@ -278,6 +278,65 @@ class CapabilityAndMarkdownTest(unittest.TestCase):
             self.assertIn("线性代数", context.text)
             self.assertIn("主楼", context.text)
 
+    def test_selected_valid_empty_caches_are_sent_as_zero_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            notice = root / "notification.json"
+            notice.write_text("[]", encoding="utf-8")
+            (root / "score.json").write_text(
+                json.dumps({"scores": [], "terms": []}), encoding="utf-8"
+            )
+            (root / "attendance_flow.json").write_text("[]", encoding="utf-8")
+            connection = sqlite3.connect(root / "schedule.db")
+            connection.execute(
+                "CREATE TABLE courseinstance "
+                "(name, day_of_week, start_time, end_time, week_number, location, teacher)"
+            )
+            connection.commit()
+            connection.close()
+
+            context = collect_local_context(
+                ("public_notices", "schedule", "scores", "attendance"),
+                notification_path=notice,
+                account_directory=root,
+            )
+
+            self.assertEqual(
+                set(context.included),
+                {"public_notices", "schedule", "scores", "attendance"},
+            )
+            self.assertFalse(context.unavailable)
+            self.assertEqual(dict(context.counts), {
+                "public_notices": 0,
+                "schedule": 0,
+                "scores": 0,
+                "attendance": 0,
+            })
+            for heading in ("公开通知", "我的课表", "我的成绩", "我的考勤"):
+                self.assertIn(f"## {heading}", context.text)
+            self.assertGreaterEqual(context.text.count("暂无记录"), 4)
+            self.assertIn("不得据此猜测", context.text)
+
+    def test_missing_or_damaged_cache_is_not_misreported_as_empty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "score.json").write_text("not-json", encoding="utf-8")
+            (root / "attendance_flow.json").write_text("{}", encoding="utf-8")
+            (root / "schedule.db").write_text("not-sqlite", encoding="utf-8")
+
+            context = collect_local_context(
+                ("public_notices", "schedule", "scores", "attendance"),
+                notification_path=root / "missing-notices.json",
+                account_directory=root,
+            )
+
+            self.assertFalse(context.included)
+            self.assertEqual(
+                set(context.unavailable),
+                {"public_notices", "schedule", "scores", "attendance"},
+            )
+            self.assertEqual(context.text, "")
+
     def test_all_real_cache_shapes_share_the_budget_and_reach_context(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

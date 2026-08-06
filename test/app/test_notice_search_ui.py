@@ -732,6 +732,28 @@ class AIInterfaceSmokeTest(unittest.TestCase):
         self.assertEqual(widget.inputEdit.toPlainText(), "我的均分多少")
         self.assertIn("成绩", widget.capabilityStatusLabel.text())
 
+    def test_selected_empty_cache_context_starts_request_and_reaches_thread(self):
+        widget = self.create_interfaces()
+        widget.inputEdit.setPlainText("我的均分多少")
+        context = SimpleNamespace(
+            text=(
+                "以下内容来自用户明确勾选的本机数据能力。\n\n"
+                "## 我的成绩（已查询，0 条）\n- 本机缓存当前暂无记录；不得据此猜测。"
+            ),
+            counts=(("scores", 0),),
+            unavailable=(),
+        )
+        with patch.object(widget, "saveConfiguration", return_value=True), \
+             patch.object(widget, "_localCapabilityContext", return_value=context), \
+             patch("app.AIInterface._AIRequestThread") as request_thread:
+            widget._sendMessageFrom(widget.inputEdit)
+
+        request_thread.assert_called_once()
+        self.assertEqual(request_thread.call_args.kwargs["local_context"], context.text)
+        request_thread.return_value.start.assert_called_once_with()
+        self.assertEqual(widget.messages[-1].content, "我的均分多少")
+        self.assertIn("我的成绩 0 条", widget.capabilityStatusLabel.text())
+
     def test_transcript_reacts_to_runtime_light_dark_theme_switch(self):
         widget = self.create_interfaces()
         widget.messages.append(ChatMessage("assistant", "```cpp\n#include <iostream>\n```"))
@@ -815,6 +837,42 @@ class AIInterfaceSmokeTest(unittest.TestCase):
                 self.assertIn(value, sent)
             self.assertNotIn("never-send-this-id", sent)
             self.assertNotIn("never-send-record-id", sent)
+
+    def test_selected_empty_cache_status_reaches_final_provider_messages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "score.json").write_text(
+                json.dumps({"scores": [], "terms": []}), encoding="utf-8"
+            )
+            context = collect_local_context(("scores",), account_directory=root)
+
+            class CapturingClient:
+                def __init__(self):
+                    self.messages = None
+                    self.session = SimpleNamespace(close=lambda: None)
+
+                def complete(self, messages, _config):
+                    self.messages = list(messages)
+                    return SimpleNamespace(
+                        text="ok", model="fixture", input_tokens=1, output_tokens=1
+                    )
+
+            thread = _AIRequestThread(
+                [ChatMessage("system", "base"), ChatMessage("user", "我的均分多少")],
+                ProviderConfig("openai", "https://api.example/v1", "fixture", "key"),
+                local_context=context.text,
+            )
+            client = CapturingClient()
+            thread.ai_client = client
+            outcomes = []
+            thread.succeeded.connect(outcomes.append)
+            thread.run()
+
+            self.assertTrue(outcomes)
+            sent = "\n".join(one.content for one in client.messages)
+            self.assertIn("我的成绩（已查询，0 条）", sent)
+            self.assertIn("暂无记录", sent)
+            self.assertIn("不得据此猜测", sent)
 
     def test_empty_message_does_not_start_request(self):
         widget = self.create_interfaces()
