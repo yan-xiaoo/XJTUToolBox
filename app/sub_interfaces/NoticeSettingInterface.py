@@ -8,7 +8,7 @@ from app.sub_interfaces.NoticeChoiceInterface import NoticeChoiceInterface
 from app.sub_interfaces.NoticeRuleInterface import NoticeRuleInterface
 from app.sub_interfaces.RuleSetInterface import RuleSetInterface
 from app.utils import StyleSheet
-from notification import NotificationManager, Source, Ruleset
+from notification import NotificationManager, Ruleset
 
 
 class NoticeSettingInterface(ScrollArea):
@@ -47,7 +47,7 @@ class NoticeSettingInterface(ScrollArea):
 
         self.vBoxLayout.setContentsMargins(15, 20, 15, 20)
         self.vBoxLayout.addWidget(self.breadcrumbBar)
-        self.vBoxLayout.addWidget(self.stackedWidget, stretch=1, alignment=Qt.AlignHCenter)
+        self.vBoxLayout.addWidget(self.stackedWidget, stretch=1)
 
         self.choiceInterface = None
         self.ruleInterface = None
@@ -105,7 +105,7 @@ class NoticeSettingInterface(ScrollArea):
             if len(self.children_) > 0:
                 self.switchInterface(self.children_[-1].objectName())
 
-    @pyqtSlot(Source)
+    @pyqtSlot(str)
     def onModifyRuleClicked(self, source):
         """
         卡片的“设置过滤规则”按钮被点击时的槽函数
@@ -124,7 +124,7 @@ class NoticeSettingInterface(ScrollArea):
         self.addInterface(self.ruleInterface, self.tr("设置过滤规则"))
         self.switchInterface(self.ruleInterface.objectName())
 
-    @pyqtSlot(Ruleset, Source)
+    @pyqtSlot(Ruleset, str)
     def onRuleSetClicked(self, ruleset, source):
         """
         当“设置过滤规则”的“编辑规则”按钮被点击时的槽函数

@@ -171,7 +171,7 @@ class TagIncludeFilter(Filter):
         return f"标签包含 {self.tag} "
 
 
-class TagExcludeFilter:
+class TagExcludeFilter(Filter):
     """
     过滤器：标签不包含指定的字符串
     """

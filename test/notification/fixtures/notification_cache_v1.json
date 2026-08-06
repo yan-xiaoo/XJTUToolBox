@@ -1,0 +1,20 @@
+[
+  {
+    "title": "关于开展研究生培养工作的通知",
+    "link": "https://gs.xjtu.edu.cn/info/example.htm",
+    "source": "研究生院",
+    "description": "",
+    "tags": ["培养工作"],
+    "date": "2026-08-01",
+    "is_read": true
+  },
+  {
+    "title": "本科教学考试安排",
+    "link": "https://dean.xjtu.edu.cn/info/example.htm",
+    "source": "教务处",
+    "description": "",
+    "tags": ["考试"],
+    "date": "2026-07-31",
+    "is_read": false
+  }
+]
