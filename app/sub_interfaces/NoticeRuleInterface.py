@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QFrame, QVBoxLayout
 from qfluentwidgets import BodyLabel, SubtitleLabel, PrimaryPushButton
 
 from ..components.NoticeRuleCard import NoticeRuleCard, AddRuleCard
-from notification import Source, NotificationManager, Ruleset
+from notification import NotificationManager, Ruleset, get_source_name
 from ..utils.cache import dataManager
 
 
@@ -12,11 +12,11 @@ class NoticeRuleInterface(QFrame):
     本类为设置通知来源过滤规则的具体页面
     """
     # 修改规则集的信号
-    editRuleSet = pyqtSignal(Ruleset, Source)
+    editRuleSet = pyqtSignal(Ruleset, str)
     # 返回上一级的信号
     quit = pyqtSignal()
 
-    def __init__(self, manager: NotificationManager, source: Source, parent=None):
+    def __init__(self, manager: NotificationManager, source: str, parent=None):
         """
         创建一个设置过滤规则的页面
         :param manager: 通知管理器
@@ -34,7 +34,8 @@ class NoticeRuleInterface(QFrame):
         self.cards = []
 
         # 标题，通知来源的名称
-        self.titleLabel = SubtitleLabel(source.value + self.tr("网站的过滤规则"), self)
+        self.titleLabel = SubtitleLabel(get_source_name(source) + self.tr("网站的过滤规则"), self)
+        self.titleLabel.setWordWrap(True)
         self.titleLabel.setContentsMargins(10, 15, 0, 0)
         self.vBoxLayout.addWidget(self.titleLabel, alignment=Qt.AlignHCenter)
         self.vBoxLayout.addStretch()

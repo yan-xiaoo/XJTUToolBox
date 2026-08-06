@@ -5,18 +5,19 @@ import sys
 
 from PyQt5.QtCore import Qt, pyqtSlot, QUrl, QTimer
 from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QActionGroup
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QActionGroup, QSizePolicy
 from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton, \
     TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType, InfoBarPosition, InfoBar, CaptionLabel, \
-    MessageBox
+    MessageBox, SearchLineEdit
 
+from app.search import fuzzy_score, rank_items
 from ..components.NoticeCard import NoticeCard
 from ..threads.NoticeThread import NoticeThread
 from ..threads.ProcessWidget import ProcessWidget
 from ..utils import StyleSheet, cfg
 from ..utils.notification import notify
 from ..utils.cache import cacheManager, dataManager
-from notification import NotificationManager, Notification
+from notification import NotificationManager, Notification, get_source_name
 
 
 class NoticeInterface(ScrollArea):
@@ -28,6 +29,8 @@ class NoticeInterface(ScrollArea):
         self.view = QWidget(self)
         self.view.setObjectName("view")
         self.vBoxLayout = QVBoxLayout(self.view)
+        self.vBoxLayout.setContentsMargins(24, 18, 24, 18)
+        self.vBoxLayout.setSpacing(10)
 
         self.main_window = main_window
 
@@ -43,9 +46,9 @@ class NoticeInterface(ScrollArea):
         self.commandBar.addAction(self.refreshAction)
         self.commandBar.addAction(self.confirmAction)
         # 排序菜单的按钮
-        button = TransparentDropDownPushButton(FluentIcon.SYNC, self.tr("排序方式"))
-        button.setFixedHeight(34)
-        setFont(button, 12)
+        self.sortButton = TransparentDropDownPushButton(FluentIcon.SYNC, self.tr("排序方式"))
+        self.sortButton.setFixedHeight(34)
+        setFont(self.sortButton, 12)
         # 几个排序选项
         self.sourceSortGroup = QActionGroup(self)
         self.sourceUpAction = Action(FluentIcon.UP, self.tr("来源正序"), self, checkable=True)
@@ -84,14 +87,32 @@ class NoticeInterface(ScrollArea):
             self.timeDownAction
         ])
 
-        button.setMenu(self.sortMenu)
-        self.commandBar.addWidget(button)
+        self.sortButton.setMenu(self.sortMenu)
+        self.commandBar.addWidget(self.sortButton)
 
-        self.commandBar.setMinimumWidth(450)
-        self.vBoxLayout.addWidget(self.commandBar, alignment=Qt.AlignTop | Qt.AlignHCenter)
+        self.commandBar.setMinimumWidth(0)
+        self.commandBar.setMaximumWidth(760)
+        self.commandBar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.vBoxLayout.addWidget(self.commandBar, alignment=Qt.AlignTop)
+        self.searchEdit = SearchLineEdit(self)
+        self.searchEdit.setPlaceholderText(self.tr("搜索通知标题、来源、标签或日期"))
+        self.searchEdit.setClearButtonEnabled(True)
+        self.searchEdit.setMaximumWidth(760)
+        self.searchEdit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.searchEdit.setFixedHeight(38)
+        self.searchEdit.textChanged.connect(self.onNoticeSearchChanged)
+        self.vBoxLayout.addWidget(self.searchEdit, alignment=Qt.AlignTop)
+        self.statusLayout = QHBoxLayout()
+        self.statusLayout.setContentsMargins(0, 0, 0, 0)
+        self.statusLayout.setSpacing(12)
+        self.searchResultLabel = CaptionLabel(self)
+        self.searchResultLabel.setVisible(False)
+        self.statusLayout.addWidget(self.searchResultLabel)
+        self.statusLayout.addStretch(1)
         self.filterHintLabel = CaptionLabel(self.tr("已启用过滤规则"), self)
-        self.vBoxLayout.addWidget(self.filterHintLabel, alignment=Qt.AlignTop | Qt.AlignHCenter)
+        self.statusLayout.addWidget(self.filterHintLabel)
         self.filterHintLabel.setVisible(False)
+        self.vBoxLayout.addLayout(self.statusLayout)
 
         # 通知管理器
         self.noticeManager = self.load_or_create_manager()
@@ -100,7 +121,9 @@ class NoticeInterface(ScrollArea):
         self.noticeThread.error.connect(self.onThreadError)
         self.noticeThread.finished.connect(self.unlock)
         self.processWidget = ProcessWidget(self.noticeThread, self, stoppable=True)
-        self.vBoxLayout.addWidget(self.processWidget, alignment=Qt.AlignTop | Qt.AlignHCenter)
+        self.processWidget.setMaximumWidth(760)
+        self.processWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.vBoxLayout.addWidget(self.processWidget, alignment=Qt.AlignTop)
         self.processWidget.setVisible(False)
 
         # 没有配置时的界面
@@ -134,10 +157,13 @@ class NoticeInterface(ScrollArea):
         # 通知显示界面
         self.noticeFrame = QFrame(self.view)
         self.noticeFrameLayout = QVBoxLayout(self.noticeFrame)
+        self.noticeFrameLayout.setContentsMargins(0, 0, 0, 0)
+        self.noticeFrameLayout.setAlignment(Qt.AlignTop)
+        self.noticeFrame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         # 通知卡片对象
         self.noticeWidgets = []
 
-        self.vBoxLayout.addWidget(self.noticeFrame, stretch=1, alignment=Qt.AlignHCenter)
+        self.vBoxLayout.addWidget(self.noticeFrame, stretch=1)
 
         self.updateFilterHint()
 
@@ -270,7 +296,7 @@ class NoticeInterface(ScrollArea):
         self.notices.sort(key=lambda x: x.date, reverse=reverse_time)
 
         if source_primary:
-            self.notices.sort(key=lambda x: x.source.value, reverse=reverse_source)
+            self.notices.sort(key=lambda x: get_source_name(x.source), reverse=reverse_source)
 
         self.notices.sort(key=lambda x: x.is_read, reverse=False)
         # 更新通知列表
@@ -287,7 +313,7 @@ class NoticeInterface(ScrollArea):
         仅对通知数据进行排序，不更新UI
         """
         self.notices.sort(key=lambda x: x.date, reverse=True)
-        self.notices.sort(key=lambda x: x.source.value, reverse=False)
+        self.notices.sort(key=lambda x: get_source_name(x.source), reverse=False)
         self.notices.sort(key=lambda x: x.is_read, reverse=False)
 
     def sort_by_selected_method(self):
@@ -298,6 +324,31 @@ class NoticeInterface(ScrollArea):
         reverse_source = self.sourceUpAction.isChecked()
         reverse_time = self.timeUpAction.isChecked()
         self.sort_notices(source_primary, reverse_source, reverse_time)
+
+    @staticmethod
+    def _noticeSearchValues(notice: Notification):
+        return (
+            notice.title,
+            get_source_name(notice.source),
+            notice.source,
+            notice.date.isoformat(),
+            *sorted(notice.tags),
+        )
+
+    def _noticeMatchesCurrentSearch(self, notice: Notification) -> bool:
+        return fuzzy_score(self.searchEdit.text(), self._noticeSearchValues(notice)) is not None
+
+    @pyqtSlot(str)
+    def onNoticeSearchChanged(self, query: str) -> None:
+        ranked = rank_items(self.notices, query, self._noticeSearchValues)
+        matched_ids = {id(notice) for notice in ranked}
+        for widget in self.noticeWidgets:
+            widget.setVisible(id(widget.notice) in matched_ids)
+        if query.strip():
+            self.searchResultLabel.setText(self.tr(f"找到 {len(ranked)} / {len(self.notices)} 条通知"))
+            self.searchResultLabel.setVisible(True)
+        else:
+            self.searchResultLabel.setVisible(False)
 
     @pyqtSlot(Notification)
     def onNoticeChanged(self, notice):
@@ -331,6 +382,7 @@ class NoticeInterface(ScrollArea):
             notice_card = NoticeCard(notice, self.noticeFrame)
             notice_card.noticeChanged.connect(self.onNoticeChanged)
             notice_card.noticeClicked.connect(self.onNoticeClicked)
+            notice_card.setVisible(self._noticeMatchesCurrentSearch(notice))
             # 添加到通知显示界面
             self.noticeFrameLayout.addWidget(notice_card)
             # 添加到通知列表
@@ -393,7 +445,7 @@ class NoticeInterface(ScrollArea):
         sources = set()
         count = len(filtered_notices)
         for notice in filtered_notices:
-            sources.add(notice.source.value)
+            sources.add(get_source_name(notice.source))
         try:
             if count > 0:
                 notify(title=self.tr("西安交通大学网站有新的通知"), message=f"{self.tr('来自')} {', '.join(sources)} {self.tr('的')} {count} {self.tr('条新通知')}")
@@ -460,22 +512,22 @@ class NoticeInterface(ScrollArea):
         """
         self.save_manager()
         # 过滤通知
-        index = 0
-        while True:
-            if index >= len(self.notices):
-                break
-            one = self.notices[index]
-            if not self.noticeManager.satisfy_filter(one):
-                self.notices.pop(index)
-                try:
-                    one_widget = self.noticeWidgets[index]
-                    self.noticeFrameLayout.removeWidget(one_widget)
-                    self.noticeWidgets.remove(one_widget)
-                    one_widget.deleteLater()
-                except IndexError:
-                    pass
-                index -= 1
-            index += 1
+        removed_ids = {
+            id(notice)
+            for notice in self.notices
+            if not self.noticeManager.satisfy_filter(notice)
+        }
+        self.notices = [notice for notice in self.notices if id(notice) not in removed_ids]
+        for widget in list(self.noticeWidgets):
+            if id(widget.notice) not in removed_ids:
+                continue
+            self.noticeFrameLayout.removeWidget(widget)
+            self.noticeWidgets.remove(widget)
+            widget.deleteLater()
+        self._pendingNotices = [
+            notice for notice in self._pendingNotices if id(notice) not in removed_ids
+        ]
+        self.onNoticeSearchChanged(self.searchEdit.text())
 
         self.save_notification()
         self.updateFilterHint()
@@ -509,6 +561,7 @@ class NoticeInterface(ScrollArea):
             notice_card = NoticeCard(notice, self.noticeFrame)
             notice_card.noticeChanged.connect(self.onNoticeChanged)
             notice_card.noticeClicked.connect(self.onNoticeClicked)
+            notice_card.setVisible(self._noticeMatchesCurrentSearch(notice))
             # 添加到通知显示界面
             self.noticeFrameLayout.addWidget(notice_card)
             # 添加到通知列表
@@ -522,4 +575,3 @@ class NoticeInterface(ScrollArea):
         开始延迟加载通知卡片
         """
         self._loadTimer.start(100)  # 每100ms加载一批通知
-

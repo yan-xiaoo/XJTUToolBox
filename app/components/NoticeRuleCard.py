@@ -1,5 +1,5 @@
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot
-from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QGraphicsOpacityEffect
+from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QGraphicsOpacityEffect, QSizePolicy
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, PushButton, TransparentToolButton, PrimaryPushButton, \
     FlyoutViewBase, Flyout
 from qfluentwidgets import FluentIcon as FIF
@@ -54,6 +54,9 @@ class AddRuleCard(CardWidget):
         self.vBoxLayout = QVBoxLayout()
 
         self.setFixedHeight(73)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.titleLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.contentLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.contentLabel.setTextColor("#606060", "#d2d2d2")
 
         self.hBoxLayout.setContentsMargins(20, 11, 20, 11)
@@ -96,7 +99,12 @@ class NoticeRuleCard(CardWidget):
         self.hBoxLayout = QHBoxLayout(self)
         self.vBoxLayout = QVBoxLayout()
 
-        self.setFixedHeight(73)
+        self.setFixedHeight(104)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.titleLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.contentLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.titleLabel.setToolTip(self.titleLabel.text())
+        self.contentLabel.setToolTip(self.contentLabel.text())
         self.contentLabel.setTextColor("#606060", "#d2d2d2")
 
         self.hBoxLayout.setContentsMargins(20, 11, 20, 11)
@@ -122,9 +130,14 @@ class NoticeRuleCard(CardWidget):
         if not self.ruleset.enable:
             self.opacity_effect.setOpacity(0.5)
 
-        self.hBoxLayout.addWidget(self.editButton, 0, Qt.AlignRight)
-        self.hBoxLayout.addWidget(self.enableButton, 0, Qt.AlignRight)
-        self.hBoxLayout.addWidget(self.deleteButton, 0, Qt.AlignRight)
+        self.actionLayout = QHBoxLayout()
+        self.actionLayout.setContentsMargins(0, 4, 0, 0)
+        self.actionLayout.setSpacing(8)
+        self.actionLayout.addStretch(1)
+        self.actionLayout.addWidget(self.editButton)
+        self.actionLayout.addWidget(self.enableButton)
+        self.actionLayout.addWidget(self.deleteButton)
+        self.vBoxLayout.addLayout(self.actionLayout)
 
     def updateDisplay(self):
         """

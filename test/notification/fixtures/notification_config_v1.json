@@ -1,0 +1,20 @@
+{
+  "subscription": ["教务处", "研究生院", "软件学院", "已下线的未来来源"],
+  "ruleset": {
+    "教务处": [
+      {
+        "name": "考试通知",
+        "filters": [{"class": "TitleIncludeFilter", "title": "考试"}],
+        "enable": true
+      }
+    ],
+    "研究生院": [
+      {
+        "name": "培养工作",
+        "filters": [{"class": "TagIncludeFilter", "tag": "培养工作"}],
+        "enable": true
+      }
+    ],
+    "已下线的未来来源": []
+  }
+}

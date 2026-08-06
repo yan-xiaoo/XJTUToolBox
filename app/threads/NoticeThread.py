@@ -43,5 +43,11 @@ class NoticeThread(ProcessThread):
                 self.canceled.emit()
                 return
 
+            if self.notice_manager.last_errors:
+                failed = list(self.notice_manager.last_errors.items())
+                details = "\n".join(f"{source}: {error}" for source, error in failed[:3])
+                if len(failed) > 3:
+                    details += self.tr("\n另有 {count} 个来源失败").format(count=len(failed) - 3)
+                self.error.emit(self.tr("部分来源获取失败"), details)
             self.notices.emit(notices)
             self.hasFinished.emit()

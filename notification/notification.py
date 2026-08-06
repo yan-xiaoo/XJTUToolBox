@@ -1,14 +1,14 @@
 import datetime
 from typing import Iterable
 
-from .source import Source
+from .source import migrate_notification_source, normalize_source_id
 
 
 class Notification:
     """
     各个学校官网上的一条通知
     """
-    def __init__(self, title, link, source: Source, description="", tags: Iterable[str] = None, date: datetime.date = None, is_read=False):
+    def __init__(self, title, link, source: str, description="", tags: Iterable[str] = None, date: datetime.date = None, is_read=False):
         """
         创建一条通知。由于网站显示通知的页面都不显示通知的内容，此处不存储通知的内容。
         :param title: 通知标题
@@ -21,7 +21,7 @@ class Notification:
         """
         self.title = title
         self.link = link
-        self.source = source
+        self.source = normalize_source_id(source)
         self.description = description
         # 使用集合存储去重
         self.tags = set(tags) if tags else set()
@@ -51,7 +51,7 @@ class Notification:
         return {
             "title": self.title,
             "link": self.link,
-            "source": self.source.value,
+            "source": self.source,
             "description": self.description,
             "tags": list(self.tags),
             "date": self.date.isoformat(),
@@ -63,9 +63,9 @@ class Notification:
         return cls(
             title=data["title"],
             link=data["link"],
-            source=Source(data["source"]),
-            description=data["description"],
-            tags=data["tags"],
+            source=migrate_notification_source(data["source"]),
+            description=data.get("description", ""),
+            tags=data.get("tags", []),
             date=datetime.date.fromisoformat(data["date"]),
-            is_read=data["is_read"]
+            is_read=data.get("is_read", False)
         )
