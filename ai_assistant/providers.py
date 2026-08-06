@@ -16,6 +16,13 @@ import requests
 
 
 Protocol = Literal["openai", "anthropic", "gemini", "ollama"]
+DEPRECATED_DEEPSEEK_MODELS = frozenset({"deepseek-chat", "deepseek-reasoner"})
+
+
+def is_official_deepseek_endpoint(base_url: str) -> bool:
+    """Return whether a URL targets DeepSeek's official API host."""
+
+    return (urlparse(str(base_url).strip()).hostname or "").lower() == "api.deepseek.com"
 
 
 @dataclass(frozen=True)
@@ -29,7 +36,7 @@ class ProviderPreset:
 
 
 PRESETS: tuple[ProviderPreset, ...] = (
-    ProviderPreset("deepseek", "DeepSeek", "openai", "https://api.deepseek.com/v1", "deepseek-chat"),
+    ProviderPreset("deepseek", "DeepSeek V4", "openai", "https://api.deepseek.com/v1", "deepseek-v4-flash"),
     ProviderPreset("openai", "OpenAI", "openai", "https://api.openai.com/v1", "gpt-4.1-mini"),
     ProviderPreset("anthropic", "Anthropic Claude", "anthropic", "https://api.anthropic.com/v1", "claude-sonnet-4-5"),
     ProviderPreset("gemini", "Google Gemini", "gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
@@ -123,8 +130,11 @@ def validate_config(config: ProviderConfig) -> ProviderConfig:
         raise ValueError("Base URL 不得包含查询参数或片段，API Key 请填写在专用字段")
     if parsed.scheme == "http" and parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("非本机 AI 端点必须使用 HTTPS")
-    if not config.model.strip() or len(config.model.strip()) > 200:
+    model = config.model.strip()
+    if not model or len(model) > 200:
         raise ValueError("请填写有效的模型 ID")
+    if is_official_deepseek_endpoint(config.base_url) and model.lower() in DEPRECATED_DEEPSEEK_MODELS:
+        raise ValueError("deepseek-chat 与 deepseek-reasoner 已停用，请改用 deepseek-v4-flash 或 deepseek-v4-pro")
     if not 1 <= int(config.max_output_tokens) <= 32768:
         raise ValueError("最大输出 token 必须在 1–32768 之间")
     if not 0 <= float(config.temperature) <= 2:
@@ -134,7 +144,7 @@ def validate_config(config: ProviderConfig) -> ProviderConfig:
     return ProviderConfig(
         protocol=config.protocol,
         base_url=config.base_url.strip().rstrip("/"),
-        model=config.model.strip(),
+        model=model,
         api_key=config.api_key.strip(),
         max_output_tokens=int(config.max_output_tokens),
         temperature=float(config.temperature),
