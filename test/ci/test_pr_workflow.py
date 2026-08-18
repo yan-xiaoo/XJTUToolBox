@@ -76,7 +76,7 @@ def _owned_modules(shards: tuple[Shard, ...]) -> dict[str, list[str]]:
     owners: dict[str, list[str]] = {}
     for shard in shards:
         for directory in shard.discovery_dirs:
-            for path in sorted((REPOSITORY_ROOT / directory).glob("*.py")):
+            for path in sorted((REPOSITORY_ROOT / directory).rglob("*.py")):
                 if path.name == "__init__.py":
                     continue
                 owners.setdefault(_module_path(path), []).append(shard.id)
@@ -162,6 +162,17 @@ class TestShardContract(unittest.TestCase):
                         (REPOSITORY_ROOT / Path(*module.split("."))).with_suffix(".py").is_file(),
                         module,
                     )
+
+    def test_owner_inventory_recurses_with_unittest_discovery(self) -> None:
+        owned = _owned_modules(SHARDS)
+        for shard in SHARDS:
+            for directory in shard.discovery_dirs:
+                expected = {
+                    _module_path(path)
+                    for path in (REPOSITORY_ROOT / directory).rglob("*.py")
+                    if path.name != "__init__.py"
+                }
+                self.assertLessEqual(expected, set(owned))
 
 
 class TestPreflight(unittest.TestCase):
