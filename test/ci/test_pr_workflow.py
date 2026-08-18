@@ -41,6 +41,7 @@ ARM_APT_PACKAGES = (
     "python3-dev",
     "python3-venv",
     "python3-pyqt5",
+    "python3-pyqt5.qtmultimedia",
     "python3-pyqt5.qtsvg",
     "python3-pyqt5.qtx11extras",
 )
@@ -54,6 +55,8 @@ ARM_SUPPLEMENTAL_PINS = {
 
 ARM_IMPORTS = (
     "PyQt5",
+    "PyQt5.QtMultimedia",
+    "PyQt5.QtMultimediaWidgets",
     "PyQt5.QtSvg",
     "PyQt5.QtX11Extras",
     "qfluentwidgets",
