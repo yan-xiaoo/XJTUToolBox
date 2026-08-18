@@ -30,15 +30,26 @@ class Lesson:
         """
         将课程对象转换为字典输出
         """
-        return {"class_name": self.class_name, "class_code": self.class_code,
-                "teachers": self.teachers, "place": self.place}
+        result = {
+            "class_name": self.class_name,
+            "class_code": self.class_code,
+            "teachers": self.teachers,
+        }
+        if self.place is not None:
+            result["place"] = self.place
+        return result
 
     @classmethod
     def loads(cls, diction) -> "Lesson":
         """
         从字典中恢复课程对象信息
         """
-        return cls(diction["class_name"], diction["class_code"], diction["teachers"], diction['place'])
+        return cls(
+            diction["class_name"],
+            diction["class_code"],
+            diction["teachers"],
+            diction.get("place"),
+        )
 
 
 class _LessonEncoder(json.JSONEncoder):
@@ -49,6 +60,6 @@ class _LessonEncoder(json.JSONEncoder):
 
 
 def _lesson_object_hook(dct):
-    if "class_name" in dct and "class_code" in dct and "teachers" in dct and 'place' in dct:
+    if "class_name" in dct and "class_code" in dct and "teachers" in dct:
         return Lesson.loads(dct)
     return dct
