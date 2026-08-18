@@ -31,3 +31,14 @@ YWTB_LOGIN_URL = "https://login.xjtu.edu.cn/cas/login?service=https%3A%2F%2Fywtb
 GMIS_LOGIN_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1036&state=abcd1234&redirectUri=http://gmis.xjtu.edu.cn/pyxx/sso/login&responseType=code&scope=user_info"
 # 研究生评教系统的登录地址
 GSTE_LOGIN_URL = "https://cas.xjtu.edu.cn/login?TARGET=http%3A%2F%2Fgste.xjtu.edu.cn%2Flogin.do"
+
+# 校园卡
+CAMPUS_CARD_LOGIN_URL = (
+    "https://ncard.xjtu.edu.cn/berserker-base/redirect?type=login&loginFrom=h5&synAccessSource=h5"
+)
+
+# 一卡通 / 图书馆座位等 H5 接口会校验 UA，桌面 Chrome 会被直接拒绝。
+MOBILE_BROWSER_UA = (
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+)

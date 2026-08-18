@@ -198,6 +198,13 @@ class HomeFrame(QWidget):
                 'content': self.tr("查看作业、课件与课程回放"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.lms_interface),
                 'color': LinkCard.LinkCardColor.SKY_BLUE
+            },
+            "campus_card": {
+                'icon': FIF.FOLDER.icon(theme=Theme.DARK),
+                'title': self.tr("校园卡"),
+                'content': self.tr("查询余额与消费流水"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.campus_card_interface),
+                'color': LinkCard.LinkCardColor.GREEN
             }
         }
 
