@@ -31,3 +31,15 @@ YWTB_LOGIN_URL = "https://login.xjtu.edu.cn/cas/login?service=https%3A%2F%2Fywtb
 GMIS_LOGIN_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1036&state=abcd1234&redirectUri=http://gmis.xjtu.edu.cn/pyxx/sso/login&responseType=code&scope=user_info"
 # 研究生评教系统的登录地址
 GSTE_LOGIN_URL = "https://cas.xjtu.edu.cn/login?TARGET=http%3A%2F%2Fgste.xjtu.edu.cn%2Flogin.do"
+
+# 学籍档案（hello / 迎新）
+HELLO_LOGIN_URL = (
+    "https://org.xjtu.edu.cn/openplatform/oauth/authorize"
+    "?appId=966&redirectUri=http://hello.xjtu.edu.cn/yingxin/login/xjtu/oauth/pc"
+    "&responseType=code&scope=user_info&state=pc"
+)
+
+# 体测
+FITNESS_LOGIN_URL = (
+    "https://tyxylp.xjtu.edu.cn/bdlp_h5_fitness_test/public/index.php/index/login/xjtuLogin"
+)
