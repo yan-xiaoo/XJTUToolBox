@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -130,6 +132,15 @@ def arm_pin_problems(workflow: str) -> set[str]:
         if f"{package}=={expected_version}" not in arm_job:
             problems.add(package)
     return problems
+
+
+def _gate_script(workflow: str) -> str:
+    marker = "      - name: Check required job results"
+    if marker not in workflow:
+        return ""
+    step = workflow.split(marker, 1)[1]
+    match = re.search(r"(?ms)^        run: \|\n((?:          .*\n?)*)", step)
+    return textwrap.dedent(match.group(1)) if match else ""
 
 
 class TestShardContract(unittest.TestCase):
@@ -312,6 +323,45 @@ class TestWorkflowContract(unittest.TestCase):
         ):
             with self.subTest(job=job):
                 self.assertIn(f"${{{{ needs.{job}.result }}}}", self.workflow)
+
+    def test_gate_rejects_every_non_success_result(self) -> None:
+        script = _gate_script(self.workflow)
+        self.assertTrue(script, "CI Gate shell script is missing")
+        gate_env = {
+            "CONTRACT": "success",
+            "SHARDS": "success",
+            "ARM_SHARDS": "success",
+            "REGRESSIONS": "success",
+        }
+        result_labels = {
+            "CONTRACT": "test-contract",
+            "SHARDS": "test-shards",
+            "ARM_SHARDS": "linux-arm-shards",
+            "REGRESSIONS": "existing-bug-regressions",
+        }
+
+        success = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", script],
+            env=gate_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, success.returncode, success.stderr)
+
+        for variable in gate_env:
+            for result in ("failure", "cancelled", "skipped"):
+                with self.subTest(variable=variable, result=result):
+                    mutated_env = gate_env | {variable: result}
+                    rejected = subprocess.run(
+                        ["bash", "-euo", "pipefail", "-c", script],
+                        env=mutated_env,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertNotEqual(0, rejected.returncode)
+                    self.assertIn(f"{result_labels[variable]}={result}", rejected.stdout)
 
 
 if __name__ == "__main__":
