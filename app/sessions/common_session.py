@@ -64,6 +64,8 @@ class CommonLoginSession(metaclass=ABCMeta):
     supports_webvpn = False
     # 自动检测为校外网络时，当前站点是否需要通过 WebVPN 访问。
     use_webvpn_when_off_campus = True
+    # 非空时覆盖共享后端的桌面 UA。一卡通、图书馆座位等站点会校验移动端标识。
+    user_agent = ""
 
     def __init__(self, backend: SessionBackend | None = None, site_key: str | None = None,
                  timeout: int = 15 * 60) -> None:
@@ -193,6 +195,8 @@ class CommonLoginSession(metaclass=ABCMeta):
                 raise TypeError("headers should be a mapping")
             for key, value in request_headers.items():
                 headers[str(key)] = str(value)
+        if self.user_agent:
+            headers["User-Agent"] = self.user_agent
 
         prepared_url = self.prepare_url_for_access_mode(url, skip_webvpn_rewrite=skip_webvpn_rewrite)
         prepared_headers = self.prepare_headers_for_access_mode(headers, skip_webvpn_rewrite=skip_webvpn_rewrite)
