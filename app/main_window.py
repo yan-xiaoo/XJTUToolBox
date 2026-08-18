@@ -32,6 +32,8 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
+from .sessions.jiaocai_session import JiaocaiSession
+from .TextbookInterface import TextbookInterface
 from .sub_interfaces import LoginInterface
 from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
 from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
@@ -62,6 +64,7 @@ def registerSession():
     SessionManager.global_register(GSTESession, "gste")
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
+    SessionManager.global_register(JiaocaiSession, "jiaocai")
 
 
 class MacReopenFilter(QObject):
@@ -201,6 +204,8 @@ class MainWindow(MSFluentWindow):
         self.lms_interface = LMSInterface(self)
         QApplication.processEvents()
         self.venue_interface = VenueInterface(self)
+        QApplication.processEvents()
+        self.textbook_interface = TextbookInterface(self)
         QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
@@ -363,6 +368,12 @@ class MainWindow(MSFluentWindow):
         empty_room_card = self.tool_box_interface.addCard(self.empty_room_interface, FIF.LAYOUT, self.tr("空闲教室"),
                                                           self.tr("查询当前空闲的教室"))
         empty_room_card.setFixedSize(200, 180)
+
+        textbook_card = self.tool_box_interface.addCard(
+            self.textbook_interface, FIF.BOOK_SHELF, self.tr("教材全文"),
+            self.tr("检索教材并阅读全文"),
+        )
+        textbook_card.setFixedSize(200, 180)
 
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
