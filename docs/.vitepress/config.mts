@@ -174,6 +174,7 @@ export default withMermaid(defineConfig({
           text: '基础与机制',
           items: [
             { text: '开发环境搭建', link: '/development/setup' },
+            { text: '测试与 PR 门禁', link: '/development/testing' },
             { text: '软件模块介绍', link: '/development/introduction' },
             { text: '认证与登录系统', link: '/development/auth' },
             { text: 'Session 管理设计', link: '/development/session' },

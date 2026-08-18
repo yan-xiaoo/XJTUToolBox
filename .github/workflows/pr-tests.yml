@@ -1,0 +1,126 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-suite:
+    name: Full suite (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            python-version: "3.10"
+          - os: ubuntu-22.04
+            python-version: "3.13"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-14
+            python-version: "3.12"
+    env:
+      PYTHONUTF8: "1"
+      QT_QPA_PLATFORM: offscreen
+      QT_OPENGL: software
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.3"
+          enable-cache: true
+
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Run full test suite
+        run: uv run --frozen python -m unittest discover -s test -t . -p "*.py" -v
+
+  existing-bug-regressions:
+    name: Existing bug regressions
+    runs-on: ubuntu-22.04
+    env:
+      PYTHONUTF8: "1"
+      QT_QPA_PLATFORM: offscreen
+      QT_OPENGL: software
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.3"
+          enable-cache: true
+
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Run historical bug regressions
+        run: >-
+          uv run --frozen python -m unittest -v
+          test.ai_assistant.test_ai_features
+          test.app.test_notice_search_ui
+          test.notification.test_notification_sources
+          test.app.test_notice_thread
+          test.schedule.test_lesson
+
+      - name: Run Issue 53 crawler challenge regression
+        run: uv run --frozen python -m unittest -v test.test_crawler_challenge
+
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs: [full-suite, existing-bug-regressions]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required job results
+        env:
+          FULL_SUITE: ${{ needs.full-suite.result }}
+          REGRESSIONS: ${{ needs.existing-bug-regressions.result }}
+        run: |
+          if [[ "$FULL_SUITE" != "success" || "$REGRESSIONS" != "success" ]]; then
+            echo "::error::full-suite=$FULL_SUITE existing-bug-regressions=$REGRESSIONS"
+            exit 1
+          fi
+          echo "All required tests passed."
