@@ -198,6 +198,13 @@ class HomeFrame(QWidget):
                 'content': self.tr("查看作业、课件与课程回放"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.lms_interface),
                 'color': LinkCard.LinkCardColor.SKY_BLUE
+            },
+            "transcript": {
+                'icon': FIF.CERTIFICATE.icon(theme=Theme.DARK),
+                'title': self.tr("电子成绩单"),
+                'content': self.tr("生成盖章 PDF 成绩单"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.transcript_interface),
+                'color': LinkCard.LinkCardColor.YELLOW
             }
         }
 
