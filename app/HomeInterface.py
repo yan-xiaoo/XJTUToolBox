@@ -198,6 +198,13 @@ class HomeFrame(QWidget):
                 'content': self.tr("查看作业、课件与课程回放"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.lms_interface),
                 'color': LinkCard.LinkCardColor.SKY_BLUE
+            },
+            "faculty": {
+                'icon': FIF.EDUCATION.icon(theme=Theme.DARK),
+                'title': self.tr("教师主页"),
+                'content': self.tr("检索教师主页"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.faculty_interface),
+                'color': LinkCard.LinkCardColor.SKY_BLUE
             }
         }
 
