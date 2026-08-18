@@ -148,7 +148,12 @@ jobs:
             uv sync --frozen --group dev
             uv pip install --python .venv/bin/python --no-deps pyqt-fluent-widgets==1.8.7 pyqt5-frameless-window==0.7.5 darkdetect==0.8.0 xcffib==1.12.0
             .venv/bin/python -m test.ci.preflight --expected-machine aarch64 --require-import PyQt5 --require-import PyQt5.QtMultimedia --require-import PyQt5.QtMultimediaWidgets --require-import PyQt5.QtSvg --require-import PyQt5.QtX11Extras --require-import qfluentwidgets --require-import qframelesswindow --require-import xcffib
-            .venv/bin/python -m test.ci.run_shard ${{ matrix.shard.id }}
+            # QEMU may crash in QtMultimedia/GStreamer teardown after all UI tests pass.
+            if [ "${{ matrix.shard.id }}" = "desktop-ui" ]; then
+              .venv/bin/python -m test.ci.run_shard desktop-ui --hard-exit-on-success
+            else
+              .venv/bin/python -m test.ci.run_shard "${{ matrix.shard.id }}"
+            fi
 
   existing-bug-regressions:
     name: Existing bug regressions

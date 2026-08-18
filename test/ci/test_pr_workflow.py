@@ -7,8 +7,9 @@ import subprocess
 import textwrap
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
+from test.ci import run_shard
 from test.ci.preflight import canonical_machine, verify_environment
 from test.ci.shards import SHARDS, Shard
 
@@ -123,6 +124,43 @@ def _arm_job(workflow: str) -> str:
     return section[: next_job.start()] if next_job else section
 
 
+def _hosted_job(workflow: str) -> str:
+    marker = "  test-shards:"
+    if marker not in workflow:
+        return ""
+    section = workflow.split(marker, 1)[1]
+    next_job = re.search(r"(?m)^  [a-z0-9-]+:\s*$", section)
+    return section[: next_job.start()] if next_job else section
+
+
+def arm_hard_exit_problems(workflow: str) -> set[str]:
+    """返回 ARM Desktop UI 成功后硬退出合同的漂移项。"""
+
+    problems = set()
+    arm_job = _arm_job(workflow)
+    hosted_job = _hosted_job(workflow)
+    condition = 'if [ "${{ matrix.shard.id }}" = "desktop-ui" ]; then'
+    hard_exit_command = (
+        ".venv/bin/python -m test.ci.run_shard "
+        "desktop-ui --hard-exit-on-success"
+    )
+    normal_arm_command = (
+        '.venv/bin/python -m test.ci.run_shard "${{ matrix.shard.id }}"'
+    )
+
+    if workflow.count("--hard-exit-on-success") != 1:
+        problems.add("hard-exit-count")
+    if "--hard-exit-on-success" in hosted_job:
+        problems.add("hosted-hard-exit")
+    if condition not in arm_job:
+        problems.add("desktop-ui-condition")
+    if hard_exit_command not in arm_job:
+        problems.add("desktop-ui-command")
+    if normal_arm_command not in arm_job:
+        problems.add("other-arm-command")
+    return problems
+
+
 def arm_pin_problems(workflow: str) -> set[str]:
     """返回锁文件、批准版本或 ARM 安装命令不一致的包。"""
 
@@ -221,6 +259,118 @@ class TestPreflight(unittest.TestCase):
             verify_environment("arm64", ("missing.module",))
 
 
+class HardExitRequested(Exception):
+    """测试替身：阻止单元测试进程真的被 os._exit 终止。"""
+
+
+class TestShardRunnerExitContract(unittest.TestCase):
+    def test_hard_exit_flushes_both_streams_after_success(self) -> None:
+        result = Mock()
+        result.wasSuccessful.return_value = True
+        stdout = Mock()
+        stderr = Mock()
+        hard_exit = Mock(side_effect=HardExitRequested)
+        events = Mock()
+        events.attach_mock(stdout.flush, "stdout_flush")
+        events.attach_mock(stderr.flush, "stderr_flush")
+        events.attach_mock(hard_exit, "hard_exit")
+
+        with patch.object(run_shard.sys, "stdout", stdout), patch.object(
+            run_shard.sys, "stderr", stderr
+        ), patch.object(run_shard.os, "_exit", hard_exit):
+            with self.assertRaises(HardExitRequested):
+                run_shard.finish_result(result, hard_exit_on_success=True)
+
+        self.assertEqual(
+            [call.stdout_flush(), call.stderr_flush(), call.hard_exit(0)],
+            events.mock_calls,
+        )
+
+    def test_success_without_option_returns_normally(self) -> None:
+        result = Mock()
+        result.wasSuccessful.return_value = True
+
+        with patch.object(run_shard.sys.stdout, "flush") as stdout_flush, patch.object(
+            run_shard.sys.stderr, "flush"
+        ) as stderr_flush, patch.object(run_shard.os, "_exit") as hard_exit:
+            self.assertEqual(
+                0,
+                run_shard.finish_result(result, hard_exit_on_success=False),
+            )
+
+        stdout_flush.assert_not_called()
+        stderr_flush.assert_not_called()
+        hard_exit.assert_not_called()
+
+    def test_failed_result_never_hard_exits(self) -> None:
+        result = Mock()
+        result.wasSuccessful.return_value = False
+
+        with patch.object(run_shard.os, "_exit") as hard_exit:
+            self.assertEqual(
+                1,
+                run_shard.finish_result(result, hard_exit_on_success=True),
+            )
+
+        hard_exit.assert_not_called()
+
+    def test_flush_failure_prevents_hard_exit(self) -> None:
+        result = Mock()
+        result.wasSuccessful.return_value = True
+        stdout = Mock()
+        stdout.flush.side_effect = RuntimeError("flush failed")
+        stderr = Mock()
+
+        with patch.object(run_shard.sys, "stdout", stdout), patch.object(
+            run_shard.sys, "stderr", stderr
+        ), patch.object(run_shard.os, "_exit") as hard_exit:
+            with self.assertRaisesRegex(RuntimeError, "flush failed"):
+                run_shard.finish_result(result, hard_exit_on_success=True)
+
+        stderr.flush.assert_not_called()
+        hard_exit.assert_not_called()
+
+    def test_stderr_flush_failure_prevents_hard_exit(self) -> None:
+        result = Mock()
+        result.wasSuccessful.return_value = True
+        stdout = Mock()
+        stderr = Mock()
+        stderr.flush.side_effect = RuntimeError("flush failed")
+
+        with patch.object(run_shard.sys, "stdout", stdout), patch.object(
+            run_shard.sys, "stderr", stderr
+        ), patch.object(run_shard.os, "_exit") as hard_exit:
+            with self.assertRaisesRegex(RuntimeError, "flush failed"):
+                run_shard.finish_result(result, hard_exit_on_success=True)
+
+        stdout.flush.assert_called_once_with()
+        hard_exit.assert_not_called()
+
+    def test_cli_forwards_hard_exit_option(self) -> None:
+        for argv, expected in (
+            (["desktop-ui", "--hard-exit-on-success"], True),
+            (["desktop-ui"], False),
+        ):
+            with self.subTest(argv=argv):
+                suite = Mock()
+                result = Mock()
+                runner = Mock()
+                runner.run.return_value = result
+                with patch.object(run_shard, "build_suite", return_value=suite), patch.object(
+                    run_shard.unittest, "TextTestRunner", return_value=runner
+                ) as runner_type, patch.object(
+                    run_shard, "finish_result", return_value=23
+                ) as finish_result:
+                    self.assertEqual(23, run_shard.main(argv))
+
+                runner_type.assert_called_once_with(verbosity=2)
+                runner.run.assert_called_once_with(suite)
+                finish_result.assert_called_once_with(
+                    result,
+                    hard_exit_on_success=expected,
+                )
+
+
 class TestWorkflowContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -285,10 +435,40 @@ class TestWorkflowContract(unittest.TestCase):
                 self.assertIn(f"--require-import {module}", arm_job)
 
         self.assertEqual(set(), arm_pin_problems(self.workflow))
-        self.assertIn(
-            ".venv/bin/python -m test.ci.run_shard ${{ matrix.shard.id }}",
-            arm_job,
+        self.assertEqual(set(), arm_hard_exit_problems(self.workflow))
+
+    def test_arm_hard_exit_is_scoped_to_desktop_ui(self) -> None:
+        self.assertEqual(set(), arm_hard_exit_problems(self.workflow))
+
+    def test_missing_arm_desktop_condition_is_rejected(self) -> None:
+        mutated = self.workflow.replace(
+            'if [ "${{ matrix.shard.id }}" = "desktop-ui" ]; then',
+            "if true; then",
         )
+        self.assertIn("desktop-ui-condition", arm_hard_exit_problems(mutated))
+
+    def test_hosted_hard_exit_is_rejected(self) -> None:
+        hosted_command = (
+            "uv run --frozen python -m test.ci.run_shard "
+            "${{ matrix.shard.id }}"
+        )
+        mutated = self.workflow.replace(
+            hosted_command,
+            f"{hosted_command} --hard-exit-on-success",
+            1,
+        )
+        self.assertIn("hosted-hard-exit", arm_hard_exit_problems(mutated))
+
+    def test_other_arm_shards_hard_exit_is_rejected(self) -> None:
+        normal_arm_command = (
+            '.venv/bin/python -m test.ci.run_shard "${{ matrix.shard.id }}"'
+        )
+        mutated = self.workflow.replace(
+            normal_arm_command,
+            f"{normal_arm_command} --hard-exit-on-success",
+            1,
+        )
+        self.assertIn("hard-exit-count", arm_hard_exit_problems(mutated))
 
     def test_wrong_arm_pin_is_rejected(self) -> None:
         mutated = self.workflow.replace("darkdetect==0.8.0", "darkdetect==0.8.1")

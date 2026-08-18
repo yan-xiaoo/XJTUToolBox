@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import unittest
 from pathlib import Path
 from typing import Sequence
@@ -34,13 +36,35 @@ def build_suite(shard_id: str) -> unittest.TestSuite:
     return suite
 
 
+def finish_result(
+    result: unittest.TestResult, *, hard_exit_on_success: bool
+) -> int:
+    """返回测试结果；按需跳过已知会崩溃的成功后 teardown。"""
+
+    if not result.wasSuccessful():
+        return 1
+    if hard_exit_on_success:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shard", choices=tuple(shard.id for shard in SHARDS))
+    parser.add_argument(
+        "--hard-exit-on-success",
+        action="store_true",
+        help="测试成功并刷新日志后跳过解释器 teardown",
+    )
     args = parser.parse_args(argv)
 
     result = unittest.TextTestRunner(verbosity=2).run(build_suite(args.shard))
-    return 0 if result.wasSuccessful() else 1
+    return finish_result(
+        result,
+        hard_exit_on_success=args.hard_exit_on_success,
+    )
 
 
 if __name__ == "__main__":
