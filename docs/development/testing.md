@@ -4,12 +4,15 @@
 测试和既有 bug 回归，并汇总为 `PR Tests / CI Gate`。该检查处于等待、失败或取消状态时
 不得合并。
 
-PR 创建和推送新提交会自动触发测试：分别对应 `opened` 和 `synchronize`。PR 作者没有
-手动 rerun 入口；修复代码、测试或 CI 配置后，向同一个 PR 分支 push 包含修改的新提交，
-即可触发下一次 `synchronize` 运行。仓库管理员可使用 GitHub 平台原生的 rerun 权限，
-这项权限由仓库成员权限决定，不由 workflow YAML 授予。对于外部 fork PR，作者没有
-原仓库的 Actions rerun、workflow dispatch 或加 label 权限；只能向自己的 PR 分支
-push 包含修改的新提交触发重测。
+PR 创建、推送新提交和重新打开会自动触发测试：分别对应 `opened`、`synchronize` 和
+`reopened`。外部 fork PR 作者没有原仓库的 Actions rerun、workflow dispatch 或加
+label 权限，但可以关闭后重新打开 PR，以当前 PR 候选再次触发测试；这条路径主要用于
+runner、网络等瞬时基础设施故障，不要求制造无意义提交。
+
+`reopened` 只重新触发当前 PR 候选，不会把其它分支上的 CI 修复自动加入该候选。如果
+失败来自 workflow、测试或代码本身，作者必须先把修复或更新后的基线同步到同一个 PR
+分支并 push，由 `synchronize` 验证实际修改。仓库管理员仍可使用 GitHub 平台原生 rerun
+权限；这项权限由仓库成员权限决定，不由 workflow YAML 授予。
 
 ## 本地测试
 
@@ -76,7 +79,8 @@ Issue #53（Windows 刷新通知时因教务处人机验证更新而报错）对
 工作流提交后会产生 `PR Tests / CI Gate` 检查。仓库管理员应在 `main` 的 GitHub
 ruleset 或 branch protection 中将该检查设为 required status check。工作流负责产生检查，
 仓库设置负责阻止红灯合并；仅提交 YAML 不能替代该外部设置。
-工作流不声明 `workflow_dispatch`，因此不会为 PR 作者提供手动触发路径。
+工作流不声明 `workflow_dispatch`。外部 PR 作者可用 `reopened` 重新验证当前候选；若
+workflow 本身需要修改，则仍须更新 PR 分支并通过 `synchronize` 验证修复。
 
 CI 测试门 PR 应先于独立的搜索功能 PR 合并。上游启用 required gate 后，搜索 PR
 基于旧基线时可能仍会暴露课表 `place` 契约问题；本 CI PR 已先修复该既有回归，避免
