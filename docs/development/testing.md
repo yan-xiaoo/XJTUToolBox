@@ -4,12 +4,12 @@
 测试和既有 bug 回归，并汇总为 `PR Tests / CI Gate`。该检查处于等待、失败或取消状态时
 不得合并。
 
-PR 创建、推送新提交和重新打开都会自动触发测试：分别对应 `opened`、
-`synchronize` 和 `reopened`。PR 作者没有手动 rerun 入口；修复失败测试时，向同一个
-PR 分支 push 新提交即可触发下一次 `synchronize` 运行。仓库管理员可使用 GitHub
-平台原生的 rerun 权限，这项权限由仓库成员权限决定，不由 workflow YAML 授予。
-对于外部 fork PR，作者没有原仓库的 Actions rerun、workflow dispatch 或加 label
-权限；只能向自己的 PR 分支 push 新提交，或关闭后重新打开同一 PR 触发 `reopened`。
+PR 创建和推送新提交会自动触发测试：分别对应 `opened` 和 `synchronize`。PR 作者没有
+手动 rerun 入口；修复代码、测试或 CI 配置后，向同一个 PR 分支 push 包含修改的新提交，
+即可触发下一次 `synchronize` 运行。仓库管理员可使用 GitHub 平台原生的 rerun 权限，
+这项权限由仓库成员权限决定，不由 workflow YAML 授予。对于外部 fork PR，作者没有
+原仓库的 Actions rerun、workflow dispatch 或加 label 权限；只能向自己的 PR 分支
+push 包含修改的新提交触发重测。
 
 ## 本地测试
 
