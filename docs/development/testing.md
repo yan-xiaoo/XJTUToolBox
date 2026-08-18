@@ -93,8 +93,10 @@ Test contract
 条件，`CI Gate` 是最终汇合点。
 
 每个 hosted job 在运行测试前都会检查实际 CPU 架构，避免 runner 标签迁移后静默丢失
-覆盖。Linux ARM64 复用 Release 的 QEMU 路径，使用系统 PyQt5、QtSvg 和 QtX11Extras，
-并在带 `--system-site-packages` 的 `.venv` 中执行 `uv sync --frozen --group dev`。该 job
+覆盖。Linux ARM64 复用 Release 的 QEMU 路径，使用系统 PyQt5、QtMultimedia、QtSvg 和
+QtX11Extras，并在带 `--system-site-packages` 的 `.venv` 中执行
+`uv sync --frozen --group dev`。ARM 系统会预检 `PyQt5.QtMultimedia` 与
+`PyQt5.QtMultimediaWidgets`，因为主窗口导入链会加载 LMS 视频界面。该 job
 不会删除或重写 `uv.lock`；随后只用 `--no-deps` 补齐锁文件中的精确版本：
 
 - `pyqt-fluent-widgets==1.8.7`
