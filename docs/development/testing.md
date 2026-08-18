@@ -107,6 +107,13 @@ QtX11Extras，并在带 `--system-site-packages` 的 `.venv` 中执行
 ARM 分片先验证 aarch64 和这些 UI 模块均可导入，再直接用 `.venv/bin/python` 运行测试，
 避免二次依赖同步移除 marker 之外的补充包。
 
+Linux ARM64 的 Desktop UI 分片会完整运行 40 项测试，但 QEMU 下的
+QtMultimedia/GStreamer 可能在 unittest 已输出 `OK` 后的解释器 teardown 阶段发生段错误。
+因此只有该分片启用 `--hard-exit-on-success`：runner 仅在所有测试成功并刷新 stdout/stderr
+后直接以 0 退出，跳过已知不稳定的终结器。测试收集、导入或断言失败仍返回非零；五个
+hosted 环境、其它三个 ARM 分片和本地默认命令都不启用该选项。该 workaround 不修改
+产品逻辑，也不能替代 GitHub Actions 上真实 ARM64 job 的成功结果。
+
 整条 workflow 会产生 27 个 checks：24 个测试分片、`Test contract`、
 `Existing bug regressions` 和 `CI Gate`。
 
