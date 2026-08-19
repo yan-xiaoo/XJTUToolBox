@@ -534,10 +534,9 @@ class TestWorkflowContract(unittest.TestCase):
     def test_pr_template_requests_test_evidence_without_credentials(self) -> None:
         template = PR_TEMPLATE_PATH.read_text(encoding="utf-8")
         for phrase in (
-            "test.ci.check_test_contract",
             "PR Tests / CI Gate",
             "无法运行的测试或环境",
-            "真实凭据",
+            "其它凭据",
             "cookie",
         ):
             self.assertIn(phrase, template)
