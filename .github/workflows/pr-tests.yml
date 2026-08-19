@@ -168,6 +168,10 @@ jobs:
               pyqt5-frameless-window==0.7.5 \
               darkdetect==0.8.0 \
               xcffib==1.12.0
+            hard_exit_arg=""
+            if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then
+              hard_exit_arg="--hard-exit-on-success"
+            fi
             .venv/bin/python -m test.ci.run_test_shard \
               --domain ${{ matrix.domain.id }} \
               --expected-machine aarch64 \
@@ -178,7 +182,8 @@ jobs:
               --require-import PyQt5.QtX11Extras \
               --require-import qfluentwidgets \
               --require-import qframelesswindow \
-              --require-import xcffib
+              --require-import xcffib \
+              $hard_exit_arg
 
   existing-bug-regressions:
     name: Existing bug regressions

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import platform
 import sys
 import unittest
@@ -57,11 +58,30 @@ def build_suite(domain_id: str) -> unittest.TestSuite:
     return suite
 
 
+def finish_result(
+    result: unittest.TestResult, *, hard_exit_on_success: bool
+) -> int:
+    """Return the result, optionally bypassing a known-bad Qt teardown."""
+
+    if not result.wasSuccessful():
+        return 1
+    if hard_exit_on_success:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--domain", required=True)
     parser.add_argument("--expected-machine")
     parser.add_argument("--require-import", action="append", default=[])
+    parser.add_argument(
+        "--hard-exit-on-success",
+        action="store_true",
+        help="flush logs and skip interpreter teardown after a successful suite",
+    )
     args = parser.parse_args(argv)
 
     if args.expected_machine:
@@ -75,7 +95,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         flush=True,
     )
     result = unittest.TextTestRunner(verbosity=2).run(build_suite(args.domain))
-    return 0 if result.wasSuccessful() else 1
+    return finish_result(
+        result,
+        hard_exit_on_success=args.hard_exit_on_success,
+    )
 
 
 if __name__ == "__main__":

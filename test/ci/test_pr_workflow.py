@@ -10,7 +10,7 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 from test.ci.check_test_contract import (
     REPOSITORY_ROOT,
@@ -20,9 +20,11 @@ from test.ci.check_test_contract import (
     owned_modules,
     product_test_modules,
 )
+from test.ci import run_test_shard
 from test.ci.run_test_shard import (
     build_suite,
     canonical_machine,
+    finish_result,
     verify_imports,
     verify_machine,
 )
@@ -162,6 +164,25 @@ def gate_script(workflow: str) -> str:
         r"(?ms)^        run: \|\n((?:          .*\n?)*)", section
     )
     return textwrap.dedent(match.group(1)) if match else ""
+
+
+def arm_hard_exit_contract_errors(workflow: str) -> list[str]:
+    """Return drift from the QEMU-only Qt UI teardown workaround."""
+
+    errors: list[str] = []
+    arm = job_section(workflow, "linux-arm-shards")
+    hosted = job_section(workflow, "test-shards")
+    if workflow.count("--hard-exit-on-success") != 1:
+        errors.append("unexpected hard-exit option count")
+    if "--hard-exit-on-success" in hosted:
+        errors.append("hosted job enables hard exit")
+    if 'if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then' not in arm:
+        errors.append("Qt UI condition is missing")
+    if 'hard_exit_arg="--hard-exit-on-success"' not in arm:
+        errors.append("hard-exit assignment is missing")
+    if "$hard_exit_arg" not in arm:
+        errors.append("runner does not consume hard-exit argument")
+    return errors
 
 
 class TestInventoryContract(unittest.TestCase):
@@ -345,6 +366,37 @@ class TestShardRunner(unittest.TestCase):
             importer.call_args_list,
         )
 
+    def test_hard_exit_flushes_logs_only_after_success(self) -> None:
+        result = Mock()
+        result.wasSuccessful.return_value = True
+        stdout = Mock()
+        stderr = Mock()
+        hard_exit = Mock(side_effect=RuntimeError("hard exit intercepted"))
+        events = Mock()
+        events.attach_mock(stdout.flush, "stdout_flush")
+        events.attach_mock(stderr.flush, "stderr_flush")
+        events.attach_mock(hard_exit, "hard_exit")
+
+        with patch.object(run_test_shard.sys, "stdout", stdout), patch.object(
+            run_test_shard.sys, "stderr", stderr
+        ), patch.object(run_test_shard.os, "_exit", hard_exit):
+            with self.assertRaisesRegex(RuntimeError, "hard exit intercepted"):
+                finish_result(result, hard_exit_on_success=True)
+
+        self.assertEqual(
+            [call.stdout_flush(), call.stderr_flush(), call.hard_exit(0)],
+            events.mock_calls,
+        )
+
+    def test_normal_success_and_failure_return_without_hard_exit(self) -> None:
+        result = Mock()
+        with patch.object(run_test_shard.os, "_exit") as hard_exit:
+            result.wasSuccessful.return_value = True
+            self.assertEqual(0, finish_result(result, hard_exit_on_success=False))
+            result.wasSuccessful.return_value = False
+            self.assertEqual(1, finish_result(result, hard_exit_on_success=True))
+        hard_exit.assert_not_called()
+
 
 class TestWorkflowContract(unittest.TestCase):
     def test_paths_exist(self) -> None:
@@ -430,9 +482,8 @@ class TestWorkflowContract(unittest.TestCase):
                 self.assertTrue(matrix_contract_errors(mutation))
 
     def test_arm_matrix_has_five_domains_and_complete_qt_runtime(self) -> None:
-        section = job_section(
-            WORKFLOW_PATH.read_text(encoding="utf-8"), "linux-arm-shards"
-        )
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        section = job_section(workflow, "linux-arm-shards")
         self.assertIn("needs: test-contract", section)
         self.assertIn("arch: aarch64", section)
         self.assertIn("distro: ubuntu22.04", section)
@@ -450,6 +501,34 @@ class TestWorkflowContract(unittest.TestCase):
             self.assertIn(f"--require-import {import_name}", section)
         for pin in ARM_PINS:
             self.assertIn(pin, section)
+        self.assertIn(
+            'if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then', section
+        )
+        self.assertIn('hard_exit_arg="--hard-exit-on-success"', section)
+        self.assertEqual(1, workflow.count("--hard-exit-on-success"))
+        self.assertNotIn(
+            "--hard-exit-on-success", job_section(workflow, "test-shards")
+        )
+        self.assertEqual([], arm_hard_exit_contract_errors(workflow))
+
+    def test_arm_hard_exit_scope_mutations_are_rejected(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        wrong_domain = workflow.replace(
+            'if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then',
+            'if [ "${{ matrix.domain.id }}" = "ai" ]; then',
+        )
+        duplicate = workflow.replace(
+            "uv run --frozen python -m test.ci.run_test_shard",
+            "uv run --frozen python -m test.ci.run_test_shard --hard-exit-on-success",
+            1,
+        )
+        self.assertIn(
+            "Qt UI condition is missing", arm_hard_exit_contract_errors(wrong_domain)
+        )
+        self.assertIn(
+            "unexpected hard-exit option count",
+            arm_hard_exit_contract_errors(duplicate),
+        )
 
     def test_regression_job_runs_the_registered_modules(self) -> None:
         section = job_section(
