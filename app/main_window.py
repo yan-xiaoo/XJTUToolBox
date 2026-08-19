@@ -32,6 +32,7 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
+from .SchoolCourseInterface import SchoolCourseInterface
 from .sub_interfaces import LoginInterface
 from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
 from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
@@ -202,6 +203,8 @@ class MainWindow(MSFluentWindow):
         QApplication.processEvents()
         self.venue_interface = VenueInterface(self)
         QApplication.processEvents()
+        self.school_course_interface = SchoolCourseInterface(self)
+        QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
         self.tray_interface.main_interface.connect(lambda: self.show())
@@ -363,6 +366,12 @@ class MainWindow(MSFluentWindow):
         empty_room_card = self.tool_box_interface.addCard(self.empty_room_interface, FIF.LAYOUT, self.tr("空闲教室"),
                                                           self.tr("查询当前空闲的教室"))
         empty_room_card.setFixedSize(200, 180)
+
+        school_course_card = self.tool_box_interface.addCard(
+            self.school_course_interface, FIF.VIEW, self.tr("全校课程"),
+            self.tr("检索全校开课信息"),
+        )
+        school_course_card.setFixedSize(200, 180)
 
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
