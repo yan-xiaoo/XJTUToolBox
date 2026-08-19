@@ -199,6 +199,13 @@ class HomeFrame(QWidget):
                 'callback': lambda: self.main_window.switchTo(self.main_window.lms_interface),
                 'color': LinkCard.LinkCardColor.SKY_BLUE
             },
+            "school_course": {
+                'icon': FIF.VIEW.icon(theme=Theme.DARK),
+                'title': self.tr("全校课程"),
+                'content': self.tr("检索全校开课信息"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.school_course_interface),
+                'color': LinkCard.LinkCardColor.BLUE
+            },
             "campus_card": {
                 'icon': FIF.FOLDER.icon(theme=Theme.DARK),
                 'title': self.tr("校园卡"),

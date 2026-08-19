@@ -32,6 +32,7 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
+from .SchoolCourseInterface import SchoolCourseInterface
 from .sessions.campus_card_session import CampusCardSession
 from .CampusCardInterface import CampusCardInterface
 from .sub_interfaces import LoginInterface
@@ -205,6 +206,7 @@ class MainWindow(MSFluentWindow):
         QApplication.processEvents()
         self.venue_interface = VenueInterface(self)
         QApplication.processEvents()
+        self.school_course_interface = SchoolCourseInterface(self)
         self.campus_card_interface = CampusCardInterface(self)
         QApplication.processEvents()
 
@@ -370,6 +372,11 @@ class MainWindow(MSFluentWindow):
                                                           self.tr("查询当前空闲的教室"))
         empty_room_card.setFixedSize(200, 180)
 
+        school_course_card = self.tool_box_interface.addCard(
+            self.school_course_interface, FIF.VIEW, self.tr("全校课程"),
+            self.tr("检索全校开课信息"),
+        )
+        school_course_card.setFixedSize(200, 180)
 
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
