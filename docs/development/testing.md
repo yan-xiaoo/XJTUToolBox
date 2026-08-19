@@ -110,6 +110,11 @@ ARM64 QEMU 安装系统 PyQt5、QtMultimedia、QtSvg、QtX11Extras，在带
 `pyqt5-frameless-window==0.7.5`、`darkdetect==0.8.0` 和 `xcffib==1.12.0`。QEMU 结果是兼容
 验证，不等于原生 ARM runner；未在本机或 Actions 运行的平台必须如实标记为未验证。
 
+QEMU 下 QtMultimedia/GStreamer 可能在 `qt-ui` 域已经输出全部成功结果后的解释器 teardown
+阶段崩溃，因此只有该域使用 `--hard-exit-on-success`：runner 先确认 suite 成功并刷新
+stdout/stderr，再以 0 跳过 teardown。任何收集、导入或断言失败仍返回非零；hosted 平台和
+其它四个 QEMU 域都禁止该选项。这个兼容措施仍须由 exact-SHA 的自然 ARM job 验证。
+
 构建、发布和定时任务继续由独立的 `.github/workflows/build_linux.yml`、`build_macos.yml`、
 `build_windows.yml`、`deploy.yml`、`empty_room.yml`、`upload.yml` 和 `update_aur.yml` 负责；
 PR 测试成功不能替代构建成功，也不能替代发布或定时任务的独立证据。
