@@ -31,11 +31,11 @@ uv run --frozen python -m test.ci.run_test_shard --domain schedule
 
 | 域 ID | Actions 显示名 | 模块 | 2026-08-19 本地完整环境用例数 |
 |---|---|---|---:|
-| `ai` | AI core and features | `test.ai_assistant.test_ai_core`、`test.ai_assistant.test_ai_features` | 66 |
-| `qt-ui` | Qt and desktop UI | `test.app.test_campus_job`、`test.app.test_ctrl_c`、`test.app.test_notice_search_ui`、`test.app.test_notice_thread` | 本地实测见候选验证记录 |
+| `ai` | AI core and features | `test.ai_assistant.test_ai_core`、`test.ai_assistant.test_ai_features` | 37 |
+| `qt-ui` | Qt and desktop UI | `test.app.test_campus_job`、`test.app.test_ctrl_c`、`test.app.test_notice_search_ui`、`test.app.test_notice_thread` | 43 |
 | `notification-crawler` | Notifications and crawler | `test.notification.test_notification_sources`、`test.test_crawler_challenge` | 28 |
 | `auth-session` | Authentication and sessions | `test.auth.login`、`test.auth.test_qrcode_login`、`test.auth.util`、`test.sessions.session_manager` | 27（无凭据时 2 项跳过） |
-| `schedule` | Schedule | `test.jwxt.test_school_course_headers`、`test.schedule.test_lesson`、`test.schedule.test_schedule` | 本地实测见候选验证记录 |
+| `schedule` | Schedule | `test.jwxt.test_school_course_headers`、`test.schedule.test_lesson`、`test.schedule.test_schedule` | 12 |
 
 域按产品职责划分，不按本地用例数量凑齐。上述实测中 Qt/UI 比 AI 更慢，而 runner 启动、依赖安装
 和平台差异还会主导云端耗时；因此本地用例数和耗时不能代替 GitHub-hosted job 时长，也不能单独
