@@ -28,6 +28,7 @@ SHARDS: tuple[Shard, ...] = (
         "auth-sessions-schedule",
         "Auth, sessions and schedule",
         ("test/auth", "test/sessions", "test/schedule"),
+        ("test.jwxt.test_school_course_headers",),
     ),
 )
 
