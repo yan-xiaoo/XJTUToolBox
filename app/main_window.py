@@ -33,6 +33,8 @@ from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
 from .SchoolCourseInterface import SchoolCourseInterface
+from .sessions.library_session import LibrarySession
+from .LibraryInterface import LibraryInterface
 from .sub_interfaces import LoginInterface
 from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
 from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
@@ -63,6 +65,7 @@ def registerSession():
     SessionManager.global_register(GSTESession, "gste")
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
+    SessionManager.global_register(LibrarySession, "library")
 
 
 class MacReopenFilter(QObject):
@@ -204,6 +207,7 @@ class MainWindow(MSFluentWindow):
         self.venue_interface = VenueInterface(self)
         QApplication.processEvents()
         self.school_course_interface = SchoolCourseInterface(self)
+        self.library_interface = LibraryInterface(self)
         QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
@@ -329,6 +333,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
         self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
         self.addSubInterface(self.venue_interface, FIF.BASKETBALL, self.tr("体育场馆"))
+        self.addSubInterface(self.library_interface, FIF.BOOK_SHELF, self.tr("图书馆"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",

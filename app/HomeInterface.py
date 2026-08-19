@@ -205,6 +205,13 @@ class HomeFrame(QWidget):
                 'content': self.tr("检索全校开课信息"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.school_course_interface),
                 'color': LinkCard.LinkCardColor.BLUE
+            },
+            "library": {
+                'icon': FIF.DOCUMENT.icon(theme=Theme.DARK),
+                'title': self.tr("图书馆"),
+                'content': self.tr("空座、预约、换座与签到"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.library_interface),
+                'color': LinkCard.LinkCardColor.PURPLE
             }
         }
 
