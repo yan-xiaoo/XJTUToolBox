@@ -76,7 +76,7 @@ Issue #53（Windows 刷新通知时因教务处人机验证更新而报错）对
 | AI assistant | `test/ai_assistant` |
 | Desktop UI | `test/app` |
 | Notification and crawler | `test/notification`、`test/test_crawler_challenge.py` |
-| Auth, sessions and schedule | `test/auth`、`test/sessions`、`test/schedule` |
+| Auth, sessions and schedule | `test/auth`、`test/sessions`、`test/schedule`、`test/jwxt/test_school_course_headers.py` |
 
 流水线依赖关系为：
 
