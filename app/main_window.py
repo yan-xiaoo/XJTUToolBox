@@ -32,6 +32,8 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
+from .sessions.library_session import LibrarySession
+from .LibraryInterface import LibraryInterface
 from .sub_interfaces import LoginInterface
 from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
 from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
@@ -62,6 +64,7 @@ def registerSession():
     SessionManager.global_register(GSTESession, "gste")
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
+    SessionManager.global_register(LibrarySession, "library")
 
 
 class MacReopenFilter(QObject):
@@ -202,6 +205,8 @@ class MainWindow(MSFluentWindow):
         QApplication.processEvents()
         self.venue_interface = VenueInterface(self)
         QApplication.processEvents()
+        self.library_interface = LibraryInterface(self)
+        QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
         self.tray_interface.main_interface.connect(lambda: self.show())
@@ -326,6 +331,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
         self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
         self.addSubInterface(self.venue_interface, FIF.BASKETBALL, self.tr("体育场馆"))
+        self.addSubInterface(self.library_interface, FIF.BOOK_SHELF, self.tr("图书馆"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",
@@ -363,6 +369,7 @@ class MainWindow(MSFluentWindow):
         empty_room_card = self.tool_box_interface.addCard(self.empty_room_interface, FIF.LAYOUT, self.tr("空闲教室"),
                                                           self.tr("查询当前空闲的教室"))
         empty_room_card.setFixedSize(200, 180)
+
 
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),

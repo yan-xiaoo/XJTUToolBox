@@ -17,6 +17,19 @@ import requests.structures
 from auth import NewLogin, QRCodeLoginMixin, ServerError, is_safety_verify_page
 from .session_backend import AccessMode, SessionBackend
 
+
+def http_safe_headers(headers: Mapping) -> dict[str, str]:
+    """Drop header values HTTP cannot send (e.g. Chinese names stuffed into site state)."""
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        text = "" if value is None else str(value)
+        try:
+            text.encode("latin-1")
+        except UnicodeEncodeError:
+            continue
+        safe[str(key)] = text
+    return safe
+
 if TYPE_CHECKING:
     from app.utils.account import Account
     from app.utils.mfa import MFAProvider
@@ -64,6 +77,8 @@ class CommonLoginSession(metaclass=ABCMeta):
     supports_webvpn = False
     # 自动检测为校外网络时，当前站点是否需要通过 WebVPN 访问。
     use_webvpn_when_off_campus = True
+    # 非空时覆盖共享后端的桌面 UA。一卡通、图书馆座位等站点会校验移动端标识。
+    user_agent = ""
 
     def __init__(self, backend: SessionBackend | None = None, site_key: str | None = None,
                  timeout: int = 15 * 60) -> None:
@@ -193,9 +208,13 @@ class CommonLoginSession(metaclass=ABCMeta):
                 raise TypeError("headers should be a mapping")
             for key, value in request_headers.items():
                 headers[str(key)] = str(value)
+        if self.user_agent:
+            headers["User-Agent"] = self.user_agent
 
         prepared_url = self.prepare_url_for_access_mode(url, skip_webvpn_rewrite=skip_webvpn_rewrite)
-        prepared_headers = self.prepare_headers_for_access_mode(headers, skip_webvpn_rewrite=skip_webvpn_rewrite)
+        prepared_headers = http_safe_headers(
+            self.prepare_headers_for_access_mode(headers, skip_webvpn_rewrite=skip_webvpn_rewrite)
+        )
         response = self.backend.session.request(method, prepared_url, headers=prepared_headers, **kwargs)
         if skip_auth_check or self._login_depth > 0 or not self.is_auth_failure_response(response):
             return response
