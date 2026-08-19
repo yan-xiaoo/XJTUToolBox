@@ -53,9 +53,9 @@ class CampusCard:
             expire = f"{expire[:4]}-{expire[4:6]}-{expire[6:]}"
         headers = getattr(self.session, "headers", {})
         return CardInfo(
-            name=str(headers.get("X-Card-Name") or ""),
-            student_no=str(headers.get("X-Card-Sno") or ""),
-            account=str(headers.get("X-Card-Account") or ""),
+            name=str(getattr(self.session, "user_name", "") or headers.get("X-Card-Name") or ""),
+            student_no=str(getattr(self.session, "student_no", "") or headers.get("X-Card-Sno") or ""),
+            account=str(getattr(self.session, "card_account", "") or headers.get("X-Card-Account") or ""),
             balance=_fen(card.get("elec_accamt")),
             pending_amount=_fen(card.get("unsettle_amount")),
             lost=card.get("barflag") == 1,

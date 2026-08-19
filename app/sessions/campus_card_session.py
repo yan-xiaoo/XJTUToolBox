@@ -53,8 +53,8 @@ class CampusCardSession(CommonLoginSession):
         self.headers["synAccessSource"] = "h5"
         self.headers["X-Card-Access-Token"] = self.access_token
         self.headers["X-Card-Account"] = self.card_account
-        self.headers["X-Card-Name"] = self.user_name
         self.headers["X-Card-Sno"] = self.student_no
+        # 姓名含中文，不能放进会随请求发出的 headers，否则 urllib 直接 latin-1 崩掉。
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         self.perform_cas_login(
@@ -126,6 +126,18 @@ class CampusCardSession(CommonLoginSession):
         self.student_no = str(data.get("sno") or "")
         self._store_tokens()
         return True
+
+    def is_auth_failure_response(self, response) -> bool:
+        if super().is_auth_failure_response(response):
+            return True
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        message = str(payload.get("message") or "")
+        return payload.get("code") == 401 or "其他设备" in message or "未登录" in message
 
     def validate_login(self) -> bool:
         if not self.access_token:
