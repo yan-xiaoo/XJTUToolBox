@@ -1,1 +1,1 @@
-"""PR 测试分片与流水线合同。"""
+"""Pull-request test inventory and shard runners."""
