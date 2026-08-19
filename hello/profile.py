@@ -83,7 +83,10 @@ class HelloProfile:
                     headers={"Referer": self.REFERER},
                     timeout=20,
                 )
-                return response.json()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("profile payload is not an object")
+                return payload
             except ValueError as exc:
                 last_error = ServerError(1, "学籍接口返回了无法解析的数据")
                 last_error.__cause__ = exc
