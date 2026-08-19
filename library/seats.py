@@ -109,7 +109,10 @@ class Library:
     def _parse_json(self, body: str) -> dict[str, Any]:
         if not self._looks_like_json(body):
             raise RuntimeError("图书馆接口返回异常（非 JSON 响应）")
-        return json.loads(body)
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("图书馆接口返回了无法解析的数据") from exc
 
     def _parse_stats(self, scount: dict | None) -> dict[str, AreaStats]:
         result = {}

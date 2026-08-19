@@ -59,8 +59,17 @@ class LibraryInterface(CampusPage):
         self._sync_actions()
 
         self.table = self.make_table([self.tr("座位"), self.tr("状态")])
-        self.table.doubleClicked.connect(self.book_selected)
+        self.table.doubleClicked.connect(lambda _index: self.book_selected())
         self.vBoxLayout.addWidget(self.table, 1)
+
+    def on_account_changed(self):
+        self._booking_loaded = False
+        self.seats = []
+        self.booking = None
+        self._visible_seats = []
+        self.bookingLabel.setText(self.tr("打开本页会自动查询当前预约。"))
+        self.table.setRowCount(0)
+        self._sync_actions()
 
     def showEvent(self, event):
         super().showEvent(event)
