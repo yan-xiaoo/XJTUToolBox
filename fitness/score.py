@@ -107,29 +107,40 @@ class Fitness:
             raise ServerError(1, "体测成绩数据为空")
         items = []
         for key, name in ITEM_NAMES.items():
-            score_key = "bmi_score_new" if key == "bmi" and data.get("bmi_score_new") else f"{key}_score"
+            score_key = f"{key}_score"
+            if key == "bmi" and "bmi_score_new" in data and data["bmi_score_new"] is not None:
+                score_key = "bmi_score_new"
             items.append(FitnessItem(
                 key=key,
                 name=name,
-                score=str(data.get(score_key) or ""),
-                grade=str(data.get(f"{key}_grade") or ""),
-                extra=str(data.get(f"{key}_class") or ""),
+                score=_text(data, score_key),
+                grade=_text(data, f"{key}_grade"),
+                extra=_text(data, f"{key}_class"),
             ))
         return FitnessScore(
-            student_num=str(data.get("student_num") or ""),
-            student_name=str(data.get("student_name") or ""),
-            total_score=str(data.get("total_score") or ""),
-            total_grade=str(data.get("total_grade") or ""),
-            report_type=str(data.get("report_type") or ""),
-            report_status=str(data.get("report_status") or ""),
-            sex=str(data.get("sex") or ""),
-            grade=str(data.get("grade") or ""),
+            student_num=_text(data, "student_num"),
+            student_name=_text(data, "student_name"),
+            total_score=_text(data, "total_score"),
+            total_grade=_text(data, "total_grade"),
+            report_type=_text(data, "report_type"),
+            report_status=_text(data, "report_status"),
+            sex=_text(data, "sex"),
+            grade=_text(data, "grade"),
             items=items,
         )
 
 
+def _text(data: dict, key: str) -> str:
+    if key not in data or data[key] is None:
+        return ""
+    return str(data[key])
+
+
 def _json(response: requests.Response) -> dict:
     try:
-        return response.json()
+        payload = response.json()
     except ValueError as exc:
         raise ServerError(1, "体测接口返回了无法解析的数据") from exc
+    if not isinstance(payload, dict):
+        raise ServerError(1, "体测接口返回了无法解析的数据")
+    return payload

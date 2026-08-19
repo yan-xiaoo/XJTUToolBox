@@ -150,4 +150,17 @@ class HelloSession(CommonLoginSession):
     _re_login = _login
 
     def validate_login(self) -> bool:
-        return bool(self.access_token)
+        if not self.access_token:
+            return False
+        self._store_tokens()
+        try:
+            response = self.get(
+                "http://hello.xjtu.edu.cn/yingxin/user/afterLogin?synAccessSource=pc",
+                headers={"Referer": "http://hello.xjtu.edu.cn/yingxin-pc/"},
+                timeout=15,
+                _skip_auth_check=True,
+            )
+            payload = response.json()
+        except Exception:
+            return False
+        return isinstance(payload, dict) and payload.get("state") == 200
