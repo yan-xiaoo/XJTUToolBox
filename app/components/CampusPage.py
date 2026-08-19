@@ -1,3 +1,4 @@
+from PyQt5.QtCore import pyqtSlot
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, InfoBar, InfoBarPosition, ScrollArea, StrongBodyLabel, TableWidget, TitleLabel
 
@@ -31,6 +32,7 @@ class CampusPage(ScrollArea):
         self.vBoxLayout.addWidget(self.jobSlot)
         self.thread = None
         self.processWidget = None
+        accounts.currentAccountChanged.connect(self._on_current_account_changed)
 
         StyleSheet.EMPTY_ROOM_INTERFACE.apply(self)
         self.setWidgetResizable(True)
@@ -77,6 +79,7 @@ class CampusPage(ScrollArea):
                   show_process: bool = True) -> bool:
         if self.thread is not None and self.thread.isRunning():
             self.thread.can_run = False
+        started_uuid = getattr(accounts.current, "uuid", None)
         self.thread = CampusFeatureThread(site_key, message, worker, need_login=need_login, parent=self)
         if self.processWidget:
             self.processWidget.deleteLater()
@@ -84,10 +87,26 @@ class CampusPage(ScrollArea):
         if show_process:
             self.processWidget = ProcessWidget(self.thread, self.jobSlot, hide_on_end=True)
             self.jobLayout.addWidget(self.processWidget)
-        self.thread.result.connect(on_result)
+
+        def _guarded(payload):
+            current = accounts.current
+            if started_uuid is None or current is None or getattr(current, "uuid", None) != started_uuid:
+                return
+            on_result(payload)
+
+        self.thread.result.connect(_guarded)
         self.thread.error.connect(self.warn)
         self.thread.start()
         return True
+
+    @pyqtSlot()
+    def _on_current_account_changed(self):
+        if self.thread is not None and self.thread.isRunning():
+            self.thread.can_run = False
+        self.on_account_changed()
+
+    def on_account_changed(self):
+        """Reset page-owned state after the current account changes."""
 
     def require_account(self) -> bool:
         if accounts.current is None:

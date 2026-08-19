@@ -4,7 +4,7 @@ from typing import Any
 from PyQt5.QtCore import pyqtSignal
 
 from app.threads.ProcessWidget import ProcessThread
-from app.utils.campus_job import run_campus_job
+from app.utils.campus_job import JOB_FAILED, run_campus_job
 
 
 class CampusFeatureThread(ProcessThread):
@@ -33,7 +33,7 @@ class CampusFeatureThread(ProcessThread):
             worker=self.worker,
             need_login=self.need_login,
         )
-        if payload is None:
+        if payload is JOB_FAILED:
             return
         self.result.emit(payload)
         self.hasFinished.emit()

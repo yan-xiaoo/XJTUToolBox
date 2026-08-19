@@ -34,6 +34,11 @@ class CampusCardInterface(CampusPage):
         ])
         self.vBoxLayout.addWidget(self.table, 1)
 
+    def on_account_changed(self):
+        self._auto_loaded = False
+        self.summary.setText(self.tr("打开本页会自动查询最近流水。"))
+        self.table.setRowCount(0)
+
     def showEvent(self, event):
         super().showEvent(event)
         if self._auto_loaded or accounts.current is None:
@@ -50,7 +55,7 @@ class CampusCardInterface(CampusPage):
         def worker(session):
             util = CampusCard(session)
             info = util.get_card_info()
-            total, records = util.get_transactions(start, end, page=1, page_size=80)
+            total, records = util.get_all_transactions(start, end, page_size=80)
             return info, total, records
 
         self.start_job("campus_card", self.tr("正在登录校园卡..."), worker, self._on_result)

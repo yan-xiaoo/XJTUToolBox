@@ -84,6 +84,11 @@ class CampusCard:
             timeout=20,
         )
         payload = _json(response)
+        if payload.get("code") != 200:
+            raise ServerError(
+                payload.get("code") or 1,
+                payload.get("message") or "查询校园卡流水失败",
+            )
         data = payload.get("data") or {}
         records = []
         for item in data.get("records") or []:
@@ -102,6 +107,22 @@ class CampusCard:
                 description=resume,
             ))
         return int(data.get("total") or len(records)), records
+
+    def get_all_transactions(
+            self,
+            time_from: date | None = None,
+            time_to: date | None = None,
+            page_size: int = 80) -> tuple[int, list[CardTransaction]]:
+        records: list[CardTransaction] = []
+        page = 1
+        total = 0
+        while True:
+            total, batch = self.get_transactions(time_from, time_to, page=page, page_size=page_size)
+            records.extend(batch)
+            if not batch or len(records) >= total:
+                break
+            page += 1
+        return total, records
 
 
 def _fen(value: Any) -> float:
