@@ -44,6 +44,14 @@ class SchoolCourseInterface(CampusPage):
         ])
         self.vBoxLayout.addWidget(self.table, 1)
 
+    def on_account_changed(self):
+        self._terms_loaded = False
+        self.departments = []
+        self.termBox.clear()
+        self.deptBox.clear()
+        self.deptBox.addItem(self.tr("全部单位"), userData="")
+        self.table.setRowCount(0)
+
     def showEvent(self, event):
         super().showEvent(event)
         if self._terms_loaded:

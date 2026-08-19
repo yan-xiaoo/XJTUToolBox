@@ -13,6 +13,9 @@ from app.utils import accounts, logger
 from app.utils.mfa import MFACancelledError, MFAUnavailableError
 from app.utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 
+# Distinguishes a failed/canceled job from a worker that legitimately returned None.
+JOB_FAILED = object()
+
 
 def run_campus_job(
         thread: ProcessThread,
@@ -21,37 +24,40 @@ def run_campus_job(
         login_message: str,
         worker: Callable[[Any], Any],
         need_login: bool = True) -> Any:
-    """Login the current account into ``site_key`` (optional) and run ``worker``.
+    """Login a captured account into ``site_key`` (optional) and run ``worker``.
 
-    ``worker`` receives the site session (or ``None`` when ``need_login`` is false).
-    The function emits the usual ProcessThread error/cancel signals and returns
-    the worker result on success. The caller should emit ``result`` / ``hasFinished``.
+    The current account is snapshotted at start so a mid-job account switch cannot
+    mix credentials. ``worker`` receives the site session (or ``None`` when
+    ``need_login`` is false). Failure paths return ``JOB_FAILED``; a successful
+    worker may still return ``None``.
     """
     thread.can_run = True
-    if need_login and accounts.current is None:
+    account = accounts.current
+    if need_login and account is None:
         thread.error.emit(thread.tr("未登录"), thread.tr("请先添加一个账户"))
         thread.canceled.emit()
-        return None
+        thread.can_run = False
+        return JOB_FAILED
 
     try:
         session = None
         if need_login:
-            session = accounts.current.session_manager.get_session(site_key)
+            session = account.session_manager.get_session(site_key)
             thread.setIndeterminate.emit(True)
             thread.messageChanged.emit(login_message)
             session.ensure_login(
-                accounts.current.username,
-                accounts.current.password,
-                account=accounts.current,
-                mfa_provider=accounts.current.session_manager.mfa_provider,
+                account.username,
+                account.password,
+                account=account,
+                mfa_provider=account.session_manager.mfa_provider,
             )
             if not thread.can_run:
                 thread.canceled.emit()
-                return None
+                return JOB_FAILED
         result = worker(session)
         if not thread.can_run:
             thread.canceled.emit()
-            return None
+            return JOB_FAILED
         return result
     except QRCodeLoginCancelledError as e:
         logger.info("二维码登录已取消：%s", e)
@@ -76,7 +82,8 @@ def run_campus_job(
                 thread.tr("登录问题"),
                 thread.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"),
             )
-            accounts.current.MFASignal.emit(True)
+            if account is not None:
+                account.MFASignal.emit(True)
         else:
             thread.error.emit(thread.tr("服务器错误"), e.message)
         thread.canceled.emit()
@@ -92,4 +99,5 @@ def run_campus_job(
         logger.error("其他错误", exc_info=True)
         thread.error.emit(thread.tr("其他错误"), str(e))
         thread.canceled.emit()
-    return None
+    thread.can_run = False
+    return JOB_FAILED

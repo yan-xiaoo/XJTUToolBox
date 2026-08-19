@@ -48,6 +48,12 @@ class SchoolCourseQuery:
     TERM_LIST_URL = "https://jwxt.xjtu.edu.cn/jwapp/sys/kcbcx/modules/bjkcb/xnxqcx.do"
     DEPT_URL = "https://jwxt.xjtu.edu.cn/jwapp/code/44e02e19-e31b-4916-91b2-0a04380cbd3a.do"
     QUERY_URL = "https://jwxt.xjtu.edu.cn/jwapp/sys/kcbcx/modules/qxkcb/qxfbkccx.do"
+    AJAX_HEADERS = {
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": INIT_URL,
+    }
 
     def __init__(self, session: requests.Session):
         self.session = session
@@ -61,19 +67,21 @@ class SchoolCourseQuery:
 
     def current_term(self) -> str:
         self._init()
-        response = self.session.post(self.CURRENT_TERM_URL, timeout=15)
+        response = self.session.post(self.CURRENT_TERM_URL, headers=self.AJAX_HEADERS, timeout=15)
         rows = ((response.json().get("datas") or {}).get("dqxnxq") or {}).get("rows") or []
         return str((rows[0] or {}).get("DM") or "") if rows else ""
 
     def term_list(self) -> list[tuple[str, str]]:
         self._init()
-        response = self.session.post(self.TERM_LIST_URL, data={"*order": "-DM"}, timeout=15)
+        response = self.session.post(
+            self.TERM_LIST_URL, data={"*order": "-DM"}, headers=self.AJAX_HEADERS, timeout=15,
+        )
         rows = ((response.json().get("datas") or {}).get("xnxqcx") or {}).get("rows") or []
         return [(str(row.get("DM") or ""), str(row.get("MC") or row.get("DM") or "")) for row in rows]
 
     def departments(self) -> list[tuple[str, str]]:
         self._init()
-        response = self.session.post(self.DEPT_URL, timeout=15)
+        response = self.session.post(self.DEPT_URL, headers=self.AJAX_HEADERS, timeout=15)
         rows = ((response.json().get("datas") or {}).get("code") or {}).get("rows") or []
         return [(str(row.get("id") or ""), str(row.get("name") or "")) for row in rows]
 
@@ -117,9 +125,6 @@ class SchoolCourseQuery:
                 "name": "XGXKLBDM", "caption": "选修类别", "linkOpt": "AND",
                 "builderList": "cbl_m_List", "builder": "m_value_equal", "value": elective,
             })
-        conditions.append({
-            "name": "*order", "value": "+KKDWDM,+KCH,+KXH", "linkOpt": "AND", "builder": "m_value_equal",
-        })
         response = self.session.post(
             self.QUERY_URL,
             data={
@@ -131,7 +136,7 @@ class SchoolCourseQuery:
                 "pageSize": str(page_size),
                 "pageNumber": str(page),
             },
-            headers={"Accept": "application/json"},
+            headers=self.AJAX_HEADERS,
             timeout=20,
         )
         try:
