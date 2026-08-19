@@ -17,6 +17,19 @@ import requests.structures
 from auth import NewLogin, QRCodeLoginMixin, ServerError, is_safety_verify_page
 from .session_backend import AccessMode, SessionBackend
 
+
+def http_safe_headers(headers: Mapping) -> dict[str, str]:
+    """Drop header values HTTP cannot send (e.g. Chinese names stuffed into site state)."""
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        text = "" if value is None else str(value)
+        try:
+            text.encode("latin-1")
+        except UnicodeEncodeError:
+            continue
+        safe[str(key)] = text
+    return safe
+
 if TYPE_CHECKING:
     from app.utils.account import Account
     from app.utils.mfa import MFAProvider
@@ -199,7 +212,9 @@ class CommonLoginSession(metaclass=ABCMeta):
             headers["User-Agent"] = self.user_agent
 
         prepared_url = self.prepare_url_for_access_mode(url, skip_webvpn_rewrite=skip_webvpn_rewrite)
-        prepared_headers = self.prepare_headers_for_access_mode(headers, skip_webvpn_rewrite=skip_webvpn_rewrite)
+        prepared_headers = http_safe_headers(
+            self.prepare_headers_for_access_mode(headers, skip_webvpn_rewrite=skip_webvpn_rewrite)
+        )
         response = self.backend.session.request(method, prepared_url, headers=prepared_headers, **kwargs)
         if skip_auth_check or self._login_depth > 0 or not self.is_auth_failure_response(response):
             return response
