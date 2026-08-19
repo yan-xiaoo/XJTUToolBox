@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -11,10 +13,14 @@ from lxml import html as lxml_html
 
 from auth.constant import MOBILE_BROWSER_UA
 
+logger = logging.getLogger("default")
+
 
 BASE_URL = "http://rg.lib.xjtu.edu.cn:8086"
 SEAT_ID_RE = re.compile(r"(?:[A-Z]\d{2,4}|\b\d{3}\b)")
-CONFIRM_RE = re.compile(r"showConfirmModal\s*\(\s*['\"][^'\"]*['\"]\s*,\s*'(\w+)'\s*,\s*'(\d+)'\s*\)")
+CONFIRM_RE = re.compile(
+    r"showConfirmModal\s*\(\s*['\"][^'\"]*['\"]\s*,\s*['\"](\w+)['\"]\s*,\s*['\"](\d+)['\"]\s*\)"
+)
 MOBILE_UA = MOBILE_BROWSER_UA
 MOBILE_ONLY_HINT = "移动端模式"
 
@@ -66,6 +72,7 @@ class BookResult:
     success: bool
     message: str
     final_url: str = ""
+    booking: MyBooking | None = None
 
 
 @dataclass
@@ -150,8 +157,15 @@ class Library:
 
     def book_seat(self, seat_id: str, area_code: str, auto_swap: bool = True) -> BookResult:
         response = self._get(f"{BASE_URL}/seat/?kid={seat_id}&sp={area_code}")
-        if "/my/" in response.url or "/seat/my/" in response.url:
-            return BookResult(True, f"座位 {seat_id} 预约成功", response.url)
+        logger.info("book_seat: seat=%s area=%s url=%s len=%s", seat_id, area_code, response.url, len(response.text))
+        if self._is_my_page(response.url):
+            booking = self._booking_from_html(response.text, response.url)
+            logger.info(
+                "book_seat: landed on my-page booking=%s actions=%s",
+                None if booking is None else f"{booking.seat_id}/{booking.status_text}",
+                list(booking.action_urls) if booking else [],
+            )
+            return BookResult(True, f"座位 {seat_id} 预约成功", response.url, booking=booking)
         body_text = ""
         try:
             body_text = lxml_html.fromstring(response.text).text_content()
@@ -160,6 +174,17 @@ class Library:
         if auto_swap and any(token in body_text for token in ("已有预约", "已预约", "换座", "已经预约", "存在预约")):
             return self.swap_seat(seat_id, area_code)
         return BookResult(False, self._failure_reason(body_text), response.url)
+
+    def _is_my_page(self, url: str) -> bool:
+        candidates = [url]
+        try:
+            from auth import getOrdinaryUrl
+            ordinary = getOrdinaryUrl(url)
+            if ordinary:
+                candidates.append(ordinary)
+        except Exception:
+            pass
+        return any("/my/" in item or "/seat/my" in item for item in candidates)
 
     def _preflight(self, path: str) -> None:
         self._get(f"{BASE_URL}/my/")
@@ -187,27 +212,55 @@ class Library:
         booking = self.get_my_booking()
         booked = booking.seat_id if booking else ""
         if booked and (booked.lower() == seat_id.lower() or seat_id in booked or booked in seat_id):
-            return BookResult(True, f"已换座到 {booked}", response.url)
+            return BookResult(True, f"已换座到 {booked}", response.url, booking=booking)
         return BookResult(False, f"换座未生效{f'（当前仍为 {booked}）' if booked else ''}", response.url)
 
     def get_my_booking(self) -> MyBooking | None:
         for url in (f"{BASE_URL}/my/", f"{BASE_URL}/seat/my/", f"{BASE_URL}/seat/my"):
             response = self._get(url, timeout=12)
+            logger.info("get_my_booking: try %s -> %s len=%s", url, response.url, len(response.text))
             if len(response.text) < 50 or self._is_login_page(response.text, response.url):
+                logger.info("get_my_booking: skip login/empty page")
                 continue
-            try:
-                tree = lxml_html.fromstring(response.text)
-                body_text = tree.text_content()
-            except Exception:
-                continue
-            if "Not Found" in body_text and len(body_text) < 800:
-                continue
-            if any(token in body_text for token in ("暂无预约", "没有预约", "无预约", "暂无")) and not SEAT_ID_RE.search(body_text):
-                return None
-            booking = self._parse_booking(response.text, body_text)
+            booking = self._booking_from_html(response.text, response.url)
             if booking:
                 return booking
+        logger.info("get_my_booking: no active booking")
         return None
+
+    def _booking_from_html(self, html: str, url: str = "") -> MyBooking | None:
+        try:
+            tree = lxml_html.fromstring(html)
+            body_text = tree.text_content()
+        except Exception:
+            body_text = html
+        if "Not Found" in body_text and len(body_text) < 800:
+            return None
+        if any(token in body_text for token in ("暂无预约", "没有预约", "无预约")) and not SEAT_ID_RE.search(body_text):
+            return None
+        booking = self._parse_booking(html, body_text)
+        if booking is None or not booking.action_urls:
+            self._dump_booking_html(html, url)
+        if booking:
+            logger.info(
+                "get_my_booking: seat=%s area=%s status=%s actions=%s confirm=%s links=%s",
+                booking.seat_id, booking.area, booking.status_text,
+                list(booking.action_urls), len(CONFIRM_RE.findall(html)),
+                self._link_texts(html),
+            )
+        return booking
+
+    def _dump_booking_html(self, html: str, url: str) -> None:
+        logger.info("get_my_booking: empty actions url=%s html_prefix=%s", url, html[:400].replace("\n", " "))
+        try:
+            from app.utils.migrate_data import LOG_DIRECTORY
+            path = os.path.join(LOG_DIRECTORY, "library-booking.html")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(f"<!-- {url} -->\n")
+                handle.write(html)
+            logger.info("get_my_booking: dumped html to %s (%s bytes)", path, len(html))
+        except Exception as exc:
+            logger.info("get_my_booking: dump failed: %s", exc)
 
     def _parse_booking(self, html: str, body_text: str) -> MyBooking | None:
         status_matches = list(re.finditer(r"预约状态[:：]\s*(\S+)", body_text))
@@ -232,13 +285,57 @@ class Library:
             return MyBooking(seats[-1].group(0), area, status, action_urls)
         return None
 
+    def _link_texts(self, html: str) -> list[str]:
+        try:
+            tree = lxml_html.fromstring(html)
+        except Exception:
+            return []
+        texts = []
+        for element in tree.xpath(".//a | .//button | .//input[@type='submit']"):
+            text = (element.text_content() or element.get("value") or "").strip()
+            if text:
+                texts.append(text[:20])
+        return texts[:40]
+
     def _parse_actions(self, html: str) -> dict[str, str]:
-        actions = {}
+        actions: dict[str, str] = {}
         for action, reserve_id in CONFIRM_RE.findall(html):
             url = self._action_url(action, reserve_id)
             label = self._action_label(action)
             if url and label:
                 actions[label] = url
+            elif not label:
+                logger.info("get_my_booking: unknown confirm action=%s ri=%s", action, reserve_id)
+        try:
+            tree = lxml_html.fromstring(html)
+        except Exception:
+            tree = None
+        if tree is not None:
+            for element in tree.xpath(".//a[@href or @onclick or @data-href or @data-url] | .//button[@onclick]"):
+                text = (element.text_content() or "").strip()
+                label = self._label_from_text(text)
+                if not label or label in actions:
+                    continue
+                url = (
+                    element.get("data-href")
+                    or element.get("data-url")
+                    or element.get("data-action")
+                    or self._url_from_onclick(element.get("onclick") or "")
+                )
+                href = element.get("href") or ""
+                if not url and href and href not in {"#", "javascript:void(0)"} and "javascript:" not in href:
+                    url = href if href.startswith("http") else f"{BASE_URL}{href}"
+                if url:
+                    actions[label] = url if url.startswith("http") else f"{BASE_URL}{url}"
+            for form in tree.xpath(".//form[@action]"):
+                submit = form.xpath(".//button[@type='submit'] | .//input[@type='submit']")
+                text = ""
+                if submit:
+                    text = (submit[0].text_content() or submit[0].get("value") or "").strip()
+                label = self._label_from_text(text)
+                action = form.get("action") or ""
+                if label and label not in actions and action and action != "#":
+                    actions[label] = action if action.startswith("http") else f"{BASE_URL}{action}"
         if "取消预约" in actions:
             return actions
         for match in re.finditer(
@@ -250,6 +347,33 @@ class Library:
             if label and label not in actions:
                 actions[label] = f"{BASE_URL}{prefix}{reserve_id}"
         return actions
+
+    def _url_from_onclick(self, onclick: str) -> str:
+        match = CONFIRM_RE.search(onclick)
+        if match:
+            return self._action_url(match.group(1), match.group(2))
+        href = re.search(r"""(?:location\.href|location|window\.location)\s*=\s*['"]([^'"]+)['"]""", onclick)
+        if href:
+            url = href.group(1)
+            return url if url.startswith("http") else f"{BASE_URL}{url}"
+        path = re.search(r"""['"](/[^'"]+)['"]""", onclick)
+        if path:
+            url = path.group(1)
+            return url if url.startswith("http") else f"{BASE_URL}{url}"
+        return ""
+
+    def _label_from_text(self, text: str) -> str:
+        if "取消" in text and "预约" in text:
+            return "取消预约"
+        if "线上签到" in text or (("入馆" in text or "签到" in text) and "离" not in text and "返" not in text):
+            return "入馆签到"
+        if "中途离开" in text or "暂离" in text or "离馆" in text:
+            return "中途离开"
+        if "中途返回" in text or "回馆" in text:
+            return "中途返回"
+        if "取消" in text:
+            return "取消预约"
+        return ""
 
     def _action_label(self, action: str) -> str:
         text = action.lower()

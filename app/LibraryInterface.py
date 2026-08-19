@@ -3,7 +3,7 @@ from qfluentwidgets import BodyLabel, CheckBox, ComboBox, PrimaryPushButton, Pus
 
 from library import AREA_MAP, FLOORS, Library
 from .components.CampusPage import CampusPage
-from .utils import accounts
+from .utils import accounts, logger
 
 
 class LibraryInterface(CampusPage):
@@ -85,6 +85,7 @@ class LibraryInterface(CampusPage):
 
     def _sync_actions(self):
         actions = self.booking.action_urls if self.booking else {}
+        logger.info("library actions=%s booking=%s", list(actions), None if self.booking is None else self.booking.seat_id)
         self.checkinButton.setEnabled("入馆签到" in actions)
         self.leaveButton.setEnabled("中途离开" in actions)
         self.returnButton.setEnabled("中途返回" in actions)
@@ -146,7 +147,10 @@ class LibraryInterface(CampusPage):
     def _on_book(self, result):
         if result.success:
             self.success(self.tr("预约成功"), result.message)
-            self.refresh_booking()
+            if result.booking:
+                self._on_booking(result.booking)
+            if not (result.booking and result.booking.action_urls):
+                self.refresh_booking()
         else:
             self.warn(self.tr("预约失败"), result.message)
 
@@ -156,16 +160,19 @@ class LibraryInterface(CampusPage):
         self.start_job("library", self.tr("正在查询预约..."), lambda session: Library(session).get_my_booking(), self._on_booking)
 
     def _on_booking(self, booking):
+        if booking and self.booking and not booking.action_urls and self.booking.action_urls:
+            booking.action_urls = dict(self.booking.action_urls)
         self.booking = booking
         self._sync_actions()
         if booking is None:
             self.bookingLabel.setText(self.tr("当前没有有效预约"))
             return
-        self.bookingLabel.setText(
-            self.tr("当前预约：{seat}  {area}  {status}").format(
-                seat=booking.seat_id, area=booking.area, status=booking.status_text,
-            )
+        text = self.tr("当前预约：{seat}  {area}  {status}").format(
+            seat=booking.seat_id, area=booking.area, status=booking.status_text,
         )
+        if not booking.action_urls:
+            text += self.tr("；未识别到操作按钮，详情已写入日志")
+        self.bookingLabel.setText(text)
 
     def run_action(self, label: str):
         if not self.require_account():
