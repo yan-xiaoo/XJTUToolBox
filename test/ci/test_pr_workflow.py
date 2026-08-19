@@ -333,6 +333,14 @@ class TestShardRunner(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown test domain"):
             build_suite("unknown")
 
+    @patch(
+        "test.ci.run_test_shard.unittest.defaultTestLoader.loadTestsFromName",
+        return_value=unittest.TestSuite(),
+    )
+    def test_domain_with_zero_loaded_cases_is_rejected(self, _load_tests) -> None:
+        with self.assertRaisesRegex(ValueError, "test domain is empty: ai"):
+            build_suite("ai")
+
     @patch("test.ci.run_test_shard.unittest.defaultTestLoader.loadTestsFromName")
     def test_each_suite_loads_only_declared_modules(self, load_tests) -> None:
         load_tests.side_effect = lambda module: unittest.FunctionTestCase(
