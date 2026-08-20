@@ -11,7 +11,17 @@ push，让 `synchronize` 触发新运行。GitHub 原生 rerun 权限由仓库�
 
 ## 本地测试
 
-先按[开发环境搭建](./setup.md)安装锁定依赖。测试合同为：
+先按[开发环境搭建](./setup.md)安装锁定依赖，然后用一行命令运行与 PR CI 相同的测试合同和
+五个测试域：
+
+```bash
+uv run --frozen local_test.py
+```
+
+脚本会隔离 Qt/XDG 临时目录，并在任一测试失败时返回非零；结果只证明当前本地平台和解释器，
+不能替代 GitHub Actions 的其它平台证据。
+
+如需单独检查测试合同：
 
 ```bash
 uv run --frozen python -m test.ci.check_test_contract
