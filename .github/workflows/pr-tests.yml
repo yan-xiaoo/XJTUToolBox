@@ -75,10 +75,6 @@ jobs:
       PYTHONUTF8: "1"
       QT_QPA_PLATFORM: offscreen
       QT_OPENGL: software
-      XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state
-      XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
-      XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
-      XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,6 +102,11 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Run ${{ matrix.domain.name }} tests
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
+          XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache
         run: uv run --frozen python -m test.ci.run_test_shard --domain ${{ matrix.domain.id }} --expected-machine ${{ matrix.platform.machine }}
 
   linux-arm-shards:
@@ -194,10 +195,6 @@ jobs:
       QT_QPA_PLATFORM: offscreen
       QT_OPENGL: software
       LIBGL_ALWAYS_SOFTWARE: "1"
-      XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state
-      XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
-      XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
-      XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -224,6 +221,11 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Run historical bug regressions
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
+          XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache
         run: uv run --frozen python -m unittest -v test.ai_assistant.test_ai_features test.app.test_notice_search_ui test.notification.test_notification_sources test.app.test_notice_thread test.schedule.test_lesson test.test_crawler_challenge
 
   ci-gate:
