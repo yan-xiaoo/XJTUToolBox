@@ -12,6 +12,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, call, patch
 
+import local_test
+
 from test.ci.check_test_contract import (
     REPOSITORY_ROOT,
     contract_errors,
@@ -76,6 +78,100 @@ ARM_PINS = (
     "darkdetect==0.8.0",
     "xcffib==1.12.0",
 )
+
+
+class TestLocalTestRunner(unittest.TestCase):
+    def test_commands_reuse_contract_and_every_registered_domain(self) -> None:
+        commands = local_test.test_commands("/example/python")
+
+        self.assertEqual(
+            (
+                "/example/python",
+                "-m",
+                "unittest",
+                "-v",
+                "test.ci.test_pr_workflow",
+            ),
+            commands[0].argv,
+        )
+        self.assertEqual(
+            [shard.id for shard in SHARDS],
+            [command.argv[-1] for command in commands[1:]],
+        )
+        for command in commands[1:]:
+            self.assertEqual(
+                (
+                    "/example/python",
+                    "-m",
+                    "test.ci.run_test_shard",
+                    "--domain",
+                ),
+                command.argv[:-1],
+            )
+
+    def test_isolated_environment_creates_writable_qt_and_xdg_paths(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            base = {"PRESERVED": "yes"}
+
+            environment = local_test.isolated_environment(root, base)
+
+            self.assertEqual("yes", environment["PRESERVED"])
+            self.assertEqual("1", environment["PYTHONUTF8"])
+            self.assertEqual("offscreen", environment["QT_QPA_PLATFORM"])
+            self.assertEqual("software", environment["QT_OPENGL"])
+            self.assertEqual("1", environment["LIBGL_ALWAYS_SOFTWARE"])
+            for name in (
+                "XDG_STATE_HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME",
+                "XDG_CACHE_HOME",
+            ):
+                path = Path(environment[name])
+                self.assertTrue(path.is_dir())
+                self.assertTrue(path.is_relative_to(root))
+            self.assertEqual({"PRESERVED": "yes"}, base)
+
+    def test_run_local_tests_stops_at_the_first_failure(self) -> None:
+        results = [
+            subprocess.CompletedProcess([], 0),
+            subprocess.CompletedProcess([], 9),
+        ]
+        runner = Mock(side_effect=results)
+
+        with patch("builtins.print"):
+            return_code = local_test.run_local_tests(runner=runner)
+
+        self.assertEqual(9, return_code)
+        self.assertEqual(2, runner.call_count)
+
+    def test_run_local_tests_runs_every_command_and_removes_temporary_paths(self) -> None:
+        observed_roots: list[Path] = []
+
+        def successful_runner(argv, *, cwd, env, check):
+            self.assertEqual(REPOSITORY_ROOT, cwd)
+            self.assertFalse(check)
+            self.assertEqual(sys.executable, argv[0])
+            root = Path(env["XDG_STATE_HOME"]).parent
+            observed_roots.append(root)
+            for name in (
+                "XDG_STATE_HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME",
+                "XDG_CACHE_HOME",
+            ):
+                self.assertTrue(Path(env[name]).is_dir())
+            return subprocess.CompletedProcess(argv, 0)
+
+        original_environment = os.environ.copy()
+        with patch("builtins.print"):
+            return_code = local_test.run_local_tests(runner=successful_runner)
+
+        self.assertEqual(0, return_code)
+        self.assertEqual(1 + len(SHARDS), len(observed_roots))
+        self.assertEqual(1, len(set(observed_roots)))
+        self.assertFalse(observed_roots[0].exists())
+        self.assertEqual(original_environment, os.environ)
 
 
 def job_section(workflow: str, job_id: str) -> str:
@@ -715,6 +811,7 @@ class TestWorkflowContract(unittest.TestCase):
             self.assertIn(platform_id, documentation)
             self.assertIn(runner.replace("windows-latest", "Windows latest").replace("macos-latest", "macOS latest").replace("macos-15-intel", "macOS 15 Intel").replace("ubuntu-22.04", "Ubuntu 22.04"), documentation)
         for phrase in (
+            "uv run --frozen local_test.py",
             "test/ci/**",
             "test/feature/ci/test_case.py",
             "每个产品测试模块恰好属于一个主测试域",
