@@ -35,6 +35,13 @@ WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "pr-tests.yml"
 TESTING_DOC_PATH = REPOSITORY_ROOT / "docs" / "development" / "testing.md"
 PR_TEMPLATE_PATH = REPOSITORY_ROOT / ".github" / "pull_request_template.md"
 
+XDG_RUNNER_TEMP_ENV = (
+    "XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state",
+    "XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config",
+    "XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data",
+    "XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache",
+)
+
 
 HOSTED_PLATFORMS = (
     ("linux-x64-py310", "ubuntu-22.04", "3.10", "x86_64"),
@@ -78,6 +85,61 @@ def job_section(workflow: str, job_id: str) -> str:
     remainder = workflow.split(marker, 1)[1]
     next_job = re.search(r"(?m)^  [a-z0-9-]+:\s*$", remainder)
     return remainder[: next_job.start()] if next_job else remainder
+
+
+def job_env_section(workflow: str, job_id: str) -> str:
+    section = job_section(workflow, job_id)
+    marker = "    env:\n"
+    if marker not in section:
+        return ""
+    remainder = section.split(marker, 1)[1]
+    next_property = re.search(r"(?m)^    [a-zA-Z][a-zA-Z0-9_-]*:", remainder)
+    return remainder[: next_property.start()] if next_property else remainder
+
+
+def named_step_section(workflow: str, job_id: str, step_name: str) -> str:
+    section = job_section(workflow, job_id)
+    marker = f"      - name: {step_name}"
+    if marker not in section:
+        return ""
+    remainder = section.split(marker, 1)[1]
+    next_step = re.search(r"(?m)^      - name: ", remainder)
+    return remainder[: next_step.start()] if next_step else remainder
+
+
+def named_step_env_section(workflow: str, job_id: str, step_name: str) -> str:
+    section = named_step_section(workflow, job_id, step_name)
+    marker = "\n        env:\n"
+    if marker not in section:
+        return ""
+    remainder = section.split(marker, 1)[1]
+    next_property = re.search(r"(?m)^        [a-zA-Z][a-zA-Z0-9_-]*:", remainder)
+    return remainder[: next_property.start()] if next_property else remainder
+
+
+def xdg_context_contract_errors(workflow: str) -> list[str]:
+    errors: list[str] = []
+    jobs_section = (
+        workflow.split("jobs:\n", 1)[1] if "jobs:\n" in workflow else ""
+    )
+    for job_id in re.findall(r"(?m)^  ([a-z0-9-]+):\s*$", jobs_section):
+        if re.search(r"\$\{\{\s*runner\.", job_env_section(workflow, job_id)):
+            errors.append(f"{job_id} job env uses runner context")
+
+    targets = (
+        ("test-shards", "Run ${{ matrix.domain.name }} tests"),
+        ("existing-bug-regressions", "Run historical bug regressions"),
+    )
+    for job_id, step_name in targets:
+        step = named_step_section(workflow, job_id, step_name)
+        if not step:
+            errors.append(f"{job_id} test step is missing")
+            continue
+        step_env = named_step_env_section(workflow, job_id, step_name)
+        for entry in XDG_RUNNER_TEMP_ENV:
+            if step_env.count(entry) != 1:
+                errors.append(f"{job_id} test step has unexpected {entry}")
+    return errors
 
 
 def matrix_records(
@@ -438,10 +500,66 @@ class TestWorkflowContract(unittest.TestCase):
             self.assertEqual(1, section.count(f"- id: {shard.id}\n"))
         self.assertIn("uv sync --frozen --group dev", section)
         self.assertIn("--expected-machine ${{ matrix.platform.machine }}", section)
-        self.assertIn("XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state", section)
-        self.assertIn("XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config", section)
-        self.assertIn("XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data", section)
-        self.assertIn("XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache", section)
+
+    def test_xdg_runner_context_is_step_scoped(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertEqual([], xdg_context_contract_errors(workflow))
+
+        arm_marker = "  linux-arm-shards:"
+        prefix, arm_and_after = workflow.split(arm_marker, 1)
+        job_level_runner = prefix + arm_marker + arm_and_after.replace(
+            '      LIBGL_ALWAYS_SOFTWARE: "1"\n',
+            '      LIBGL_ALWAYS_SOFTWARE: "1"\n'
+            "      BROKEN: ${{ runner.temp }}/broken\n",
+            1,
+        )
+        self.assertIn(
+            "linux-arm-shards job env uses runner context",
+            xdg_context_contract_errors(job_level_runner),
+        )
+
+        for job_id, occurrence in (
+            ("test-shards", 1),
+            ("existing-bug-regressions", 2),
+        ):
+            with self.subTest(job=job_id):
+                before, separator, after = workflow.partition(
+                    "          XDG_CACHE_HOME: "
+                    "${{ runner.temp }}/xjtu-test-cache\n"
+                )
+                if occurrence == 2:
+                    second_before, separator, after = after.partition(
+                        "          XDG_CACHE_HOME: "
+                        "${{ runner.temp }}/xjtu-test-cache\n"
+                    )
+                    before += (
+                        "          XDG_CACHE_HOME: "
+                        "${{ runner.temp }}/xjtu-test-cache\n" + second_before
+                    )
+                self.assertTrue(separator)
+                missing_step_xdg = before + after
+                self.assertIn(
+                    f"{job_id} test step has unexpected "
+                    "XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache",
+                    xdg_context_contract_errors(missing_step_xdg),
+                )
+
+        xdg_in_run_script = workflow.replace(
+            "        run: uv run --frozen python -m test.ci.run_test_shard",
+            "        run: |\n"
+            "          # XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache\n"
+            "          uv run --frozen python -m test.ci.run_test_shard",
+            1,
+        ).replace(
+            "          XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache\n",
+            "",
+            1,
+        )
+        self.assertIn(
+            "test-shards test step has unexpected "
+            "XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache",
+            xdg_context_contract_errors(xdg_in_run_script),
+        )
 
     def test_matrix_members_and_job_names_are_exact(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -544,10 +662,6 @@ class TestWorkflowContract(unittest.TestCase):
             "existing-bug-regressions",
         )
         self.assertIn("needs: test-contract", section)
-        self.assertIn("XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state", section)
-        self.assertIn("XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config", section)
-        self.assertIn("XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data", section)
-        self.assertIn("XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache", section)
         for module in REGRESSION_MODULES:
             self.assertEqual(1, section.count(module))
 
