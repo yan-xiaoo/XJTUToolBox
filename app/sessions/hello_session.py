@@ -77,10 +77,13 @@ def extract_hello_token(response) -> str:
 
 
 class HelloTokenMixin:
-    """从 CAS 登录落地 URL 上取出 JWT，而不是再 GET 一次 OAuth 入口。"""
+    """从 OAuth 重定向链中取出 Hello JWT。"""
 
     def postLogin(self, login_response) -> None:
         token = extract_hello_token(login_response)
+        if not token:
+            oauth_response = self._get(HELLO_LOGIN_URL, allow_redirects=True)
+            token = extract_hello_token(oauth_response)
         if not token:
             raise ServerError(500, "个人信息系统未返回访问令牌")
         session = self.session
