@@ -51,11 +51,7 @@ class JiaoxiaozhiLauncherTest(unittest.TestCase):
         for platform, suffix in (("win32", ".exe"), ("linux", ""), ("darwin", "")):
             with self.subTest(platform=platform):
                 executable = Path("/tmp/packaged app/XJTUToolBox" + suffix)
-                helper = (
-                    executable.resolve().parent
-                    / "SchoolAIBrowser"
-                    / f"SchoolAIBrowser{suffix}"
-                )
+                helper = executable.parent / "SchoolAIBrowser" / f"SchoolAIBrowser{suffix}"
                 with patch("app.school_ai_launcher.sys.frozen", True, create=True), \
                      patch("app.school_ai_launcher.sys.executable", str(executable)), \
                      patch("app.school_ai_launcher.sys.platform", platform), \
