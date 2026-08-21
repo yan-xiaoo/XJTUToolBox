@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 import requests
@@ -44,34 +43,9 @@ class HelloProfile:
         payload = self._request_profile()
         if payload.get("state") != 200:
             raise ServerError(payload.get("state") or 1, payload.get("message") or "查询学籍失败")
-        data_value = payload.get("data")
-        if data_value is None:
-            data: Mapping[str, object] = {}
-        elif isinstance(data_value, Mapping):
-            data = data_value
-        else:
-            raise ServerError(1, "学籍接口返回了无法解析的数据")
-
-        student_value = data.get("studentBean")
-        if student_value is None:
-            student: Mapping[str, object] = {}
-        elif isinstance(student_value, Mapping):
-            student = student_value
-        else:
-            raise ServerError(1, "学籍接口返回了无法解析的数据")
-
-        nested_teacher = student.get("teacherBean")
-        top_level_teacher = data.get("teacherBean")
-        if nested_teacher is not None:
-            if not isinstance(nested_teacher, Mapping):
-                raise ServerError(1, "学籍接口返回了无法解析的数据")
-            teacher = nested_teacher
-        elif top_level_teacher is not None:
-            if not isinstance(top_level_teacher, Mapping):
-                raise ServerError(1, "学籍接口返回了无法解析的数据")
-            teacher = top_level_teacher
-        else:
-            teacher = {}
+        data = payload.get("data") or {}
+        student = data.get("studentBean") or {}
+        teacher = student.get("teacherBean") or {}
         sex_code = str(student.get("sex") or "")
         sex = {"1": "男", "2": "女"}.get(sex_code, sex_code)
         major = re.sub(r"^\d{4,}\s*", "", str(student.get("professionName") or ""))
