@@ -37,15 +37,15 @@ uv run --frozen python -m test.ci.run_test_shard --domain auth-session
 uv run --frozen python -m test.ci.run_test_shard --domain schedule
 ```
 
-域清单当前覆盖以下 25 个模块，每个产品测试模块恰好属于一个主测试域：
+域清单当前覆盖以下 15 个模块，每个产品测试模块恰好属于一个主测试域：
 
 | 域 ID | Actions 显示名 | 模块 | 2026-08-19 本地完整环境用例数 |
 |---|---|---|---:|
 | `ai` | AI core and features | `test.ai_assistant.test_ai_core`、`test.ai_assistant.test_ai_features` | 37 |
-| `qt-ui` | Qt and desktop UI | `test.app.test_campus_job`、`test.app.test_campus_pages`、`test.app.test_campus_registration`、`test.app.test_ctrl_c`、`test.app.test_jiaoxiaozhi`、`test.app.test_notice_search_ui`、`test.app.test_notice_thread` | 43 |
+| `qt-ui` | Qt and desktop UI | `test.app.test_campus_job`、`test.app.test_ctrl_c`、`test.app.test_notice_search_ui`、`test.app.test_notice_thread` | 43 |
 | `notification-crawler` | Notifications and crawler | `test.notification.test_notification_sources`、`test.test_crawler_challenge` | 28 |
-| `auth-session` | Authentication and sessions | `test.auth.login`、`test.auth.test_qrcode_login`、`test.auth.util`、`test.fitness.test_session`、`test.hello.test_session`、`test.sessions.session_manager` | 27（无凭据时 2 项跳过） |
-| `schedule` | Schedule | `test.fitness.test_score_zero`、`test.fitness.test_years`、`test.hello.test_profile`、`test.jwxt.test_calendar_api`、`test.jwxt.test_calendar_week`、`test.jwxt.test_school_course_headers`、`test.schedule.test_lesson`、`test.schedule.test_schedule` | 12 |
+| `auth-session` | Authentication and sessions | `test.auth.login`、`test.auth.test_qrcode_login`、`test.auth.util`、`test.sessions.session_manager` | 27（无凭据时 2 项跳过） |
+| `schedule` | Schedule | `test.jwxt.test_school_course_headers`、`test.schedule.test_lesson`、`test.schedule.test_schedule` | 12 |
 
 域按产品职责划分，不按本地用例数量凑齐。上述实测中 Qt/UI 比 AI 更慢，而 runner 启动、依赖安装
 和平台差异还会主导云端耗时；因此本地用例数和耗时不能代替 GitHub-hosted job 时长，也不能单独

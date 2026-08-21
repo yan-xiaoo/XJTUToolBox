@@ -12,22 +12,11 @@ from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import QApplication
 
 from app.JiaoxiaozhiInterface import JiaoxiaozhiInterface
+from app.school_ai_launcher import school_ai_browser_command
 from app.school_ai_policy import JIAOXIAOZHI_URL
 
 
 APP = QApplication.instance() or QApplication([])
-
-
-def school_ai_browser_command():
-    from app.school_ai_launcher import school_ai_browser_command as command
-
-    return command()
-
-
-def tearDownModule():
-    # Keep this optional launcher policy import local to the dedicated smoke
-    # module so legacy AI tests can verify the dormant Qt 6 path in isolation.
-    sys.modules.pop("app.school_ai_launcher", None)
 
 
 class JiaoxiaozhiLauncherTest(unittest.TestCase):

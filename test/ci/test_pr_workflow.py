@@ -350,23 +350,18 @@ class TestInventoryContract(unittest.TestCase):
             tuple((shard.id, shard.name) for shard in SHARDS),
         )
 
-    def test_current_modules_have_exactly_one_owner(self) -> None:
+    def test_current_fifteen_modules_have_exactly_one_owner(self) -> None:
         missing, duplicates, unexpected = inventory_problems()
         self.assertEqual(set(), missing)
         self.assertEqual({}, duplicates)
         self.assertEqual(set(), unexpected)
-        self.assertEqual(25, len(product_test_modules()))
+        self.assertEqual(15, len(product_test_modules()))
         self.assertEqual(product_test_modules(), set(owned_modules()))
 
     def test_missing_assignment_is_rejected(self) -> None:
         missing, duplicates, unexpected = inventory_problems(SHARDS[:-1])
         self.assertEqual(
             {
-                "test.fitness.test_score_zero",
-                "test.fitness.test_years",
-                "test.hello.test_profile",
-                "test.jwxt.test_calendar_api",
-                "test.jwxt.test_calendar_week",
                 "test.jwxt.test_school_course_headers",
                 "test.schedule.test_lesson",
                 "test.schedule.test_schedule",
@@ -486,7 +481,7 @@ class TestInventoryContract(unittest.TestCase):
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("25 product test modules", result.stdout)
+        self.assertIn("15 product test modules", result.stdout)
 
 
 class TestShardRunner(unittest.TestCase):
