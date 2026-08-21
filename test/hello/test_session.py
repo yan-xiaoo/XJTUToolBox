@@ -121,7 +121,10 @@ class HelloJwtAndSessionTest(unittest.TestCase):
         probe = _LoginProbe(session)
         probe._get = Mock(
             return_value=_response(
-                f"http://hello.xjtu.edu.cn/yingxin-pc/?token={token}&uuid=redacted"
+                "http://hello.xjtu.edu.cn/yingxin-pc/index?uuid=redacted",
+                history=[_response(
+                    f"http://hello.xjtu.edu.cn/yingxin-pc/?token={token}&uuid=redacted"
+                )],
             )
         )
 
