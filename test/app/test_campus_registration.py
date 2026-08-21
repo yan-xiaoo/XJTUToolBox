@@ -1,13 +1,15 @@
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 
 from app.FitnessInterface import FitnessInterface
-from app.HomeInterface import HomeFrame
+from app.HomeInterface import HomeFrame, validate_card_ids
 from app.JiaoxiaozhiInterface import JiaoxiaozhiInterface
 from app.ProfileInterface import ProfileInterface
 from app.SchoolCalendarInterface import SchoolCalendarInterface
@@ -17,6 +19,8 @@ from app.sessions.hello_session import HelloSession
 from app.utils.session_manager import SessionManager
 
 
+if QApplication.instance() is None:
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 APP = QApplication.instance() or QApplication([])
 
 
@@ -45,10 +49,26 @@ class CampusRegistrationSmokeTest(unittest.TestCase):
         frame.linkCardView = Mock()
         frame.setupCards()
         cards = frame.linkCardView.setAvailableCards.call_args.args[0]
-        self.assertEqual(len(cards), len(set(cards)))
+        self.assertEqual(tuple(cards), validate_card_ids(cards.keys()))
+        with self.assertRaises(ValueError):
+            validate_card_ids(["duplicate", "duplicate"])
         for key in ("profile", "fitness", "school_calendar", "jiaoxiaozhi"):
             self.assertIn(key, cards)
             cards[key]["callback"]()
+        self.assertEqual(
+            [call.args[0] for call in frame.main_window.switchTo.call_args_list],
+            [frame.main_window.profile_interface, frame.main_window.fitness_interface,
+             frame.main_window.school_calendar_interface, frame.main_window.jiaoxiaozhi_interface],
+        )
+
+    def test_source_and_frozen_resource_paths_resolve(self):
+        from app.utils.resources import resource_path
+        source = resource_path("assets/icons/login.png")
+        self.assertTrue(source.is_absolute())
+        self.assertTrue(source.is_file())
+        with patch("app.utils.resources.sys._MEIPASS", "/tmp/frozen-root", create=True):
+            self.assertEqual(resource_path("assets/icons/login.png"),
+                             Path("/tmp/frozen-root/assets/icons/login.png"))
 
     def test_new_modules_import_without_qt6_webengine(self):
         for name in (

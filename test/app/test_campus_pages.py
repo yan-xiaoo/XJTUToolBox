@@ -1,12 +1,14 @@
 import os
 import unittest
+import base64
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QShowEvent
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QWidget
 
 from app.FitnessInterface import FitnessInterface
 from app.ProfileInterface import ProfileInterface
@@ -16,7 +18,43 @@ from fitness.score import FitnessItem, FitnessScore, FitnessYear
 from hello.profile import StudentProfile
 
 
+if QApplication.instance() is None:
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 APP = QApplication.instance() or QApplication([])
+
+
+class _Signal:
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, slot):
+        self.slots.append(slot)
+
+    def emit(self, *args):
+        for slot in tuple(self.slots):
+            slot(*args)
+
+
+class _PageThread:
+    def __init__(self, *args, **kwargs):
+        self.can_run = True
+        self.result = _Signal()
+        self.error = _Signal()
+        self.hasFinished = _Signal()
+        self.canceled = _Signal()
+        self.started = False
+
+    def isRunning(self):
+        return self.started
+
+    def start(self):
+        self.started = True
+
+
+class _ProcessWidget(QWidget):
+    def __init__(self, *args, **kwargs):
+        parent = args[1] if len(args) > 1 and isinstance(args[1], QWidget) else None
+        super().__init__(parent)
 
 
 def _term(term_id="1", *, current_week=None, holidays=None):
@@ -86,6 +124,20 @@ class CampusPageLifecycleTest(unittest.TestCase):
             query.reset_mock()
             page.yearBox.setCurrentIndex(0)
             query.assert_called_once()
+            page._on_score(FitnessScore("2", "Alice", "88", "B", "r", "ok", "F", "4", [
+                FitnessItem("run", "跑步", "88", "B", "免测"),
+            ]))
+            self.assertEqual(page.table.item(0, 1).text(), "88")
+
+    def test_fitness_score_result_replaces_existing_cells(self):
+        page = FitnessInterface()
+        self._track(page)
+        page._on_score(FitnessScore("1", "Alice", "90", "A", "r", "ok", "F", "4", [
+            FitnessItem("bmi", "身高体重", "90", "A", "x"),
+        ]))
+        self.assertEqual(page.table.item(0, 1).text(), "90")
+        page._on_score(FitnessScore("1", "Alice", "0", "B", "r", "ok", "F", "4", []))
+        self.assertEqual(page.table.rowCount(), 0)
 
     def test_unselected_fitness_year_warns_without_request(self):
         page = FitnessInterface()
@@ -133,8 +185,62 @@ class CampusPageLifecycleTest(unittest.TestCase):
              patch.object(page, "start_job") as start:
             page.refresh()
         self.assertEqual(page.photo.text(), "暂无照片")
-        start.assert_called_once()
 
+    def test_profile_valid_photo_is_loaded_and_scaled(self):
+        page = ProfileInterface()
+        self._track(page)
+        profile = StudentProfile(*([""] * 19))
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        with patch.object(page, "success"), patch.object(page.photo, "setPixmap") as set_pixmap, \
+             patch("app.ProfileInterface.QPixmap") as pixmap_type:
+            pixmap = pixmap_type.return_value
+            pixmap.loadFromData.return_value = True
+            scaled = pixmap.scaled.return_value
+            page._on_result((profile, png))
+        pixmap.loadFromData.assert_called_once_with(png)
+        pixmap.scaled.assert_called_once_with(
+            140, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation,
+        )
+        set_pixmap.assert_called_once_with(scaled)
+
+    def test_profile_download_failure_returns_empty_photo(self):
+        page = ProfileInterface()
+        self._track(page)
+        account_state = SimpleNamespace(current=SimpleNamespace(uuid="a"))
+        profile = StudentProfile(*([""] * 19))
+        with patch("app.ProfileInterface.accounts", account_state), \
+             patch("app.components.CampusPage.accounts", account_state), \
+             patch.object(page, "start_job") as start:
+            page.refresh()
+        worker = start.call_args.args[2]
+        session = SimpleNamespace(get=Mock(side_effect=OSError("download")))
+        with patch("app.ProfileInterface.HelloProfile.get_profile", return_value=profile):
+            self.assertEqual(worker(session), (profile, b""))
+
+    def test_profile_worker_error_clears_old_data_and_page_remains_operable(self):
+        page = ProfileInterface()
+        self._track(page)
+        page.fields.setText("old sensitive data")
+        page.photo.setText("old photo")
+        account_state = SimpleNamespace(current=SimpleNamespace(uuid="a"))
+        with patch("app.ProfileInterface.accounts", account_state), \
+             patch("app.components.CampusPage.accounts", account_state), \
+             patch("app.components.CampusPage.CampusFeatureThread", _PageThread), \
+             patch("app.components.CampusPage.ProcessWidget", _ProcessWidget), \
+             patch.object(page, "warn") as warn:
+            page.refresh()
+            page.thread.error.emit("查询失败", "offline")
+        self.assertNotIn("old sensitive", page.fields.text())
+        self.assertEqual(page.photo.text(), "暂无照片")
+        self.assertTrue(page.refreshButton.isEnabled())
+        warn.assert_called_once_with("查询失败", "offline")
+
+    def test_profile_bad_photo_decode_clears_existing_photo(self):
+        page = ProfileInterface()
+        self._track(page)
+        page.photo.setText("old photo")
         profile = StudentProfile(*([""] * 19))
         with patch.object(page, "success"):
             page._on_result((profile, b"not-an-image"))
