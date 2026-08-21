@@ -7,7 +7,7 @@ import requests
 from auth import ServerError
 from app.threads.CampusFeatureThread import CampusFeatureThread
 from app.utils.mfa import MFACancelledError, MFAUnavailableError
-from app.utils.qrcode_login import QRCodeLoginCancelledError
+from app.utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 from app.utils.campus_job import JOB_FAILED, run_campus_job
 
 
@@ -180,6 +180,7 @@ class CampusJobTest(unittest.TestCase):
             (MFACancelledError("cancel"), "安全验证已取消"),
             (MFAUnavailableError("missing"), "登录问题"),
             (QRCodeLoginCancelledError("cancel"), "扫码登录已取消"),
+            (QRCodeLoginUnavailableError("missing"), "登录问题"),
             (ServerError(500, "server"), "服务器错误"),
             (requests.ConnectionError("offline"), "无网络连接"),
             (requests.Timeout("slow"), "网络错误"),
@@ -204,6 +205,24 @@ class CampusJobTest(unittest.TestCase):
                 thread.error.emit.assert_called_once()
                 self.assertEqual(thread.error.emit.call_args.args[0], title)
                 thread.canceled.emit.assert_called_once()
+
+    def test_worker_exception_emits_error_and_cancel_without_result(self):
+        account = SimpleNamespace(
+            username="u", password="p", MFASignal=Mock(),
+            session_manager=SimpleNamespace(
+                get_session=lambda _: SimpleNamespace(ensure_login=Mock()),
+                mfa_provider=None,
+            ),
+        )
+        thread = _thread()
+        worker = Mock(side_effect=RuntimeError("worker failed"))
+        with patch("app.utils.campus_job.accounts") as accounts:
+            accounts.current = account
+            result = run_campus_job(thread, site_key="hello", login_message="login", worker=worker)
+        self.assertIs(result, JOB_FAILED)
+        worker.assert_called_once()
+        thread.error.emit.assert_called_once_with("其他错误", "worker failed")
+        thread.canceled.emit.assert_called_once()
 
 
 class CampusFeatureThreadTest(unittest.TestCase):

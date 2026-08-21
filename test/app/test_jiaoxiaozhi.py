@@ -8,13 +8,15 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QUrl
+from PyQt5.QtCore import QUrl, Qt
 from PyQt5.QtWidgets import QApplication
 
 from app.JiaoxiaozhiInterface import JiaoxiaozhiInterface
 from app.school_ai_policy import JIAOXIAOZHI_URL
 
 
+if QApplication.instance() is None:
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 APP = QApplication.instance() or QApplication([])
 
 
@@ -35,6 +37,15 @@ class JiaoxiaozhiLauncherTest(unittest.TestCase):
         with patch("app.school_ai_launcher.sys.frozen", False, create=True), \
              patch("app.school_ai_launcher.importlib.util.find_spec", return_value=None):
             self.assertIsNone(school_ai_browser_command())
+
+    def test_source_environment_with_webengine_uses_module_command(self):
+        with patch("app.school_ai_launcher.sys.frozen", False, create=True), \
+             patch("app.school_ai_launcher.importlib.util.find_spec", return_value=object()), \
+             patch("app.school_ai_launcher.sys.executable", "/tmp/python"):
+            self.assertEqual(
+                school_ai_browser_command(),
+                ("/tmp/python", ["-m", "app.school_ai_browser"]),
+            )
 
     def test_frozen_platform_helper_names_and_spaces(self):
         for platform, suffix in (("win32", ".exe"), ("linux", ""), ("darwin", "")):
@@ -73,9 +84,11 @@ class JiaoxiaozhiLauncherTest(unittest.TestCase):
                 with patch("app.JiaoxiaozhiInterface.school_ai_browser_command", return_value=command), \
                      patch("app.JiaoxiaozhiInterface.subprocess.Popen", side_effect=popen_error), \
                      patch("app.JiaoxiaozhiInterface.QDesktopServices.openUrl", return_value=True) as open_url, \
-                     patch.object(page, "info"), patch.object(page, "warn"):
+                     patch.object(page, "info"), patch.object(page, "warn") as warn:
                     page.launch()
                 open_url.assert_called_once_with(QUrl(JIAOXIAOZHI_URL))
+                if popen_error:
+                    warn.assert_called_once_with("启动失败", "failed")
 
     def test_open_url_failure_warns_user(self):
         page = JiaoxiaozhiInterface()

@@ -19,7 +19,8 @@ os.environ.setdefault("XDG_CONFIG_HOME", "/tmp/xjtu-test-config")
 from PyQt5.QtCore import Qt, QRect, QThread
 from PyQt5.QtWidgets import QApplication
 
-QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+if QApplication.instance() is None:
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 
 from qfluentwidgets import (
     EditableComboBox,
