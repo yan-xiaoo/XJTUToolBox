@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from collections.abc import Mapping
 
 import requests
 
@@ -34,10 +33,10 @@ class CalendarTerm:
         try:
             cap = int(self.week_number)
         except (TypeError, ValueError):
-            return None
-        if cap <= 0:
-            return None
-        return min(week, cap)
+            cap = None
+        if cap is not None:
+            week = min(week, cap)
+        return max(1, week)
 
 
 @dataclass
@@ -78,31 +77,18 @@ class SchoolCalendar:
             raise ServerError(1, "校历接口返回了无法解析的数据")
         if payload.get("code") != 200:
             raise ServerError(payload.get("code") or 1, payload.get("msg") or "查询校历失败")
-        raw_terms = payload.get("data")
-        if raw_terms is None:
-            raw_terms = []
-        if not isinstance(raw_terms, list):
-            raise ServerError(1, "校历接口返回了无法解析的数据")
         terms = []
-        for item in raw_terms:
-            if not isinstance(item, Mapping):
-                raise ServerError(1, "校历接口返回了无法解析的数据")
-            raw_holidays = item.get("holidays")
-            if raw_holidays is None:
-                raw_holidays = []
-            if not isinstance(raw_holidays, list):
-                raise ServerError(1, "校历接口返回了无法解析的数据")
-            holidays = []
-            for holiday in raw_holidays:
-                if not isinstance(holiday, Mapping):
-                    raise ServerError(1, "校历接口返回了无法解析的数据")
-                holidays.append(CalendarHoliday(
+        for item in payload.get("data") or []:
+            holidays = [
+                CalendarHoliday(
                     name=str(holiday.get("holiday_name") or ""),
                     start_date=str(holiday.get("start_date") or ""),
                     end_date=str(holiday.get("end_date") or ""),
                     days=str(holiday.get("holiday_days") or ""),
                     remark=str(holiday.get("holiday_remark") or ""),
-                ))
+                )
+                for holiday in item.get("holidays") or []
+            ]
             terms.append(CalendarTerm(
                 term_id=str(item.get("id") or ""),
                 start_date=str(item.get("start_date") or ""),
@@ -113,5 +99,4 @@ class SchoolCalendar:
                 work_days=str(item.get("work_days") or ""),
                 holidays=holidays,
             ))
-        terms.sort(key=lambda term: (term.start_date, term.term_id), reverse=True)
         return terms
