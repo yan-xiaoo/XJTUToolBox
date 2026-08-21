@@ -205,34 +205,6 @@ class HomeFrame(QWidget):
                 'content': self.tr("检索全校开课信息"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.school_course_interface),
                 'color': LinkCard.LinkCardColor.BLUE
-            },
-            "profile": {
-                'icon': FIF.INFO.icon(theme=Theme.DARK),
-                'title': self.tr("学籍档案"),
-                'content': self.tr("证件照、书院与辅导员"),
-                'callback': lambda: self.main_window.switchTo(self.main_window.profile_interface),
-                'color': LinkCard.LinkCardColor.BLUE
-            },
-            "fitness": {
-                'icon': FIF.SPEED_HIGH.icon(theme=Theme.DARK),
-                'title': self.tr("体测查询"),
-                'content': self.tr("查询体测项目分与总评"),
-                'callback': lambda: self.main_window.switchTo(self.main_window.fitness_interface),
-                'color': LinkCard.LinkCardColor.RED
-            },
-            "school_calendar": {
-                'icon': FIF.DATE_TIME.icon(theme=Theme.DARK),
-                'title': self.tr("校历"),
-                'content': self.tr("学期起止与节假日"),
-                'callback': lambda: self.main_window.switchTo(self.main_window.school_calendar_interface),
-                'color': LinkCard.LinkCardColor.GREEN
-            },
-            "jiaoxiaozhi": {
-                'icon': FIF.FEEDBACK.icon(theme=Theme.DARK),
-                'title': self.tr("交晓智"),
-                'content': self.tr("打开学校官方校园问答"),
-                'callback': lambda: self.main_window.switchTo(self.main_window.jiaoxiaozhi_interface),
-                'color': LinkCard.LinkCardColor.PURPLE
             }
         }
 
