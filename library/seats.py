@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from html import unescape as html_unescape
 from typing import Any
 
 import requests
@@ -15,10 +16,10 @@ logger = logging.getLogger("default")
 BASE_URL = "http://rg.lib.xjtu.edu.cn:8086"
 # 座位号：字母 + 2~4 位数字（如 A101、D004）；前后不得再跟字母数字，避免误匹配文本中的数字。
 SEAT_ID_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]\d{2,4}(?![0-9])")
-# showConfirmModal(message, action, id) 的第二个、第三个参数；兼容 WebVPN 实体引号。
+# showConfirmModal(message, action, id) 的第二、三个参数。
+# 页面实体会先被 html.unescape 解码（WebVPN 把引号编成 &#39;），正则只认普通引号。
 CONFIRM_RE = re.compile(
-    r"showConfirmModal\(\s*[^,]+,\s*(?:&#39;|&quot;|['\"])(\w+)(?:&#39;|&quot;|['\"])\s*,\s*"
-    r"(?:&#39;|&quot;|['\"])(\d+)(?:&#39;|&quot;|['\"])"
+    r"showConfirmModal\(\s*['\"][^'\"]*['\"]\s*,\s*['\"](\w+)['\"]\s*,\s*['\"](\d+)['\"]\s*\)"
 )
 
 # 预约动作：页面 JS 的 action 参数 → 展示名（与前端源码 switch(currentAction) 一致）
@@ -221,7 +222,7 @@ class Library:
         页面按预约状态只渲染当前可执行的按钮（如未入馆时无“中途离开”），
         动作集合来自页面实际出现的 showConfirmModal action 参数。
         """
-        normalized = html.replace("&#39;", "'").replace("&quot;", '"').replace("&#34;", '"')
+        normalized = html_unescape(html)
         present: set[str] = set()
         reserve_id = ""
         for action, ri in CONFIRM_RE.findall(normalized):
