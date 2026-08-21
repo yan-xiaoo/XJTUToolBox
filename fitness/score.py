@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from collections.abc import Mapping
 
 import requests
 
@@ -79,19 +78,7 @@ class Fitness:
         today = date.today()
         current = today.year if today.month >= 9 else today.year - 1
         years = []
-        data = payload.get("data")
-        if data is None:
-            data = {}
-        if not isinstance(data, Mapping):
-            raise ServerError(1, "体测学年数据为空")
-        raw_list = data.get("list")
-        if raw_list is None:
-            raw_list = []
-        if not isinstance(raw_list, list):
-            raise ServerError(1, "体测学年列表格式错误")
-        for item in raw_list:
-            if not isinstance(item, Mapping):
-                raise ServerError(1, "体测学年项目格式错误")
+        for item in ((payload.get("data") or {}).get("list") or []):
             year_num = str(item.get("year_num") or "")
             try:
                 if int(year_num) > current:
@@ -115,8 +102,8 @@ class Fitness:
         payload = _json(response)
         if payload.get("status") != 1:
             raise ServerError(1, payload.get("info") or "查询体测成绩失败")
-        data = payload.get("data")
-        if not isinstance(data, Mapping):
+        data = payload.get("data") or {}
+        if not isinstance(data, dict):
             raise ServerError(1, "体测成绩数据为空")
         items = []
         for key, name in ITEM_NAMES.items():
