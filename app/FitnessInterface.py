@@ -24,13 +24,6 @@ class FitnessInterface(CampusPage):
         self.table = self.make_table([self.tr("项目"), self.tr("成绩"), self.tr("等级"), self.tr("附加")])
         self.vBoxLayout.addWidget(self.table, 1)
 
-    def on_account_changed(self):
-        self._auto_loaded = False
-        self.years = []
-        self.yearBox.clear()
-        self.summary.setText(self.tr("打开本页会自动加载体测学年。"))
-        self.table.setRowCount(0)
-
     def showEvent(self, event):
         super().showEvent(event)
         if self._auto_loaded or accounts.current is None:

@@ -23,15 +23,6 @@ class SchoolCalendarInterface(CampusPage):
         self.table = self.make_table([self.tr("假期"), self.tr("开始"), self.tr("结束"), self.tr("天数")])
         self.vBoxLayout.addWidget(self.table, 1)
 
-    def on_account_changed(self):
-        self._auto_loaded = False
-        self.terms = []
-        self.termBox.blockSignals(True)
-        self.termBox.clear()
-        self.termBox.blockSignals(False)
-        self.summary.setText(self.tr("打开本页会自动加载校历。"))
-        self.table.setRowCount(0)
-
     def showEvent(self, event):
         super().showEvent(event)
         if self._auto_loaded or accounts.current is None:
@@ -65,18 +56,11 @@ class SchoolCalendarInterface(CampusPage):
         if index < 0 or index >= len(self.terms):
             return
         term = self.terms[index]
-        if term.current_week is None:
-            self.summary.setText(
-                self.tr("{start} 至 {end}，共 {weeks} 周").format(
-                    start=term.start_date, end=term.end_date, weeks=term.week_number,
-                )
+        self.summary.setText(
+            self.tr("{start} 至 {end}，共 {weeks} 周，当前约第 {current} 周").format(
+                start=term.start_date, end=term.end_date, weeks=term.week_number, current=term.current_week,
             )
-        else:
-            self.summary.setText(
-                self.tr("{start} 至 {end}，共 {weeks} 周，当前约第 {current} 周").format(
-                    start=term.start_date, end=term.end_date, weeks=term.week_number, current=term.current_week,
-                )
-            )
+        )
         self.table.setRowCount(len(term.holidays))
         for row, holiday in enumerate(term.holidays):
             self.table.setItem(row, 0, QTableWidgetItem(holiday.name))

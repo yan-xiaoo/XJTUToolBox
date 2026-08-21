@@ -20,23 +20,12 @@ class CalendarTerm:
     holidays: list["CalendarHoliday"] = field(default_factory=list)
 
     @property
-    def current_week(self) -> int | None:
+    def current_week(self) -> int:
         try:
             start = datetime.strptime(self.start_date[:10], "%Y-%m-%d").date()
-            end = datetime.strptime(self.end_date[:10], "%Y-%m-%d").date()
+            return max(1, ((date.today() - start).days // 7) + 1)
         except ValueError:
-            return None
-        today = date.today()
-        if today < start or today > end:
-            return None
-        week = ((today - start).days // 7) + 1
-        try:
-            cap = int(self.week_number)
-        except (TypeError, ValueError):
-            cap = None
-        if cap is not None:
-            week = min(week, cap)
-        return max(1, week)
+            return 1
 
 
 @dataclass
@@ -73,8 +62,6 @@ class SchoolCalendar:
             payload = response.json()
         except ValueError as exc:
             raise ServerError(1, "校历接口返回了无法解析的数据") from exc
-        if not isinstance(payload, dict):
-            raise ServerError(1, "校历接口返回了无法解析的数据")
         if payload.get("code") != 200:
             raise ServerError(payload.get("code") or 1, payload.get("msg") or "查询校历失败")
         terms = []

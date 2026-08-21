@@ -33,15 +33,6 @@ class ProfileInterface(CampusPage):
         self.vBoxLayout.addWidget(self.content)
         self.vBoxLayout.addStretch(1)
 
-    def on_account_changed(self):
-        self._auto_loaded = False
-        self.fields.setText(self.tr("打开本页会自动查询。"))
-        self._clear_photo()
-
-    def _clear_photo(self):
-        self.photo.clear()
-        self.photo.setText(self.tr("暂无照片"))
-
     def showEvent(self, event):
         super().showEvent(event)
         if self._auto_loaded or accounts.current is None:
@@ -85,7 +76,6 @@ class ProfileInterface(CampusPage):
             f"{self.tr('辅导员办公室')}：{profile.counselor_office}",
         ]
         self.fields.setText("\n".join(lines))
-        self._clear_photo()
         if photo:
             pixmap = QPixmap()
             if pixmap.loadFromData(photo):
