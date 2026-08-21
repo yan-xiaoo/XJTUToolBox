@@ -42,3 +42,15 @@ MOBILE_BROWSER_UA = (
     "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 )
+
+# 学籍档案（hello / 迎新）
+HELLO_LOGIN_URL = (
+    "https://org.xjtu.edu.cn/openplatform/oauth/authorize"
+    "?appId=966&redirectUri=http://hello.xjtu.edu.cn/yingxin/login/xjtu/oauth/pc"
+    "&responseType=code&scope=user_info&state=pc"
+)
+
+# 体测
+FITNESS_LOGIN_URL = (
+    "https://tyxylp.xjtu.edu.cn/bdlp_h5_fitness_test/public/index.php/index/login/xjtuLogin"
+)

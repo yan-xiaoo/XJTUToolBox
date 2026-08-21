@@ -2,9 +2,19 @@ from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, TitleLabel, FluentIcon as FIF, Theme, TogglePushButton, PushButton, InfoBar, InfoBarPosition
 from PyQt5.QtWidgets import QVBoxLayout, QWidget, QHBoxLayout
 from .utils import accounts, StyleSheet, cfg
+from .utils.resources import resource_path
 from .cards.link_card import LinkCardView, LinkCard
 from .sub_interfaces.EncryptDialog import DecryptFrame
 from .components.CardManagerDialog import CardManagerDialog
+
+
+def validate_card_ids(card_ids) -> tuple[str, ...]:
+    """Validate the explicit IDs used by the card registry."""
+
+    ids = tuple(card_ids)
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate home card id")
+    return ids
 
 
 class HomeFrame(QWidget):
@@ -145,7 +155,7 @@ class HomeFrame(QWidget):
         """设置所有可用的卡片定义"""
         available_cards = {
             'account': {
-                'icon': "assets/icons/login.png",
+                'icon': str(resource_path("assets/icons/login.png")),
                 'title': self.tr("开始使用"),
                 'content': self.tr("添加你的第一个账户"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.account_interface)
@@ -158,7 +168,7 @@ class HomeFrame(QWidget):
                 'color': LinkCard.LinkCardColor.RED
             },
             'attendance': {
-                'icon': "assets/icons/attendance.png",
+                'icon': str(resource_path("assets/icons/attendance.png")),
                 'title': self.tr("考勤"),
                 'content': self.tr("查看你的考勤信息"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.attendance_interface),
@@ -212,9 +222,38 @@ class HomeFrame(QWidget):
                 'content': self.tr("查询余额与消费流水"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.campus_card_interface),
                 'color': LinkCard.LinkCardColor.GREEN
+            },
+            "profile": {
+                'icon': FIF.INFO.icon(theme=Theme.DARK),
+                'title': self.tr("学籍档案"),
+                'content': self.tr("证件照、书院与辅导员"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.profile_interface),
+                'color': LinkCard.LinkCardColor.BLUE
+            },
+            "fitness": {
+                'icon': FIF.SPEED_HIGH.icon(theme=Theme.DARK),
+                'title': self.tr("体测查询"),
+                'content': self.tr("查询体测项目分与总评"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.fitness_interface),
+                'color': LinkCard.LinkCardColor.RED
+            },
+            "school_calendar": {
+                'icon': FIF.DATE_TIME.icon(theme=Theme.DARK),
+                'title': self.tr("校历"),
+                'content': self.tr("学期起止与节假日"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.school_calendar_interface),
+                'color': LinkCard.LinkCardColor.GREEN
+            },
+            "jiaoxiaozhi": {
+                'icon': FIF.FEEDBACK.icon(theme=Theme.DARK),
+                'title': self.tr("交晓智"),
+                'content': self.tr("打开学校官方校园问答"),
+                'callback': lambda: self.main_window.switchTo(self.main_window.jiaoxiaozhi_interface),
+                'color': LinkCard.LinkCardColor.PURPLE
             }
         }
 
+        validate_card_ids(available_cards.keys())
         self.linkCardView.setAvailableCards(available_cards)
 
     def loadDefaultCards(self):

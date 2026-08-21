@@ -60,6 +60,7 @@ from ai_assistant import (
     ModelCatalogClient,
     ModelOperationCancelled,
     SEARCH_ENGINES,
+    SearchAllSourcesVerificationRequired,
     SearchHumanVerificationRequired,
     WebSearchClient,
     collect_local_context,
@@ -140,11 +141,16 @@ class _AIRequestThread(QThread):
             if self.cancel_event.is_set():
                 self.cancelled.emit()
                 return
-        except SearchHumanVerificationRequired as error:
+        except SearchAllSourcesVerificationRequired as error:
             if self.cancel_event.is_set():
                 self.cancelled.emit()
             else:
                 self.webSearchDisabled.emit(_AIRequestFailure(str(error), self.session_id))
+        except SearchHumanVerificationRequired as error:
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.failed.emit(_AIRequestFailure(str(error), self.session_id))
         except Exception as error:
             if self.cancel_event.is_set():
                 self.cancelled.emit()
@@ -229,9 +235,6 @@ class AIInterface(QFrame):
         self.setObjectName("AIInterface")
         self.store = config_store or AIConfigStore()
         self.profile = self.store.load_profiles()[0]
-        self._lastSearxngEndpoint = (
-            self.profile.search_endpoint if self.profile.search_engine != "duckduckgo" else ""
-        )
         self.conversationStore = conversation_store or ConversationStore(
             self.store.path.with_name("ai_conversations.json")
         )
@@ -382,7 +385,7 @@ class AIInterface(QFrame):
         self.searchEngineCombo = ComboBox(widget)
         self.searchEngineCombo.addItems([name for _, name in SEARCH_ENGINES])
         self.searchEndpointEdit = LineEdit(widget)
-        self.searchEndpointEdit.setPlaceholderText("https://search.example/search")
+        self.searchEndpointEdit.setPlaceholderText(self.tr("内置直连搜索无需地址"))
         self.searchLimitCombo = ComboBox(widget)
         self.searchLimitCombo.addItems(["3", "5", "8", "10"])
         self.capabilityStatusLabel = CaptionLabel(
@@ -401,7 +404,6 @@ class AIInterface(QFrame):
         self.capabilityChecks["web_search"].toggled.connect(self._updateSearchControls)
         for checkbox in self.capabilityChecks.values():
             checkbox.toggled.connect(self._persistCapabilityPreferences)
-        self.searchEndpointEdit.editingFinished.connect(self._persistSearchPreferences)
         self.searchLimitCombo.currentTextChanged.connect(self._persistSearchPreferences)
 
     def _createSettingsTabs(self) -> None:
@@ -760,7 +762,7 @@ class AIInterface(QFrame):
             self.searchEngineCombo.setCurrentIndex(max(0, next(
                 (index for index, one in enumerate(SEARCH_ENGINES) if one[0] == self.profile.search_engine), 0
             )))
-            self.searchEndpointEdit.setText(self.profile.search_endpoint)
+            self.searchEndpointEdit.clear()
             self.searchLimitCombo.setCurrentText(str(self.profile.search_result_limit))
             self._updateSearchControls()
             self._onProtocolChanged(self.protocolCombo.currentIndex())
@@ -797,10 +799,6 @@ class AIInterface(QFrame):
 
     @pyqtSlot(int)
     def _onSearchEngineChanged(self, _index: int) -> None:
-        if self._currentSearchEngine() == "duckduckgo":
-            self.searchEndpointEdit.setText("https://html.duckduckgo.com/html/")
-        elif "duckduckgo.com" in self.searchEndpointEdit.text():
-            self.searchEndpointEdit.setText(self._lastSearxngEndpoint)
         self._updateSearchControls()
         if not self._loadingProfile:
             self._persistSearchPreferences()
@@ -808,13 +806,9 @@ class AIInterface(QFrame):
     @pyqtSlot()
     def _updateSearchControls(self) -> None:
         enabled = self.capabilityChecks["web_search"].isChecked()
-        needs_searxng = self._currentSearchEngine() != "duckduckgo"
         self.searchEngineCombo.setEnabled(enabled)
-        self.searchEndpointEdit.setEnabled(enabled and needs_searxng)
-        self.searchEndpointEdit.setPlaceholderText(
-            self.tr("填写 SearXNG 根地址，例如 https://search.example")
-            if needs_searxng else "https://html.duckduckgo.com/html/"
-        )
+        self.searchEndpointEdit.hide()
+        self.searchEndpointEdit.setEnabled(False)
         self.searchLimitCombo.setEnabled(enabled)
 
     def _persistCapabilityPreferences(self, *_args) -> None:
@@ -837,22 +831,15 @@ class AIInterface(QFrame):
         if self._loadingProfile:
             return
         engine = self._currentSearchEngine()
-        endpoint = self.searchEndpointEdit.text().strip()
-        if engine != "duckduckgo" and endpoint:
-            self._lastSearxngEndpoint = endpoint
         try:
             profile = replace(
                 self.profile,
                 search_engine=engine,
-                search_endpoint=endpoint,
+                search_endpoint="",
                 search_result_limit=int(self.searchLimitCombo.currentText() or 5),
             )
             self.store.save_profiles([profile])
         except Exception:
-            if engine != "duckduckgo":
-                self.capabilityStatusLabel.setText(
-                    self.tr("已选择主流引擎；填写有效的 SearXNG HTTPS 地址后会自动记住。")
-                )
             return
         self.profile = profile
 
@@ -868,7 +855,7 @@ class AIInterface(QFrame):
             model=self.modelCombo.currentText().strip(),
             capability_ids=self._selectedCapabilityIds(),
             search_engine=self._currentSearchEngine(),
-            search_endpoint=self.searchEndpointEdit.text().strip(),
+            search_endpoint="",
             search_result_limit=int(self.searchLimitCombo.currentText() or 5),
         )
 

@@ -19,7 +19,8 @@ os.environ.setdefault("XDG_CONFIG_HOME", "/tmp/xjtu-test-config")
 from PyQt5.QtCore import Qt, QRect, QThread
 from PyQt5.QtWidgets import QApplication
 
-QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+if QApplication.instance() is None:
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 
 from qfluentwidgets import (
     EditableComboBox,
@@ -30,8 +31,19 @@ from qfluentwidgets import (
     setTheme,
 )
 
-from ai_assistant import AIConfigStore, ChatMessage, PRESETS, ProviderConfig, collect_local_context
+from ai_assistant import (
+    AIConfigStore,
+    AIProfile,
+    ChatMessage,
+    PRESETS,
+    ProviderConfig,
+    collect_local_context,
+)
 from ai_assistant.markdown_render import render_markdown_fragment
+from ai_assistant.web_search import (
+    SearchAllSourcesVerificationRequired,
+    SearchHumanVerificationRequired,
+)
 from app.AIInterface import (
     AIInterface,
     _AIRequestFailure,
@@ -529,42 +541,187 @@ class AIInterfaceSmokeTest(unittest.TestCase):
         widget = self.create_interfaces()
         self.assertTrue(all(not checkbox.isChecked() for checkbox in widget.capabilityChecks.values()))
         self.assertFalse(widget.searchEngineCombo.isEnabled())
+        self.assertEqual(widget._currentSearchEngine(), "auto")
+        self.assertTrue(widget.searchEndpointEdit.isHidden())
         widget.capabilityChecks["schedule"].setChecked(True)
         self.assertTrue(widget.saveConfiguration())
         self.assertEqual(widget.profile.capability_ids, ("schedule",))
         widget.capabilityChecks["web_search"].setChecked(True)
-        searxng_index = widget.searchEngineCombo.findText("SearXNG（聚合）")
-        widget.searchEngineCombo.setCurrentIndex(searxng_index)
-        widget.searchEndpointEdit.setText("https://search.example")
-        self.assertTrue(widget.searchEndpointEdit.isEnabled())
+        bing_index = widget.searchEngineCombo.findText("Bing（直连）")
+        widget.searchEngineCombo.setCurrentIndex(bing_index)
+        self.assertTrue(widget.searchEndpointEdit.isHidden())
+        self.assertFalse(widget.searchEndpointEdit.isEnabled())
         self.assertTrue(widget.saveConfiguration())
-        self.assertEqual(widget.profile.search_engine, "searxng")
-        self.assertEqual(widget.profile.search_endpoint, "https://search.example")
+        self.assertEqual(widget.profile.search_engine, "bing")
+        self.assertEqual(widget.profile.search_endpoint, "")
 
-    def test_mainstream_search_choice_persists_and_captcha_turns_capability_off(self):
+    def test_search_catalog_labels_order_and_endpoint_visibility(self):
+        widget = self.create_interfaces()
+        labels = [
+            widget.searchEngineCombo.itemText(index)
+            for index in range(widget.searchEngineCombo.count())
+        ]
+        self.assertEqual(
+            labels,
+            [
+                "自动（直连推荐）",
+                "Bing（直连）",
+                "搜狗（直连）",
+                "360 搜索（直连）",
+            ],
+        )
+        widget.capabilityChecks["web_search"].setChecked(True)
+        for index in range(widget.searchEngineCombo.count()):
+            with self.subTest(label=labels[index]):
+                widget.searchEngineCombo.setCurrentIndex(index)
+                app.processEvents()
+                self.assertTrue(widget.searchEndpointEdit.isHidden())
+                self.assertFalse(widget.searchEndpointEdit.isEnabled())
+
+    def test_direct_search_choice_persists_and_aggregate_verification_turns_capability_off(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "profiles.json"
             first = AIInterface(config_store=AIConfigStore(path, keyring_backend=DummyKeyring()))
             self.addCleanup(first.close)
             first.capabilityChecks["web_search"].setChecked(True)
-            google = first.searchEngineCombo.findText("Google（通过 SearXNG）")
-            first.searchEngineCombo.setCurrentIndex(google)
-            first.searchEndpointEdit.setText("https://search.example")
-            first.searchEndpointEdit.editingFinished.emit()
+            bing = first.searchEngineCombo.findText("Bing（直连）")
+            first.searchEngineCombo.setCurrentIndex(bing)
             first.searchLimitCombo.setCurrentText("8")
             app.processEvents()
             second = AIInterface(config_store=AIConfigStore(path, keyring_backend=DummyKeyring()))
             self.addCleanup(second.close)
-            self.assertEqual(second._currentSearchEngine(), "google")
-            self.assertEqual(second.searchEndpointEdit.text(), "https://search.example/")
+            self.assertEqual(second._currentSearchEngine(), "bing")
+            self.assertEqual(second.searchEndpointEdit.text(), "")
+            self.assertTrue(second.searchEndpointEdit.isHidden())
             self.assertEqual(second.searchLimitCombo.currentText(), "8")
             self.assertTrue(second.capabilityChecks["web_search"].isChecked())
 
             with patch("app.AIInterface.InfoBar.warning"):
-                second._onWebSearchDisabled(_AIRequestFailure("DuckDuckGo 要求人机验证", "session"))
+                second._onWebSearchDisabled(
+                    _AIRequestFailure("自动模式的公开搜索服务均要求人机验证", "session")
+                )
             self.assertFalse(second.capabilityChecks["web_search"].isChecked())
             reloaded = AIConfigStore(path, keyring_backend=DummyKeyring()).load_profiles()[0]
             self.assertNotIn("web_search", reloaded.capability_ids)
+
+    def test_legacy_disabled_engine_loads_as_auto_without_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profiles.json"
+            legacy = {
+                **AIProfile.default().__dict__,
+                "search_engine": "google",
+                "search_endpoint": "https://search.example/",
+                "capability_ids": ("web_search",),
+            }
+            path.write_text(
+                json.dumps({"version": 2, "profiles": [legacy]}),
+                encoding="utf-8",
+            )
+
+            widget = AIInterface(
+                config_store=AIConfigStore(path, keyring_backend=DummyKeyring())
+            )
+            self.addCleanup(widget.close)
+            widget.show()
+            app.processEvents()
+
+            self.assertEqual(widget._currentSearchEngine(), "auto")
+            self.assertEqual(widget.searchEndpointEdit.text(), "")
+            self.assertTrue(widget.searchEndpointEdit.isHidden())
+            self.assertFalse(widget.searchEndpointEdit.isEnabled())
+            self.assertTrue(widget.capabilityChecks["web_search"].isChecked())
+
+    def test_request_thread_disables_search_only_after_aggregate_verification_failure(self):
+        class CapturingAIClient:
+            def __init__(self):
+                self.session = SimpleNamespace(close=lambda: None)
+
+            def complete(self, _messages, _config):
+                return SimpleNamespace(
+                    text="ok", model="fixture", input_tokens=1, output_tokens=1
+                )
+
+        class SuccessfulFallbackSearch:
+            def __init__(self):
+                self.session = SimpleNamespace(close=lambda: None)
+
+            def search(self, _query, **_settings):
+                return [SimpleNamespace(
+                    title="fallback result",
+                    url="https://source.test/result",
+                    snippet="available from the second built-in source",
+                )]
+
+        success_thread = _AIRequestThread(
+            [ChatMessage("user", "查询")],
+            ProviderConfig("openai", "https://api.example/v1", "fixture", "key"),
+            search_query="xjtu",
+            search_settings={"engine": "auto", "endpoint": "", "limit": 3},
+        )
+        success_thread.search_client = SuccessfulFallbackSearch()
+        success_thread.ai_client = CapturingAIClient()
+        outcomes = []
+        disabled = []
+        success_thread.succeeded.connect(outcomes.append)
+        success_thread.webSearchDisabled.connect(disabled.append)
+
+        success_thread.run()
+
+        self.assertEqual(outcomes[0].search_count, 1)
+        self.assertFalse(disabled)
+
+        class ExplicitSourceChallenged:
+            def __init__(self):
+                self.session = SimpleNamespace(close=lambda: None)
+
+            def search(self, _query, **_settings):
+                raise SearchHumanVerificationRequired("Google 要求人机验证")
+
+        explicit_thread = _AIRequestThread(
+            [ChatMessage("user", "查询")],
+            ProviderConfig("openai", "https://api.example/v1", "fixture", "key"),
+            search_query="xjtu",
+            search_settings={"engine": "google", "endpoint": "", "limit": 3},
+        )
+        explicit_thread.search_client = ExplicitSourceChallenged()
+        explicit_thread.ai_client = CapturingAIClient()
+        explicit_failures = []
+        explicit_disabled = []
+        explicit_thread.failed.connect(explicit_failures.append)
+        explicit_thread.webSearchDisabled.connect(explicit_disabled.append)
+
+        explicit_thread.run()
+
+        self.assertEqual(explicit_failures[0].message, "Google 要求人机验证")
+        self.assertFalse(explicit_disabled)
+
+        class AllSourcesChallenged:
+            def __init__(self):
+                self.session = SimpleNamespace(close=lambda: None)
+
+            def search(self, _query, **_settings):
+                raise SearchAllSourcesVerificationRequired(
+                    "自动模式的公开搜索服务均要求人机验证"
+                )
+
+        failure_thread = _AIRequestThread(
+            [ChatMessage("user", "查询")],
+            ProviderConfig("openai", "https://api.example/v1", "fixture", "key"),
+            search_query="xjtu",
+            search_settings={"engine": "auto", "endpoint": "", "limit": 3},
+        )
+        failure_thread.search_client = AllSourcesChallenged()
+        failure_thread.ai_client = CapturingAIClient()
+        aggregate_failures = []
+        provider_failures = []
+        failure_thread.webSearchDisabled.connect(aggregate_failures.append)
+        failure_thread.failed.connect(provider_failures.append)
+
+        failure_thread.run()
+
+        self.assertEqual(len(aggregate_failures), 1)
+        self.assertIn("均要求人机验证", aggregate_failures[0].message)
+        self.assertFalse(provider_failures)
 
     def test_model_dropdown_download_guard_markdown_status_and_placeholder(self):
         widget = self.create_interfaces()
@@ -986,8 +1143,8 @@ class AIInterfaceSmokeTest(unittest.TestCase):
         self.assertFalse(widget.messages)
 
     def test_legacy_smoke_setup_no_longer_references_qt5_embedded_webview(self):
-        # The retained Qt 6 implementation is dormant source: importing the
-        # normal Qt 5 application must not load or package its launcher.
+        # The Qt 5 application may import the lightweight process launcher,
+        # but the separate Qt 6 browser implementation must remain dormant.
         self.create_interfaces()
         self.assertNotIn("app.school_ai_browser", sys.modules)
         self.assertNotIn("app.school_ai_launcher", sys.modules)

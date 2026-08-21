@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+Sanitized from a no-cookie public Bing response captured on 2026-08-17.
+Scripts, styles, tracking identifiers, and unrelated results were removed.
+The selector-relevant b_algo, h2/a, and b_caption/p structure is retained.
+-->
+<html>
+  <body>
+    <ol id="b_results">
+      <li class="b_algo" data-id="" iid="SERP.fixture">
+        <div class="b_tpcn">
+          <a class="tilk" aria-label="en.xjtu.edu.cn" href="https://en.xjtu.edu.cn/">
+            <div class="tptxt"><div class="tptt">en.xjtu.edu.cn</div></div>
+          </a>
+        </div>
+        <h2 class="">
+          <a target="_blank" href="https://en.xjtu.edu.cn/">Xi'an Jiaotong University</a>
+        </h2>
+        <div class="b_caption">
+          <p class="b_lineclamp2">Teaching and learning news from XJTU.</p>
+        </div>
+      </li>
+    </ol>
+  </body>
+</html>

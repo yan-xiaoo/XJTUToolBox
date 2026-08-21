@@ -1,0 +1,248 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-contract:
+    name: Test contract
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate test inventory and workflow contract
+        run: python -m unittest -v test.ci.test_pr_workflow
+
+  test-shards:
+    name: ${{ matrix.domain.name }} (${{ matrix.platform.id }}, Python ${{ matrix.platform.python-version }})
+    needs: test-contract
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - id: linux-x64-py310
+            os: ubuntu-22.04
+            python-version: "3.10"
+            machine: x86_64
+          - id: linux-x64-py313
+            os: ubuntu-22.04
+            python-version: "3.13"
+            machine: x86_64
+          - id: windows-x64-py312
+            os: windows-latest
+            python-version: "3.12"
+            machine: x86_64
+          - id: macos-arm64-py312
+            os: macos-latest
+            python-version: "3.12"
+            machine: arm64
+          - id: macos-intel-py312
+            os: macos-15-intel
+            python-version: "3.12"
+            machine: x86_64
+        domain:
+          - id: ai
+            name: AI core and features
+          - id: qt-ui
+            name: Qt and desktop UI
+          - id: notification-crawler
+            name: Notifications and crawler
+          - id: auth-session
+            name: Authentication and sessions
+          - id: schedule
+            name: Schedule
+    env:
+      PYTHONUTF8: "1"
+      QT_QPA_PLATFORM: offscreen
+      QT_OPENGL: software
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.platform.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.platform.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.3"
+          enable-cache: true
+
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Run ${{ matrix.domain.name }} tests
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
+          XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache
+        run: uv run --frozen python -m test.ci.run_test_shard --domain ${{ matrix.domain.id }} --expected-machine ${{ matrix.platform.machine }}
+
+  linux-arm-shards:
+    name: ${{ matrix.domain.name }} (linux-arm64-qemu-py310, Python 3.10)
+    needs: test-contract
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        domain:
+          - id: ai
+            name: AI core and features
+          - id: qt-ui
+            name: Qt and desktop UI
+          - id: notification-crawler
+            name: Notifications and crawler
+          - id: auth-session
+            name: Authentication and sessions
+          - id: schedule
+            name: Schedule
+    env:
+      PYTHONUTF8: "1"
+      QT_QPA_PLATFORM: offscreen
+      QT_OPENGL: software
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Run Linux ARM64 shard via QEMU
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ github.token }}
+          env: |
+            PYTHONUTF8: 1
+            QT_QPA_PLATFORM: offscreen
+            QT_OPENGL: software
+            LIBGL_ALWAYS_SOFTWARE: 1
+            XDG_STATE_HOME: /tmp/xjtu-test-state
+            XDG_CONFIG_HOME: /tmp/xjtu-test-config
+            XDG_DATA_HOME: /tmp/xjtu-test-data
+            XDG_CACHE_HOME: /tmp/xjtu-test-cache
+          install: |
+            apt-get update
+            apt-get install -y curl build-essential python3-dev python3-venv python3-pyqt5 python3-pyqt5.qtmultimedia python3-pyqt5.qtsvg python3-pyqt5.qtx11extras libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+          run: |
+            test "$(uname -m)" = "aarch64"
+            curl -LsSf https://astral.sh/uv/0.12.3/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
+            uv venv --python python3 --system-site-packages .venv
+            uv sync --frozen --group dev
+            uv pip install --python .venv/bin/python --no-deps \
+              pyqt-fluent-widgets==1.8.7 \
+              pyqt5-frameless-window==0.7.5 \
+              darkdetect==0.8.0 \
+              xcffib==1.12.0
+            hard_exit_arg=""
+            if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then
+              hard_exit_arg="--hard-exit-on-success"
+            fi
+            .venv/bin/python -m test.ci.run_test_shard \
+              --domain ${{ matrix.domain.id }} \
+              --expected-machine aarch64 \
+              --require-import PyQt5 \
+              --require-import PyQt5.QtMultimedia \
+              --require-import PyQt5.QtMultimediaWidgets \
+              --require-import PyQt5.QtSvg \
+              --require-import PyQt5.QtX11Extras \
+              --require-import qfluentwidgets \
+              --require-import qframelesswindow \
+              --require-import xcffib \
+              $hard_exit_arg
+
+  existing-bug-regressions:
+    name: Existing bug regressions
+    needs: test-contract
+    runs-on: ubuntu-22.04
+    env:
+      PYTHONUTF8: "1"
+      QT_QPA_PLATFORM: offscreen
+      QT_OPENGL: software
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.3"
+          enable-cache: true
+
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Run historical bug regressions
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
+          XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache
+        run: uv run --frozen python -m unittest -v test.ai_assistant.test_ai_features test.app.test_notice_search_ui test.notification.test_notification_sources test.app.test_notice_thread test.schedule.test_lesson test.test_crawler_challenge
+
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs: [test-contract, test-shards, linux-arm-shards, existing-bug-regressions]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required job results
+        env:
+          CONTRACT: ${{ needs.test-contract.result }}
+          HOSTED_SHARDS: ${{ needs.test-shards.result }}
+          ARM_SHARDS: ${{ needs.linux-arm-shards.result }}
+          REGRESSIONS: ${{ needs.existing-bug-regressions.result }}
+        run: |
+          if [[ "$CONTRACT" != "success" || "$HOSTED_SHARDS" != "success" || "$ARM_SHARDS" != "success" || "$REGRESSIONS" != "success" ]]; then
+            echo "::error::test-contract=$CONTRACT test-shards=$HOSTED_SHARDS linux-arm-shards=$ARM_SHARDS existing-bug-regressions=$REGRESSIONS"
+            exit 1
+          fi
+          echo "All required tests passed."
