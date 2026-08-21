@@ -16,11 +16,10 @@ logger = logging.getLogger("default")
 BASE_URL = "http://rg.lib.xjtu.edu.cn:8086"
 # 座位号：字母 + 2~4 位数字（如 A101、D004）；前后不得再跟字母数字，避免误匹配文本中的数字。
 SEAT_ID_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]\d{2,4}(?![0-9])")
-# showConfirmModal(message, action, id) 的第二、三个参数。
-# 页面实体会先被 html.unescape 解码（WebVPN 把引号编成 &#39;），正则只认普通引号。
-CONFIRM_RE = re.compile(
-    r"showConfirmModal\(\s*['\"][^'\"]*['\"]\s*,\s*['\"](\w+)['\"]\s*,\s*['\"](\d+)['\"]\s*\)"
-)
+# showConfirmModal(message, action, id) 第二、三个参数。
+# 格式写死为真实页面形态（单引号、无空格）：showConfirmModal('确认您已到馆?', 'ruguan1', '4953117')
+# 实体由 html.unescape 提前解码；若服务器改版（引号/空格/参数顺序变化），此处需同步。
+CONFIRM_RE = re.compile(r"showConfirmModal\('[^']*', '(\w+)', '(\d+)'\)")
 
 # 预约动作：页面 JS 的 action 参数 → 展示名（与前端源码 switch(currentAction) 一致）
 ACTION_LABELS = {

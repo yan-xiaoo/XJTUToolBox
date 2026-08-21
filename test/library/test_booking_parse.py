@@ -42,8 +42,8 @@ class LibraryBookingTest(unittest.TestCase):
     def test_active_booking_and_actions(self):
         html = """
         <div>北楼二层外文库（东） A101 预约状态：已预约</div>
-        <script>showConfirmModal('确认','cancel','88')</script>
-        <script>showConfirmModal('确认','ruguan1','88')</script>
+        <script>showConfirmModal('确认', 'cancel', '88')</script>
+        <script>showConfirmModal('确认', 'ruguan1', '88')</script>
         """
         booking = self.library._booking_from_html(html)
         self.assertIsNotNone(booking)
@@ -78,8 +78,8 @@ class LibraryBookingTest(unittest.TestCase):
         """未入馆的预约只渲染取消/签到，不应出现离开/返回按钮。"""
         html = """
         <div>北楼二层外文库（东） D004 预约状态：待入馆</div>
-        <script>showConfirmModal('确认取消申请?','cancel','77')</script>
-        <script>showConfirmModal('确认您已到馆?','ruguan1','77')</script>
+        <script>showConfirmModal('确认取消申请?', 'cancel', '77')</script>
+        <script>showConfirmModal('确认您已到馆?', 'ruguan1', '77')</script>
         """
         booking = self.library._booking_from_html(html)
         self.assertEqual(set(booking.action_urls), {"取消预约", "入馆签到"})
@@ -143,7 +143,7 @@ class LibraryBookingTest(unittest.TestCase):
     def test_book_seat_success_lands_on_my_page(self):
         html = """
         <div>北楼二层外文库（东） A101 预约状态：已预约</div>
-        <script>showConfirmModal('确认','cancel','88')</script>
+        <script>showConfirmModal('确认', 'cancel', '88')</script>
         """
         self.library.session.get = lambda *a, **k: make_response(html, f"{BASE_URL}/my/")
         result = self.library.book_seat("A101", "north2east")
