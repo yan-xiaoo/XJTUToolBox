@@ -52,6 +52,7 @@ class ProfileInterface(CampusPage):
     def refresh(self):
         if not self.require_account():
             return
+        self._clear_photo()
 
         def worker(session):
             profile = HelloProfile(session).get_profile()
