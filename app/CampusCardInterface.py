@@ -51,6 +51,9 @@ class CampusCardInterface(CampusPage):
             return
         start = self.fromPicker.getDate().toPyDate()
         end = self.toPicker.getDate().toPyDate()
+        if start > end:
+            self.warn(self.tr("日期范围错误"), self.tr("开始日期不能晚于结束日期"))
+            return
 
         def worker(session):
             util = CampusCard(session)

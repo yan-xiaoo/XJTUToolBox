@@ -2,12 +2,14 @@ import os
 import unittest
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from auth import ServerError
 import card.campus_card as campus_card_module
+from PyQt5.QtCore import QDate
+from PyQt5.QtWidgets import QWidget
 
 CampusCard = campus_card_module.CampusCard
 
@@ -263,6 +265,176 @@ class CampusCardAccountSwitchTest(unittest.TestCase):
         page.on_account_changed()
         self.assertFalse(page._auto_loaded)
         self.assertEqual(page.table.rowCount(), 0)
+
+    def _page_with_accounts(self):
+        from app.CampusCardInterface import CampusCardInterface
+        from app.utils.account import AccountManager
+
+        first = SimpleNamespace(uuid="first", username="first")
+        second = SimpleNamespace(uuid="second", username="second")
+        manager = AccountManager(first, second)
+        patches = (
+            patch("app.CampusCardInterface.accounts", manager),
+            patch("app.components.CampusPage.accounts", manager),
+        )
+        for item in patches:
+            item.start()
+        self.addCleanup(lambda: [item.stop() for item in reversed(patches)])
+        page = CampusCardInterface()
+        self.addCleanup(page.deleteLater)
+        return page, manager, first, second
+
+    def test_real_account_changed_signal_clears_summary_and_table(self):
+        page, manager, _first, second = self._page_with_accounts()
+        page._auto_loaded = True
+        page.summary.setText("旧账户摘要")
+        page.table.setRowCount(1)
+
+        manager.current = second
+
+        self.assertFalse(page._auto_loaded)
+        self.assertIn("自动查询", page.summary.text())
+        self.assertEqual(page.table.rowCount(), 0)
+
+    def test_reverse_date_range_does_not_start_background_job(self):
+        page, _manager, _first, _second = self._page_with_accounts()
+        page.fromPicker.setDate(QDate(2026, 3, 2))
+        page.toPicker.setDate(QDate(2026, 3, 1))
+
+        with patch.object(page, "start_job") as start, patch.object(page, "warn") as warn:
+            page.refresh()
+
+        start.assert_not_called()
+        warn.assert_called_once()
+        self.assertIn("开始日期", warn.call_args.args[1])
+
+    def test_switching_account_discards_old_result_and_error_from_card_page(self):
+        from app.components.CampusPage import CampusPage
+
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+            def emit(self, *args):
+                for callback in tuple(self.callbacks):
+                    callback(*args)
+
+        class FakeThread:
+            def __init__(self, *args, **kwargs):
+                self.can_run = True
+                self.result = FakeSignal()
+                self.error = FakeSignal()
+                self.running = True
+
+            def isRunning(self):
+                return self.running
+
+            def start(self):
+                pass
+
+        page, manager, _first, second = self._page_with_accounts()
+        on_result = Mock()
+        with patch("app.components.CampusPage.CampusFeatureThread", FakeThread), \
+             patch("app.components.CampusPage.ProcessWidget", side_effect=lambda *args, **kwargs: QWidget()), \
+             patch.object(page, "warn") as warn:
+            page.start_job("campus_card", "查询", Mock(), on_result, show_process=False)
+            old_thread = page.thread
+            manager.current = second
+            old_thread.result.emit("旧结果")
+            old_thread.error.emit("旧错误", "旧消息")
+
+        on_result.assert_not_called()
+        warn.assert_not_called()
+
+    def test_second_refresh_wins_over_earlier_result_and_error(self):
+        from app.components.CampusPage import CampusPage
+
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+            def emit(self, *args):
+                for callback in tuple(self.callbacks):
+                    callback(*args)
+
+        class FakeThread:
+            created = []
+
+            def __init__(self, *args, **kwargs):
+                self.can_run = True
+                self.result = FakeSignal()
+                self.error = FakeSignal()
+                self.running = True
+                self.created.append(self)
+
+            def isRunning(self):
+                return self.running
+
+            def start(self):
+                pass
+
+        page, _manager, _first, _second = self._page_with_accounts()
+        on_result = Mock()
+        with patch("app.components.CampusPage.CampusFeatureThread", FakeThread), \
+             patch("app.components.CampusPage.ProcessWidget", return_value=None), \
+             patch.object(page, "warn") as warn:
+            CampusPage.start_job(page, "campus_card", "查询", Mock(), on_result, show_process=False)
+            CampusPage.start_job(page, "campus_card", "查询", Mock(), on_result, show_process=False)
+            first_thread, second_thread = FakeThread.created[-2:]
+            first_thread.result.emit("旧结果")
+            first_thread.error.emit("旧错误", "旧消息")
+            second_thread.result.emit("新结果")
+
+        on_result.assert_called_once_with("新结果")
+        warn.assert_not_called()
+
+    def test_current_query_error_preserves_last_successful_view(self):
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+            def emit(self, *args):
+                for callback in tuple(self.callbacks):
+                    callback(*args)
+
+        class FakeThread:
+            def __init__(self, *args, **kwargs):
+                self.can_run = True
+                self.result = FakeSignal()
+                self.error = FakeSignal()
+                self.running = True
+
+            def isRunning(self):
+                return self.running
+
+            def start(self):
+                pass
+
+        page, _manager, _first, _second = self._page_with_accounts()
+        page.summary.setText("上一次成功结果")
+        page.table.setRowCount(1)
+        page.fromPicker.setDate(QDate(2026, 1, 1))
+        page.toPicker.setDate(QDate(2026, 1, 31))
+        with patch("app.components.CampusPage.CampusFeatureThread", FakeThread), \
+             patch("app.components.CampusPage.ProcessWidget", side_effect=lambda *args, **kwargs: QWidget()), \
+             patch.object(page, "warn") as warn:
+            page.refresh()
+            page.thread.error.emit("查询失败", "服务暂时不可用")
+
+        self.assertEqual(page.summary.text(), "上一次成功结果")
+        self.assertEqual(page.table.rowCount(), 1)
+        self.assertEqual(page.fromPicker.getDate(), QDate(2026, 1, 1))
+        self.assertEqual(page.toPicker.getDate(), QDate(2026, 1, 31))
+        warn.assert_called_once_with("查询失败", "服务暂时不可用")
 
 
 if __name__ == "__main__":
