@@ -21,6 +21,7 @@ from .conversations import (
 )
 from .web_search import (
     SEARCH_ENGINES,
+    SearchAllSourcesVerificationRequired,
     SearchHumanVerificationRequired,
     SearchResult,
     WebSearchClient,
@@ -47,6 +48,7 @@ __all__ = [
     "ProviderPreset",
     "SecretPersistence",
     "SEARCH_ENGINES",
+    "SearchAllSourcesVerificationRequired",
     "SearchResult",
     "SearchHumanVerificationRequired",
     "ToolCall",
