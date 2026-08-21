@@ -10,7 +10,6 @@ from PyQt5.QtWidgets import QApplication
 
 from app.FitnessInterface import FitnessInterface
 from app.HomeInterface import HomeFrame, validate_card_ids
-from app.JiaoxiaozhiInterface import JiaoxiaozhiInterface
 from app.ProfileInterface import ProfileInterface
 from app.SchoolCalendarInterface import SchoolCalendarInterface
 from app.main_window import registerSession
@@ -30,11 +29,11 @@ class CampusRegistrationSmokeTest(unittest.TestCase):
         self.assertIs(SessionManager.sessions["hello"], HelloSession)
         self.assertIs(SessionManager.sessions["fitness"], FitnessSession)
 
-    def test_four_pages_construct_with_unique_object_names(self):
-        pages = [ProfileInterface(), FitnessInterface(), SchoolCalendarInterface(), JiaoxiaozhiInterface()]
+    def test_three_pages_construct_with_unique_object_names(self):
+        pages = [ProfileInterface(), FitnessInterface(), SchoolCalendarInterface()]
         for page in pages:
             page.close()
-        self.assertEqual(len({page.objectName() for page in pages}), 4)
+        self.assertEqual(len({page.objectName() for page in pages}), 3)
 
     def test_home_card_ids_and_callbacks_target_new_pages(self):
         frame = HomeFrame.__new__(HomeFrame)
@@ -42,7 +41,6 @@ class CampusRegistrationSmokeTest(unittest.TestCase):
             "profile_interface": object(),
             "fitness_interface": object(),
             "school_calendar_interface": object(),
-            "jiaoxiaozhi_interface": object(),
             "switchTo": Mock(),
         })()
         frame.tr = lambda text: text
@@ -52,13 +50,13 @@ class CampusRegistrationSmokeTest(unittest.TestCase):
         self.assertEqual(tuple(cards), validate_card_ids(cards.keys()))
         with self.assertRaises(ValueError):
             validate_card_ids(["duplicate", "duplicate"])
-        for key in ("profile", "fitness", "school_calendar", "jiaoxiaozhi"):
+        for key in ("profile", "fitness", "school_calendar"):
             self.assertIn(key, cards)
             cards[key]["callback"]()
         self.assertEqual(
             [call.args[0] for call in frame.main_window.switchTo.call_args_list],
             [frame.main_window.profile_interface, frame.main_window.fitness_interface,
-             frame.main_window.school_calendar_interface, frame.main_window.jiaoxiaozhi_interface],
+             frame.main_window.school_calendar_interface],
         )
 
     def test_source_and_frozen_resource_paths_resolve(self):
@@ -73,7 +71,7 @@ class CampusRegistrationSmokeTest(unittest.TestCase):
     def test_new_modules_import_without_qt6_webengine(self):
         for name in (
             "app.ProfileInterface", "app.FitnessInterface", "app.SchoolCalendarInterface",
-            "app.JiaoxiaozhiInterface", "hello.profile", "fitness.score", "jwxt.calendar",
+            "hello.profile", "fitness.score", "jwxt.calendar",
         ):
             with self.subTest(name=name):
                 __import__(name)
