@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Mapping
 from urllib.parse import parse_qs, urlparse
 
 from auth import ServerError, getOrdinaryUrl
@@ -19,6 +20,8 @@ def _jwt_system_type(token: str) -> str:
         payload = token.split(".")[1]
         payload += "=" * ((4 - len(payload) % 4) % 4)
         data = json.loads(base64.urlsafe_b64decode(payload))
+        if not isinstance(data, Mapping):
+            return "yingxin_student_pc"
         return str(data.get("systemType") or "yingxin_student_pc")
     except Exception:
         return "yingxin_student_pc"
@@ -32,15 +35,16 @@ def _token_from_url(url: str) -> str:
 
 def _is_hello_site(url: str) -> bool:
     """WebVPN 落地 URL 的域名段是密文，不能用 contains('hello.xjtu.edu.cn')。"""
-    if HELLO_HOST in url:
+    parsed = urlparse(url)
+    if parsed.hostname == HELLO_HOST:
         return True
-    if "webvpn.xjtu.edu.cn" not in url:
+    if parsed.hostname != "webvpn.xjtu.edu.cn":
         return False
     try:
         ordinary = getOrdinaryUrl(url)
     except Exception:
         return False
-    return bool(ordinary) and HELLO_HOST in ordinary
+    return bool(ordinary) and urlparse(ordinary).hostname == HELLO_HOST
 
 
 def _iter_response_urls(response) -> list[str]:
@@ -68,10 +72,6 @@ def extract_hello_token(response) -> str:
     for url in candidates:
         token = _token_from_url(url)
         if token and _is_hello_site(url):
-            return token
-    for url in candidates:
-        token = _token_from_url(url)
-        if token and token.count(".") == 2:
             return token
     return ""
 
