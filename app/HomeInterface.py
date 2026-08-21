@@ -236,13 +236,6 @@ class HomeFrame(QWidget):
                 'content': self.tr("学期起止与节假日"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.school_calendar_interface),
                 'color': LinkCard.LinkCardColor.GREEN
-            },
-            "jiaoxiaozhi": {
-                'icon': FIF.FEEDBACK.icon(theme=Theme.DARK),
-                'title': self.tr("交晓智"),
-                'content': self.tr("打开学校官方校园问答"),
-                'callback': lambda: self.main_window.switchTo(self.main_window.jiaoxiaozhi_interface),
-                'color': LinkCard.LinkCardColor.PURPLE
             }
         }
 
