@@ -4,9 +4,16 @@ from PyQt5.QtCore import QUrl, Qt
 from PyQt5.QtGui import QDesktopServices
 from qfluentwidgets import BodyLabel, PrimaryPushButton, PushButton
 
-from app.school_ai_launcher import school_ai_browser_command
 from app.school_ai_policy import JIAOXIAOZHI_URL
 from .components.CampusPage import CampusPage
+
+
+def school_ai_browser_command():
+    """Resolve the optional helper without importing its Qt 6 policy eagerly."""
+
+    from app.school_ai_launcher import school_ai_browser_command as command
+
+    return command()
 
 
 class JiaoxiaozhiInterface(CampusPage):
