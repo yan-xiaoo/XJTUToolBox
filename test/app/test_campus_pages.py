@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QShowEvent
+from PyQt5.QtGui import QColor, QShowEvent
 from PyQt5.QtWidgets import QApplication, QWidget
 
 from app.FitnessInterface import FitnessInterface
@@ -138,6 +138,31 @@ class CampusPageLifecycleTest(unittest.TestCase):
         self.assertEqual(page.table.item(0, 1).text(), "90")
         page._on_score(FitnessScore("1", "Alice", "0", "B", "r", "ok", "F", "4", []))
         self.assertEqual(page.table.rowCount(), 0)
+
+    def test_fitness_style_class_colors_grade_without_extra_column(self):
+        page = FitnessInterface()
+        self._track(page)
+        with patch.object(page, "success"):
+            page._on_score(FitnessScore("1", "Alice", "90", "A", "r", "ok", "F", "4", [
+                FitnessItem("bmi", "身高体重", "90", "正常", "red"),
+                FitnessItem("run", "跑步", "88", "良好", "red; color: blue"),
+            ]))
+
+        self.assertEqual(page.table.columnCount(), 3)
+        self.assertEqual(
+            [page.table.horizontalHeaderItem(column).text() for column in range(3)],
+            ["项目", "成绩", "等级"],
+        )
+        self.assertNotIn(
+            "red",
+            [
+                page.table.item(row, column).text()
+                for row in range(page.table.rowCount())
+                for column in range(page.table.columnCount())
+            ],
+        )
+        self.assertEqual(page.table.item(0, 2).foreground().color(), QColor("red"))
+        self.assertEqual(page.table.item(1, 2).foreground().style(), Qt.NoBrush)
 
     def test_unselected_fitness_year_warns_without_request(self):
         page = FitnessInterface()

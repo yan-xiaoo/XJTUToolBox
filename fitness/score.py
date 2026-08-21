@@ -22,7 +22,7 @@ class FitnessItem:
     name: str
     score: str
     grade: str
-    extra: str
+    style_class: str
 
 
 @dataclass
@@ -128,7 +128,7 @@ class Fitness:
                 name=name,
                 score=_text(data, score_key),
                 grade=_text(data, f"{key}_grade"),
-                extra=_text(data, f"{key}_class"),
+                style_class=_text(data, f"{key}_class"),
             ))
         return FitnessScore(
             student_num=_text(data, "student_num"),

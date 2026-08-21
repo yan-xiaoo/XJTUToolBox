@@ -17,6 +17,7 @@ from app.sessions.hello_session import (
     extract_hello_token,
 )
 from app.sessions.session_backend import AccessMode, SessionBackend
+from app.utils.session_manager import SessionManager
 
 
 DEFAULT_SYSTEM_TYPE = "yingxin_student_pc"
@@ -211,6 +212,22 @@ class HelloJwtAndSessionTest(unittest.TestCase):
                 unselected = webvpn if mode == AccessMode.NORMAL else normal
                 selected.assert_called_once_with(session=session, visitor_id=unittest.mock.ANY)
                 unselected.assert_not_called()
+
+    def test_site_policy_keeps_hello_on_direct_backend_off_campus(self):
+        manager = SessionManager()
+        manager.resolve_access_mode = Mock(return_value=AccessMode.WEBVPN)
+
+        self.assertIs(
+            manager.resolve_access_mode_for_site(HelloSession),
+            AccessMode.NORMAL,
+        )
+        self.assertIs(
+            manager.resolve_access_mode_for_site(
+                HelloSession,
+                preferred=AccessMode.WEBVPN,
+            ),
+            AccessMode.NORMAL,
+        )
 
     def test_validate_login_response_matrix(self):
         cases = (

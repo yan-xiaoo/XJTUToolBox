@@ -111,8 +111,8 @@ class HelloSession(CommonLoginSession):
 
     site_key = "hello"
     site_name = "学籍档案"
-    supports_webvpn = True
-    use_webvpn_when_off_campus = True
+    supports_webvpn = False
+    use_webvpn_when_off_campus = False
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
