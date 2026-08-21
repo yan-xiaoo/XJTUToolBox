@@ -2,27 +2,45 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import requests
 from lxml import html as lxml_html
 
-from auth.constant import MOBILE_BROWSER_UA
-
 logger = logging.getLogger("default")
 
 
 BASE_URL = "http://rg.lib.xjtu.edu.cn:8086"
-SEAT_ID_RE = re.compile(r"(?:[A-Z]\d{2,4}|\b\d{3}\b)")
+# 座位号：字母 + 2~4 位数字（如 A101、D004）；前后不得再跟字母数字，避免误匹配文本中的数字。
+SEAT_ID_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]\d{2,4}(?![0-9])")
+# showConfirmModal(message, action, id) 的第二个、第三个参数；兼容 WebVPN 实体引号。
 CONFIRM_RE = re.compile(
-    r"showConfirmModal\s*\(\s*['\"][^'\"]*['\"]\s*,\s*['\"](\w+)['\"]\s*,\s*['\"](\d+)['\"]\s*\)"
+    r"showConfirmModal\(\s*[^,]+,\s*(?:&#39;|&quot;|['\"])(\w+)(?:&#39;|&quot;|['\"])\s*,\s*"
+    r"(?:&#39;|&quot;|['\"])(\d+)(?:&#39;|&quot;|['\"])"
 )
-MOBILE_UA = MOBILE_BROWSER_UA
-MOBILE_ONLY_HINT = "移动端模式"
+
+# 预约动作：页面 JS 的 action 参数 → 展示名（与前端源码 switch(currentAction) 一致）
+ACTION_LABELS = {
+    "cancel": "取消预约",
+    "ruguan1": "入馆签到",
+    "leave": "中途离开",
+    "return": "中途返回",
+}
+# 展示名 → 动作 URL 参数（/my/?{参数}=1&ri={id}）。
+# 注意：页面 action 名与 URL 参数名不同（ruguan1→firstruguan、leave→midleave、
+# return→midreturn），来源为前端源码 switch(currentAction) 的 url 赋值，不得由上面推导。
+ACTION_PARAMS = {
+    "取消预约": "cancel",
+    "入馆签到": "firstruguan",
+    "中途离开": "midleave",
+    "中途返回": "midreturn",
+}
+
+# 页面中出现任一 token 即存在其它预约（预约失败的典型原因）
+ALREADY_BOOKED_TOKENS = ("已有预约", "已预约", "换座", "已经预约", "存在预约")
+NO_BOOKING_TOKENS = ("暂无预约", "没有预约", "无预约")
 
 AREA_MAP = {
     "北楼二层外文库（东）": "north2east",
@@ -39,7 +57,6 @@ AREA_MAP = {
     "北楼四层西南侧": "north4southwest",
     "北楼四层东南侧": "north4southeast",
 }
-AREA_MAP_REVERSE = {code: name for name, code in AREA_MAP.items()}
 FLOORS = {
     "二楼": ["北楼二层外文库（东）", "二层连廊及流通大厅", "北楼二层外文库（西）", "南楼二层大厅"],
     "三楼": ["北楼三层ILibrary-B（西）", "大屏辅学空间", "南楼三层中段", "北楼三层ILibrary-A（东）"],
@@ -52,7 +69,6 @@ AREA_FLOOR_CODES = {
     for area in areas
     if area in AREA_MAP
 }
-INACTIVE_STATUSES = {"已取消", "已完成", "已过期", "已失效", "已违约", "超时取消", "超时未入馆", "超时", "已离馆"}
 
 
 @dataclass
@@ -84,96 +100,81 @@ class MyBooking:
 
 
 class Library:
+    """图书馆座位系统客户端。session 需为已登录的共享会话（登录态由调用方保证）。"""
+
     def __init__(self, session: requests.Session):
         self.session = session
         self.area_stats: dict[str, AreaStats] = {}
 
-    def _headers(self, referer: str = f"{BASE_URL}/seat/", ajax: bool = False) -> dict[str, str]:
-        headers = {"User-Agent": MOBILE_UA, "Referer": referer}
+    # ---- 请求封装 ----
+
+    def _get(self, url: str, ajax: bool = False, timeout: int = 15) -> requests.Response:
+        headers = {}
         if ajax:
-            headers["X-Requested-With"] = "XMLHttpRequest"
-            headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
-        return headers
-
-    def _get(self, url: str, referer: str = f"{BASE_URL}/seat/", ajax: bool = False, timeout: int = 15) -> requests.Response:
-        response = self.session.get(url, headers=self._headers(referer, ajax), timeout=timeout)
-        if MOBILE_ONLY_HINT in response.text:
-            raise RuntimeError("请浏览器调成移动端模式访问！")
-        return response
-
-    def _looks_like_json(self, body: str) -> bool:
-        stripped = body.lstrip()
-        return stripped.startswith("{") or stripped.startswith("[")
-
-    def _is_login_page(self, body: str, url: str) -> bool:
-        return (
-            'id="loginForm"' in body
-            or 'name="execution"' in body
-            or "cas/login" in body
-            or "login.xjtu.edu.cn" in url
-        )
+            headers = {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+            }
+        return self.session.get(url, headers=headers, timeout=timeout)
 
     def _parse_json(self, body: str) -> dict[str, Any]:
-        if not self._looks_like_json(body):
+        if not (body.lstrip().startswith("{") or body.lstrip().startswith("[")):
             raise RuntimeError("图书馆接口返回异常（非 JSON 响应）")
         try:
             return json.loads(body)
         except json.JSONDecodeError as exc:
             raise RuntimeError("图书馆接口返回了无法解析的数据") from exc
 
-    def _parse_stats(self, scount: dict | None) -> dict[str, AreaStats]:
-        result = {}
+    @staticmethod
+    def _parse_scount(scount: Any) -> dict[str, AreaStats]:
+        """scount: {区域码: [总数, 空闲]} → 统计；字段缺失/类型不符则跳过（UI 不显示统计即可）。"""
+        result: dict[str, AreaStats] = {}
         for key, value in (scount or {}).items():
             if key not in AREA_MAP.values() or not isinstance(value, list) or len(value) < 2:
                 continue
-            result[key] = AreaStats(available=int(value[1]), total=int(value[0]))
+            try:
+                result[key] = AreaStats(available=int(value[1]), total=int(value[0]))
+            except (TypeError, ValueError):
+                continue
         return result
 
-    def _load_floor(self, area_code: str) -> None:
-        floor_code = AREA_FLOOR_CODES.get(area_code)
-        if not floor_code:
-            return
-        response = self._get(f"{BASE_URL}/qspace?lang=zh&floor={floor_code}", ajax=True)
-        payload = self._parse_json(response.text)
-        self.area_stats = self._parse_stats(payload.get("scount"))
+    # ---- 动作一：查询座位状态 ----
 
     def get_seats(self, area_code: str) -> tuple[list[SeatInfo], dict[str, AreaStats]]:
-        self._load_floor(area_code)
-        floor_code = AREA_FLOOR_CODES.get(area_code)
-        referer = f"{BASE_URL}/qspace?lang=zh&floor={floor_code}" if floor_code else f"{BASE_URL}/seat/"
-        response = self._get(f"{BASE_URL}/qseat?sp={area_code}", referer=referer, ajax=True)
-        if self._is_login_page(response.text, response.url):
-            raise RuntimeError("图书馆登录态已失效")
+        response = self._get(f"{BASE_URL}/qseat?sp={area_code}", ajax=True)
         payload = self._parse_json(response.text)
-        stats = self._parse_stats(payload.get("scount"))
+        stats = self._parse_scount(payload.get("scount"))
         if stats:
             self.area_stats = stats
         seats = [
-            SeatInfo(seat_id=seat_id, available=status == 0)
+            SeatInfo(seat_id=seat_id, available=int(status) == 0)
             for seat_id, status in (payload.get("seat") or {}).items()
         ]
         seats.sort(key=lambda item: (item.seat_id[:1], item.seat_id))
         return seats, self.area_stats
 
-    def book_seat(self, seat_id: str, area_code: str, auto_swap: bool = True) -> BookResult:
+    # ---- 动作二：选座位 ----
+
+    def book_seat(self, seat_id: str, area_code: str) -> BookResult:
+        """预约目标座位；若已有其它预约则自动换成目标座位。"""
         response = self._get(f"{BASE_URL}/seat/?kid={seat_id}&sp={area_code}")
-        logger.info("book_seat: seat=%s area=%s url=%s len=%s", seat_id, area_code, response.url, len(response.text))
+        logger.info("book_seat: seat=%s area=%s landed=%s len=%s", seat_id, area_code, response.url, len(response.text))
         if self._is_my_page(response.url):
             booking = self._booking_from_html(response.text, response.url)
-            logger.info(
-                "book_seat: landed on my-page booking=%s actions=%s",
-                None if booking is None else f"{booking.seat_id}/{booking.status_text}",
-                list(booking.action_urls) if booking else [],
-            )
             return BookResult(True, f"座位 {seat_id} 预约成功", response.url, booking=booking)
-        body_text = ""
-        try:
-            body_text = lxml_html.fromstring(response.text).text_content()
-        except Exception:
-            body_text = response.text
-        if auto_swap and any(token in body_text for token in ("已有预约", "已预约", "换座", "已经预约", "存在预约")):
-            return self.swap_seat(seat_id, area_code)
+        body_text = self._body_text(response.text)
+        if any(token in body_text for token in ALREADY_BOOKED_TOKENS):
+            return self._swap_seat(seat_id, area_code)
         return BookResult(False, self._failure_reason(body_text), response.url)
+
+    def _swap_seat(self, seat_id: str, area_code: str) -> BookResult:
+        """把当前预约换到目标座位，以 /my/ 复查座位号严格一致确认。"""
+        response = self._get(f"{BASE_URL}/updateseat/?kid={seat_id}&sp={area_code}")
+        booking = self.get_my_booking()
+        booked = booking.seat_id if booking else ""
+        if booked and booked.lower() == seat_id.lower():
+            return BookResult(True, f"已换座到 {booked}", response.url, booking=booking)
+        return BookResult(False, f"换座未生效{f'（当前仍为 {booked}）' if booked else ''}", response.url)
 
     def _is_my_page(self, url: str) -> bool:
         candidates = [url]
@@ -186,234 +187,91 @@ class Library:
             pass
         return any("/my/" in item or "/seat/my" in item for item in candidates)
 
-    def _preflight(self, path: str) -> None:
-        self._get(f"{BASE_URL}/my/")
-        if path != "/my/":
-            self._get(f"{BASE_URL}{path}")
-        access_mode = getattr(self.session, "access_mode", None)
-        if access_mode is not None and getattr(access_mode, "value", "") == "webvpn":
-            cookie_url = (
-                "https://webvpn.xjtu.edu.cn/wengine-vpn/cookie"
-                f"?method=get&host=rg.lib.xjtu.edu.cn&scheme=http&path={path}"
-                f"&vpn_timestamp={int(time.time() * 1000)}"
-            )
-            self.session.get(cookie_url, timeout=10, _skip_webvpn_rewrite=True)
-
-    def swap_seat(self, seat_id: str, area_code: str) -> BookResult:
-        self._preflight("/updateseat/")
-        try:
-            self._get(f"{BASE_URL}/qseat?sp={area_code}", referer=f"{BASE_URL}/updateseat/", ajax=True)
-        except Exception:
-            pass
-        response = self._get(
-            f"{BASE_URL}/updateseat/?kid={seat_id}&sp={area_code}",
-            referer=f"{BASE_URL}/updateseat/",
-        )
-        booking = self.get_my_booking()
-        booked = booking.seat_id if booking else ""
-        if booked and (booked.lower() == seat_id.lower() or seat_id in booked or booked in seat_id):
-            return BookResult(True, f"已换座到 {booked}", response.url, booking=booking)
-        return BookResult(False, f"换座未生效{f'（当前仍为 {booked}）' if booked else ''}", response.url)
+    # ---- 动作三：当前预约 ----
 
     def get_my_booking(self) -> MyBooking | None:
-        for url in (f"{BASE_URL}/my/", f"{BASE_URL}/seat/my/", f"{BASE_URL}/seat/my"):
-            response = self._get(url, timeout=12)
-            logger.info("get_my_booking: try %s -> %s len=%s", url, response.url, len(response.text))
-            if len(response.text) < 50 or self._is_login_page(response.text, response.url):
-                logger.info("get_my_booking: skip login/empty page")
-                continue
-            booking = self._booking_from_html(response.text, response.url)
-            if booking:
-                return booking
-        logger.info("get_my_booking: no active booking")
-        return None
+        response = self._get(f"{BASE_URL}/my/", timeout=12)
+        logger.info("get_my_booking: %s len=%s", response.url, len(response.text))
+        return self._booking_from_html(response.text, response.url)
+
+    # ---- 预约页解析 ----
 
     def _booking_from_html(self, html: str, url: str = "") -> MyBooking | None:
-        try:
-            tree = lxml_html.fromstring(html)
-            body_text = tree.text_content()
-        except Exception:
-            body_text = html
-        if "Not Found" in body_text and len(body_text) < 800:
+        body_text = self._body_text(html)
+        if any(token in body_text for token in NO_BOOKING_TOKENS):
             return None
-        if any(token in body_text for token in ("暂无预约", "没有预约", "无预约")) and not SEAT_ID_RE.search(body_text):
+        seat = SEAT_ID_RE.search(body_text)
+        if not seat:
             return None
-        booking = self._parse_booking(html, body_text)
-        if booking is None or not booking.action_urls:
-            self._dump_booking_html(html, url)
-        if booking:
-            logger.info(
-                "get_my_booking: seat=%s area=%s status=%s actions=%s confirm=%s links=%s",
-                booking.seat_id, booking.area, booking.status_text,
-                list(booking.action_urls), len(CONFIRM_RE.findall(html)),
-                self._link_texts(html),
-            )
+        status = re.search(r"预约状态[:：]\s*(\S+)", body_text)
+        area = next((name for name in AREA_MAP if name in body_text), "")
+        reserve_id, actions_present = self._reserve_id_and_actions(html, url)
+        actions = self._build_actions(reserve_id, actions_present)
+        booking = MyBooking(seat.group(0), area, status.group(1) if status else "", actions)
+        logger.info(
+            "get_my_booking: seat=%s area=%s status=%s actions=%s",
+            booking.seat_id, booking.area, booking.status_text, list(actions),
+        )
         return booking
 
-    def _dump_booking_html(self, html: str, url: str) -> None:
-        logger.info("get_my_booking: empty actions url=%s html_prefix=%s", url, html[:400].replace("\n", " "))
-        try:
-            from app.utils.migrate_data import LOG_DIRECTORY
-            path = os.path.join(LOG_DIRECTORY, "library-booking.html")
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(f"<!-- {url} -->\n")
-                handle.write(html)
-            logger.info("get_my_booking: dumped html to %s (%s bytes)", path, len(html))
-        except Exception as exc:
-            logger.info("get_my_booking: dump failed: %s", exc)
+    def _reserve_id_and_actions(self, html: str, url: str) -> tuple[str, set[str]]:
+        """提取 (reserve_id, 页面当前渲染的动作)。
 
-    def _parse_booking(self, html: str, body_text: str) -> MyBooking | None:
-        status_matches = list(re.finditer(r"预约状态[:：]\s*(\S+)", body_text))
-        action_urls = self._parse_actions(html)
-        if not status_matches:
-            seat = SEAT_ID_RE.search(body_text)
-            if not seat:
-                return None
-            area = next((name for name in AREA_MAP if name in body_text), "")
-            return MyBooking(seat.group(0), area, "", action_urls)
-        start = 0
-        for match in status_matches:
-            status = match.group(1)
-            block = body_text[start:match.end()]
-            start = match.end()
-            if status in INACTIVE_STATUSES:
-                continue
-            seats = list(SEAT_ID_RE.finditer(block))
-            if not seats:
-                continue
-            area = next((name for name in AREA_MAP if name in block), "")
-            return MyBooking(seats[-1].group(0), area, status, action_urls)
-        return None
+        reserve_id 是动作 URL 的唯一动态参数（showConfirmModal 的第三个参数）；
+        页面按预约状态只渲染当前可执行的按钮（如未入馆时无“中途离开”），
+        动作集合来自页面实际出现的 showConfirmModal action 参数。
+        """
+        normalized = html.replace("&#39;", "'").replace("&quot;", '"').replace("&#34;", '"')
+        present: set[str] = set()
+        reserve_id = ""
+        for action, ri in CONFIRM_RE.findall(normalized):
+            label = ACTION_LABELS.get(action)
+            if label:
+                present.add(label)
+            if not reserve_id:
+                reserve_id = ri
+        if not reserve_id:
+            match = re.search(r"[?&]ri=(\d+)", url)
+            if match:
+                reserve_id = match.group(1)
+        return reserve_id, present
 
-    def _link_texts(self, html: str) -> list[str]:
-        try:
-            tree = lxml_html.fromstring(html)
-        except Exception:
-            return []
-        texts = []
-        for element in tree.xpath(".//a | .//button | .//input[@type='submit']"):
-            text = (element.text_content() or element.get("value") or "").strip()
-            if text:
-                texts.append(text[:20])
-        return texts[:40]
-
-    def _parse_actions(self, html: str) -> dict[str, str]:
-        actions: dict[str, str] = {}
-        for action, reserve_id in CONFIRM_RE.findall(html):
-            url = self._action_url(action, reserve_id)
-            label = self._action_label(action)
-            if url and label:
-                actions[label] = url
-            elif not label:
-                logger.info("get_my_booking: unknown confirm action=%s ri=%s", action, reserve_id)
-        try:
-            tree = lxml_html.fromstring(html)
-        except Exception:
-            tree = None
-        if tree is not None:
-            for element in tree.xpath(".//a[@href or @onclick or @data-href or @data-url] | .//button[@onclick]"):
-                text = (element.text_content() or "").strip()
-                label = self._label_from_text(text)
-                if not label or label in actions:
-                    continue
-                url = (
-                    element.get("data-href")
-                    or element.get("data-url")
-                    or element.get("data-action")
-                    or self._url_from_onclick(element.get("onclick") or "")
-                )
-                href = element.get("href") or ""
-                if not url and href and href not in {"#", "javascript:void(0)"} and "javascript:" not in href:
-                    url = href if href.startswith("http") else f"{BASE_URL}{href}"
-                if url:
-                    actions[label] = url if url.startswith("http") else f"{BASE_URL}{url}"
-            for form in tree.xpath(".//form[@action]"):
-                submit = form.xpath(".//button[@type='submit'] | .//input[@type='submit']")
-                text = ""
-                if submit:
-                    text = (submit[0].text_content() or submit[0].get("value") or "").strip()
-                label = self._label_from_text(text)
-                action = form.get("action") or ""
-                if label and label not in actions and action and action != "#":
-                    actions[label] = action if action.startswith("http") else f"{BASE_URL}{action}"
-        if "取消预约" in actions:
-            return actions
-        for match in re.finditer(
-            r"""['"](/my/\?(?:cancel|firstruguan|midleave|midreturn)=1&ri=)(\d+)['"]""",
-            html,
-        ):
-            prefix, reserve_id = match.groups()
-            label = self._action_label(prefix)
-            if label and label not in actions:
-                actions[label] = f"{BASE_URL}{prefix}{reserve_id}"
-        return actions
-
-    def _url_from_onclick(self, onclick: str) -> str:
-        match = CONFIRM_RE.search(onclick)
-        if match:
-            return self._action_url(match.group(1), match.group(2))
-        href = re.search(r"""(?:location\.href|location|window\.location)\s*=\s*['"]([^'"]+)['"]""", onclick)
-        if href:
-            url = href.group(1)
-            return url if url.startswith("http") else f"{BASE_URL}{url}"
-        path = re.search(r"""['"](/[^'"]+)['"]""", onclick)
-        if path:
-            url = path.group(1)
-            return url if url.startswith("http") else f"{BASE_URL}{url}"
-        return ""
-
-    def _label_from_text(self, text: str) -> str:
-        if "取消" in text and "预约" in text:
-            return "取消预约"
-        if "线上签到" in text or (("入馆" in text or "签到" in text) and "离" not in text and "返" not in text):
-            return "入馆签到"
-        if "中途离开" in text or "暂离" in text or "离馆" in text:
-            return "中途离开"
-        if "中途返回" in text or "回馆" in text:
-            return "中途返回"
-        if "取消" in text:
-            return "取消预约"
-        return ""
-
-    def _action_label(self, action: str) -> str:
-        text = action.lower()
-        if "cancel" in text:
-            return "取消预约"
-        if "ruguan" in text or "firstruguan" in text:
-            return "入馆签到"
-        if "leave" in text:
-            return "中途离开"
-        if "return" in text:
-            return "中途返回"
-        return ""
-
-    def _action_url(self, action: str, reserve_id: str) -> str:
-        mapping = {
-            "cancel": f"{BASE_URL}/my/?cancel=1&ri={reserve_id}",
-            "ruguan1": f"{BASE_URL}/my/?firstruguan=1&ri={reserve_id}",
-            "leave": f"{BASE_URL}/my/?midleave=1&ri={reserve_id}",
-            "midleave": f"{BASE_URL}/my/?midleave=1&ri={reserve_id}",
-            "return": f"{BASE_URL}/my/?midreturn=1&ri={reserve_id}",
-            "midreturn": f"{BASE_URL}/my/?midreturn=1&ri={reserve_id}",
+    def _build_actions(self, reserve_id: str, actions_present: set[str]) -> dict[str, str]:
+        if not reserve_id or not actions_present:
+            return {}
+        return {
+            label: f"{BASE_URL}/my/?{param}=1&ri={reserve_id}"
+            for label, param in ACTION_PARAMS.items()
+            if label in actions_present
         }
-        return mapping.get(action, "")
+
+    @staticmethod
+    def _body_text(html: str) -> str:
+        try:
+            return lxml_html.fromstring(html).text_content()
+        except Exception:
+            return html
+
+    # ---- 动作执行 ----
 
     def execute_action(self, url: str) -> BookResult:
-        self._preflight("/my/")
-        response = self._get(url, referer=f"{BASE_URL}/my/")
+        response = self._get(url)
         if "cancel=1" in url:
             booking = self.get_my_booking()
             if booking is None:
                 return BookResult(True, "已取消预约", response.url)
             return BookResult(False, f"取消未生效，当前仍为 {booking.seat_id}", response.url)
-        return BookResult(True, "操作已提交", response.url)
+        # 签到/离开/返回不声明状态断言（页面文案可能变化），如实告知，UI 刷新展示真实结果。
+        return BookResult(True, "操作已提交，稍后自动刷新最新状态", response.url)
+
+    # ---- 失败原因 ----
 
     def _failure_reason(self, body_text: str) -> str:
         if "30分钟" in body_text:
             return "30 分钟内不能重复预约"
         if "已被预约" in body_text or "已被占" in body_text:
             return "该座位已被他人预约"
-        if "已有预约" in body_text or "已预约" in body_text:
+        if any(token in body_text for token in ALREADY_BOOKED_TOKENS):
             return "您已有其他座位预约"
         if "不在预约时间" in body_text or "未开放" in body_text:
             return "当前不在预约开放时间"

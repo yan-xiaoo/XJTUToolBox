@@ -370,7 +370,6 @@ class MainWindow(MSFluentWindow):
                                                           self.tr("查询当前空闲的教室"))
         empty_room_card.setFixedSize(200, 180)
 
-
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
                                       position=NavigationItemPosition.BOTTOM)

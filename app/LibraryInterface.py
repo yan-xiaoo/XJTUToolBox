@@ -171,7 +171,7 @@ class LibraryInterface(CampusPage):
             seat=booking.seat_id, area=booking.area, status=booking.status_text,
         )
         if not booking.action_urls:
-            text += self.tr("；未识别到操作按钮，详情已写入日志")
+            text += self.tr("；当前页面未识别到操作按钮，请稍后刷新重试")
         self.bookingLabel.setText(text)
 
     def run_action(self, label: str):

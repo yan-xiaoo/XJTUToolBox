@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from auth import ServerError
-from auth.constant import LIBRARY_LOGIN_URL, MOBILE_BROWSER_UA
+from auth.constant import LIBRARY_LOGIN_URL
 from auth.new_login import NewLogin, NewWebVPNLogin
 from .common_session import CommonLoginSession
 from .session_backend import AccessMode
@@ -21,7 +21,6 @@ class LibrarySession(CommonLoginSession):
     site_name = "图书馆"
     supports_webvpn = True
     use_webvpn_when_off_campus = True
-    user_agent = MOBILE_BROWSER_UA
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin
