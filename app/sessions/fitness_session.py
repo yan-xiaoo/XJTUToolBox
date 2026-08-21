@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from urllib.parse import parse_qs, urlparse
-
-import requests
 
 from auth import ServerError
 from auth.constant import FITNESS_LOGIN_URL
@@ -51,55 +48,49 @@ class FitnessSession(CommonLoginSession):
             allow_qrcode_login=False,
         )
         response = self.get(FITNESS_LOGIN_URL, allow_redirects=True, timeout=20, _skip_auth_check=True)
-        callback = urlparse(response.url)
-        if callback.hostname != "tyxylp.xjtu.edu.cn":
+        if "tyxylp.xjtu.edu.cn" not in response.url:
             raise ServerError(102, "体测登录回调异常")
         self.referer_url = response.url or self.H5_HOME_URL
         self.headers["X-Fitness-Referer"] = self.referer_url
         params = {key: parse_qs(urlparse(response.url).query).get(key, [""])[0] for key in self.CHECK_LOGIN_FIELDS}
-        if not params.get("token") or not params.get("sign"):
-            raise ServerError(102, "体测登录回调缺少会话参数")
-        check = self.post(
-            f"{self.API_ROOT}/Index/checkLogin",
-            data=params,
-            headers={
-                "Origin": "https://tyxylp.xjtu.edu.cn",
-                "Referer": self.referer_url,
-                "X-Requested-With": "XMLHttpRequest",
-            },
-            timeout=15,
-            _skip_auth_check=True,
-        )
-        try:
-            payload = check.json()
-        except (TypeError, ValueError):
-            payload = None
-        if not check.ok or not isinstance(payload, Mapping) or payload.get("status") != 1:
-            raise ServerError(102, "体测会话初始化失败")
+        if params.get("token") and params.get("sign"):
+            check = self.post(
+                f"{self.API_ROOT}/Index/checkLogin",
+                data=params,
+                headers={
+                    "Origin": "https://tyxylp.xjtu.edu.cn",
+                    "Referer": self.referer_url,
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                timeout=15,
+                _skip_auth_check=True,
+            )
+            try:
+                ok = check.json().get("status") == 1
+            except ValueError:
+                ok = False
+            if not check.ok or not ok:
+                raise ServerError(102, "体测会话初始化失败")
         self.reset_timeout()
         self.has_login = True
 
     _re_login = _login
 
     def validate_login(self) -> bool:
-        try:
-            response = self.post(
-                f"{self.API_ROOT}/fitness/fitnessYear",
-                data={"from": "1"},
-                headers={
-                    "Origin": "https://tyxylp.xjtu.edu.cn",
-                    "Referer": self.referer_url,
-                    "X-Requested-With": "XMLHttpRequest",
-                },
-                timeout=10,
-                _skip_auth_check=True,
-            )
-        except requests.RequestException:
-            return False
+        response = self.post(
+            f"{self.API_ROOT}/fitness/fitnessYear",
+            data={"from": "1"},
+            headers={
+                "Origin": "https://tyxylp.xjtu.edu.cn",
+                "Referer": self.referer_url,
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            timeout=10,
+            _skip_auth_check=True,
+        )
         if not response.ok or self.is_auth_failure_response(response):
             return False
         try:
-            payload = response.json()
-        except (TypeError, ValueError):
+            return response.json().get("status") == 1
+        except ValueError:
             return False
-        return isinstance(payload, Mapping) and payload.get("status") == 1
