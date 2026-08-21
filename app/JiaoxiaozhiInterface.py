@@ -43,5 +43,4 @@ class JiaoxiaozhiInterface(CampusPage):
             self.open_system_browser()
 
     def open_system_browser(self):
-        if not QDesktopServices.openUrl(QUrl(JIAOXIAOZHI_URL)):
-            self.warn(self.tr("打开失败"), self.tr("系统浏览器无法打开交晓智"))
+        QDesktopServices.openUrl(QUrl(JIAOXIAOZHI_URL))
