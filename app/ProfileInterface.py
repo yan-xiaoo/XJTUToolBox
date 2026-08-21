@@ -52,7 +52,6 @@ class ProfileInterface(CampusPage):
     def refresh(self):
         if not self.require_account():
             return
-        self.fields.setText(self.tr("正在查询学籍档案..."))
         self._clear_photo()
 
         def worker(session):

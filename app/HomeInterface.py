@@ -2,19 +2,9 @@ from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, TitleLabel, FluentIcon as FIF, Theme, TogglePushButton, PushButton, InfoBar, InfoBarPosition
 from PyQt5.QtWidgets import QVBoxLayout, QWidget, QHBoxLayout
 from .utils import accounts, StyleSheet, cfg
-from .utils.resources import resource_path
 from .cards.link_card import LinkCardView, LinkCard
 from .sub_interfaces.EncryptDialog import DecryptFrame
 from .components.CardManagerDialog import CardManagerDialog
-
-
-def validate_card_ids(card_ids) -> tuple[str, ...]:
-    """Validate the explicit IDs used by the card registry."""
-
-    ids = tuple(card_ids)
-    if len(ids) != len(set(ids)):
-        raise ValueError("duplicate home card id")
-    return ids
 
 
 class HomeFrame(QWidget):
@@ -155,7 +145,7 @@ class HomeFrame(QWidget):
         """设置所有可用的卡片定义"""
         available_cards = {
             'account': {
-                'icon': str(resource_path("assets/icons/login.png")),
+                'icon': "assets/icons/login.png",
                 'title': self.tr("开始使用"),
                 'content': self.tr("添加你的第一个账户"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.account_interface)
@@ -168,7 +158,7 @@ class HomeFrame(QWidget):
                 'color': LinkCard.LinkCardColor.RED
             },
             'attendance': {
-                'icon': str(resource_path("assets/icons/attendance.png")),
+                'icon': "assets/icons/attendance.png",
                 'title': self.tr("考勤"),
                 'content': self.tr("查看你的考勤信息"),
                 'callback': lambda: self.main_window.switchTo(self.main_window.attendance_interface),
@@ -246,7 +236,6 @@ class HomeFrame(QWidget):
             }
         }
 
-        validate_card_ids(available_cards.keys())
         self.linkCardView.setAvailableCards(available_cards)
 
     def loadDefaultCards(self):

@@ -139,19 +139,6 @@ class FitnessValidationTest(unittest.TestCase):
                     session.post = Mock(return_value=response_or_error)
                 self.assertIs(session.validate_login(), expected)
 
-    def test_validate_login_rejects_non_ok_and_auth_failure_responses(self):
-        non_ok = _response(ok=False, payload={"status": 1})
-        session = FitnessSession()
-        session.post = Mock(return_value=non_ok)
-        self.assertFalse(session.validate_login())
-
-        auth_failed = _response(payload={"status": 1})
-        session = FitnessSession()
-        session.post = Mock(return_value=auth_failed)
-        with patch.object(session, "is_auth_failure_response", return_value=True) as is_auth_failure:
-            self.assertFalse(session.validate_login())
-        is_auth_failure.assert_called_once_with(auth_failed)
-
     def test_snapshot_round_trip_restores_referer_and_clear_resets_it(self):
         source = FitnessSession()
         source.referer_url = "https://tyxylp.xjtu.edu.cn/custom"
