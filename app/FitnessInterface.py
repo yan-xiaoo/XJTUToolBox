@@ -14,7 +14,6 @@ class FitnessInterface(CampusPage):
 
         self.yearBox = ComboBox(self.view)
         self.yearBox.setMinimumWidth(200)
-        self.yearBox.currentIndexChanged.connect(self._on_year_changed)
         self.queryButton = PrimaryPushButton(self.tr("查询成绩"), self.view)
         self.queryButton.setFixedWidth(110)
         self.queryButton.clicked.connect(self.query_score)
@@ -47,19 +46,13 @@ class FitnessInterface(CampusPage):
 
     def _on_years(self, years):
         self.years = years
-        self.yearBox.blockSignals(True)
         self.yearBox.clear()
         for year in years:
             self.yearBox.addItem(year.name, userData=year.year_num)
             if year.checked:
                 self.yearBox.setCurrentIndex(self.yearBox.count() - 1)
-        self.yearBox.blockSignals(False)
         self.success(self.tr("查询成功"), self.tr("已加载体测学年"))
         if self.yearBox.currentData():
-            self.query_score()
-
-    def _on_year_changed(self, _index):
-        if self.yearBox.currentData() and self._auto_loaded:
             self.query_score()
 
     def query_score(self):
