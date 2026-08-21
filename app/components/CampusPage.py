@@ -32,7 +32,6 @@ class CampusPage(ScrollArea):
         self.vBoxLayout.addWidget(self.jobSlot)
         self.thread = None
         self.processWidget = None
-        self._job_generation = 0
         accounts.currentAccountChanged.connect(self._on_current_account_changed)
 
         StyleSheet.EMPTY_ROOM_INTERFACE.apply(self)
@@ -78,8 +77,6 @@ class CampusPage(ScrollArea):
 
     def start_job(self, site_key: str, message: str, worker, on_result, need_login: bool = True,
                   show_process: bool = True) -> bool:
-        self._job_generation += 1
-        job_generation = self._job_generation
         if self.thread is not None and self.thread.isRunning():
             self.thread.can_run = False
         started_uuid = getattr(accounts.current, "uuid", None)
@@ -93,34 +90,17 @@ class CampusPage(ScrollArea):
 
         def _guarded(payload):
             current = accounts.current
-            if (
-                job_generation != self._job_generation
-                or started_uuid is None
-                or current is None
-                or getattr(current, "uuid", None) != started_uuid
-            ):
+            if started_uuid is None or current is None or getattr(current, "uuid", None) != started_uuid:
                 return
             on_result(payload)
 
-        def _guarded_error(title, message):
-            current = accounts.current
-            if (
-                job_generation != self._job_generation
-                or started_uuid is None
-                or current is None
-                or getattr(current, "uuid", None) != started_uuid
-            ):
-                return
-            self.warn(title, message)
-
         self.thread.result.connect(_guarded)
-        self.thread.error.connect(_guarded_error)
+        self.thread.error.connect(self.warn)
         self.thread.start()
         return True
 
     @pyqtSlot()
     def _on_current_account_changed(self):
-        self._job_generation += 1
         if self.thread is not None and self.thread.isRunning():
             self.thread.can_run = False
         self.on_account_changed()
