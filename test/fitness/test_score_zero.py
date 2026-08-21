@@ -43,7 +43,20 @@ class FitnessScoreZeroTest(unittest.TestCase):
         for index, item in enumerate(score.items, 1):
             self.assertEqual(item.score, str(index))
             self.assertEqual(item.grade, f"G{index}")
-            self.assertEqual(item.extra, f"C{index}")
+            self.assertEqual(item.style_class, f"C{index}")
+
+    def test_item_class_maps_to_style_class(self):
+        session = SimpleNamespace(headers={}, post=Mock(return_value=SimpleNamespace(
+            json=lambda: {
+                "status": 1,
+                "data": {"bmi_grade": "正常", "bmi_class": "red"},
+            }
+        )))
+
+        score = Fitness(session).get_score("2024")
+        bmi = next(item for item in score.items if item.key == "bmi")
+
+        self.assertEqual(bmi.style_class, "red")
 
     def test_new_bmi_zero_wins_and_none_or_missing_falls_back(self):
         def score(data):
@@ -63,8 +76,8 @@ class FitnessScoreZeroTest(unittest.TestCase):
         score = Fitness(session).get_score("2024")
         vc = next(item for item in score.items if item.key == "vc")
         bmi = next(item for item in score.items if item.key == "bmi")
-        self.assertEqual((vc.score, vc.grade, vc.extra), ("0", "合格", ""))
-        self.assertEqual((bmi.score, bmi.grade, bmi.extra), ("", "", ""))
+        self.assertEqual((vc.score, vc.grade, vc.style_class), ("0", "合格", ""))
+        self.assertEqual((bmi.score, bmi.grade, bmi.style_class), ("", "", ""))
 
     def test_wrong_top_level_and_data_shapes_are_rejected(self):
         for payload in (["not"], "string", None, {"status": 1, "data": []}, {"status": 1, "data": "bad"}):
