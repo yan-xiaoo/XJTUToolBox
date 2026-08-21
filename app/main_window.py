@@ -38,7 +38,6 @@ from .sessions.fitness_session import FitnessSession
 from .ProfileInterface import ProfileInterface
 from .FitnessInterface import FitnessInterface
 from .SchoolCalendarInterface import SchoolCalendarInterface
-from .JiaoxiaozhiInterface import JiaoxiaozhiInterface
 from .sub_interfaces import LoginInterface
 from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
 from .sub_interfaces.VerifyCodeDialog import VerifyCodeDialog
@@ -215,7 +214,6 @@ class MainWindow(MSFluentWindow):
         self.profile_interface = ProfileInterface(self)
         self.fitness_interface = FitnessInterface(self)
         self.school_calendar_interface = SchoolCalendarInterface(self)
-        self.jiaoxiaozhi_interface = JiaoxiaozhiInterface(self)
         QApplication.processEvents()
 
         self.tray_interface = TrayInterface(QIcon("assets/icons/main_icon.ico"))
@@ -388,7 +386,6 @@ class MainWindow(MSFluentWindow):
             (self.profile_interface, FIF.INFO, self.tr("学籍档案"), self.tr("证件照、书院与辅导员")),
             (self.fitness_interface, FIF.SPEED_HIGH, self.tr("体测查询"), self.tr("查询体测项目分与总评")),
             (self.school_calendar_interface, FIF.DATE_TIME, self.tr("校历"), self.tr("学期起止与节假日")),
-            (self.jiaoxiaozhi_interface, FIF.FEEDBACK, self.tr("交晓智"), self.tr("打开学校官方校园问答")),
         ):
             card = self.tool_box_interface.addCard(interface, icon, title, content)
             card.setFixedSize(200, 180)

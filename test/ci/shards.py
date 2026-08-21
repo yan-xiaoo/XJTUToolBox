@@ -31,7 +31,6 @@ SHARDS: tuple[Shard, ...] = (
             "test.app.test_campus_pages",
             "test.app.test_campus_registration",
             "test.app.test_ctrl_c",
-            "test.app.test_jiaoxiaozhi",
             "test.app.test_notice_search_ui",
             "test.app.test_notice_thread",
         ),

@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import requests
 
 from auth import ServerError
+from auth.constant import HELLO_LOGIN_URL
 from app.sessions.hello_session import (
     HelloLogin,
     HelloSession,
@@ -16,6 +17,7 @@ from app.sessions.hello_session import (
     extract_hello_token,
 )
 from app.sessions.session_backend import AccessMode, SessionBackend
+from app.utils.session_manager import SessionManager
 
 
 DEFAULT_SYSTEM_TYPE = "yingxin_student_pc"
@@ -114,9 +116,43 @@ class HelloJwtAndSessionTest(unittest.TestCase):
         self.assertEqual(session.headers["access_token"], token)
         self.assertEqual(session.headers["systemtype"], "teacher_pc")
 
-    def test_post_login_without_token_raises_server_error(self):
+    def test_post_login_replays_oauth_entry_after_code_only_cas_response(self):
+        session = HelloSession()
+        token = _jwt({"systemType": "student_pc"})
+        probe = _LoginProbe(session)
+        probe._get = Mock(
+            return_value=_response(
+                "http://hello.xjtu.edu.cn/yingxin-pc/index?uuid=redacted",
+                history=[_response(
+                    f"http://hello.xjtu.edu.cn/yingxin-pc/?token={token}&uuid=redacted"
+                )],
+            )
+        )
+
+        probe.postLogin(
+            _response(
+                "https://org.xjtu.edu.cn/openplatform/oauth/authorizesw"
+                "?code=redacted&state=pc"
+            )
+        )
+
+        probe._get.assert_called_once_with(HELLO_LOGIN_URL, allow_redirects=True)
+        self.assertEqual(session.access_token, token)
+        self.assertEqual(session.headers["access-token"], token)
+
+    def test_post_login_without_token_after_replay_raises_server_error(self):
+        probe = _LoginProbe(HelloSession())
+        probe._get = Mock(
+            return_value=_response(
+                "http://hello.xjtu.edu.cn/yingxin/login/xjtu/oauth/pc"
+                "?code=redacted&state=pc"
+            )
+        )
+
         with self.assertRaises(ServerError):
-            _LoginProbe(HelloSession()).postLogin(_response("https://hello.xjtu.edu.cn/"))
+            probe.postLogin(_response("https://hello.xjtu.edu.cn/"))
+
+        probe._get.assert_called_once_with(HELLO_LOGIN_URL, allow_redirects=True)
 
     def test_clear_site_state_removes_all_site_authentication_state(self):
         session = HelloSession()
@@ -176,6 +212,22 @@ class HelloJwtAndSessionTest(unittest.TestCase):
                 unselected = webvpn if mode == AccessMode.NORMAL else normal
                 selected.assert_called_once_with(session=session, visitor_id=unittest.mock.ANY)
                 unselected.assert_not_called()
+
+    def test_site_policy_keeps_hello_on_direct_backend_off_campus(self):
+        manager = SessionManager()
+        manager.resolve_access_mode = Mock(return_value=AccessMode.WEBVPN)
+
+        self.assertIs(
+            manager.resolve_access_mode_for_site(HelloSession),
+            AccessMode.NORMAL,
+        )
+        self.assertIs(
+            manager.resolve_access_mode_for_site(
+                HelloSession,
+                preferred=AccessMode.WEBVPN,
+            ),
+            AccessMode.NORMAL,
+        )
 
     def test_validate_login_response_matrix(self):
         cases = (

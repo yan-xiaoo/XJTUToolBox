@@ -1,3 +1,4 @@
+from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QTableWidgetItem
 from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton
 
@@ -22,7 +23,7 @@ class FitnessInterface(CampusPage):
 
         self.summary = BodyLabel(self.tr("打开本页会自动加载体测学年。"), self.view)
         self.vBoxLayout.addWidget(self.summary)
-        self.table = self.make_table([self.tr("项目"), self.tr("成绩"), self.tr("等级"), self.tr("附加")])
+        self.table = self.make_table([self.tr("项目"), self.tr("成绩"), self.tr("等级")])
         self.vBoxLayout.addWidget(self.table, 1)
 
     def on_account_changed(self):
@@ -81,6 +82,9 @@ class FitnessInterface(CampusPage):
         for row, item in enumerate(score.items):
             self.table.setItem(row, 0, QTableWidgetItem(item.name))
             self.table.setItem(row, 1, QTableWidgetItem(item.score))
-            self.table.setItem(row, 2, QTableWidgetItem(item.grade))
-            self.table.setItem(row, 3, QTableWidgetItem(item.extra))
+            grade_item = QTableWidgetItem(item.grade)
+            color = QColor(item.style_class)
+            if color.isValid():
+                grade_item.setForeground(color)
+            self.table.setItem(row, 2, grade_item)
         self.success(self.tr("查询成功"), self.tr("已更新体测成绩"))
