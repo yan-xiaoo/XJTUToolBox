@@ -1,0 +1,13 @@
+<!doctype html>
+<!--
+Sanitized from the DuckDuckGo HTTP 202 challenge structure independently
+recorded in cooperate.md on 2026-08-17. Challenge tokens and scripts were
+removed; the two parser-significant markers are retained.
+-->
+<html>
+  <body>
+    <div class="anomaly-modal">
+      <form id="challenge-form" action="/anomaly.js" method="post"></form>
+    </div>
+  </body>
+</html>

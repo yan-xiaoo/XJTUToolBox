@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+Sanitized from a no-cookie public DuckDuckGo HTML response captured on
+2026-08-17. Tracking tokens and unrelated results were removed while retaining
+the upstream result, result__a, and result__snippet structure.
+-->
+<html>
+  <body>
+    <div class="result results_links results_links_deep web-result">
+      <div class="links_main links_deep result__body">
+        <h2 class="result__title">
+          <a rel="nofollow" class="result__a"
+             href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.xjtu.edu.cn%2F">
+            Welcome to XJTU
+          </a>
+        </h2>
+        <a class="result__snippet"
+           href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.xjtu.edu.cn%2F">
+          Teaching and learning news from XJTU.
+        </a>
+      </div>
+    </div>
+  </body>
+</html>
