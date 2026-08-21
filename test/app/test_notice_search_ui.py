@@ -1142,8 +1142,8 @@ class AIInterfaceSmokeTest(unittest.TestCase):
         self.assertFalse(widget.messages)
 
     def test_legacy_smoke_setup_no_longer_references_qt5_embedded_webview(self):
-        # The retained Qt 6 implementation is dormant source: importing the
-        # normal Qt 5 application must not load or package its launcher.
+        # The Qt 5 application may import the lightweight process launcher,
+        # but the separate Qt 6 browser implementation must remain dormant.
         self.create_interfaces()
         self.assertNotIn("app.school_ai_browser", sys.modules)
         self.assertNotIn("app.school_ai_launcher", sys.modules)
