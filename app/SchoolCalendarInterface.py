@@ -54,6 +54,8 @@ class SchoolCalendarInterface(CampusPage):
         self.terms = terms
         self.termBox.blockSignals(True)
         self.termBox.clear()
+        self.table.setRowCount(0)
+        self.summary.setText(self.tr("没有可显示的校历数据。"))
         for term in terms:
             self.termBox.addItem(f"{term.year_num} {term.term_num}")
         self.termBox.blockSignals(False)
