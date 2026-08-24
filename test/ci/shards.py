@@ -33,6 +33,7 @@ SHARDS: tuple[Shard, ...] = (
             "test.app.test_ctrl_c",
             "test.app.test_notice_search_ui",
             "test.app.test_notice_thread",
+            "test.library.test_booking_parse",
         ),
     ),
     Shard(
