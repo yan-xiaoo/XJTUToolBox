@@ -43,3 +43,7 @@ HELLO_LOGIN_URL = (
 FITNESS_LOGIN_URL = (
     "https://tyxylp.xjtu.edu.cn/bdlp_h5_fitness_test/public/index.php/index/login/xjtuLogin"
 )
+
+# 图书馆座位
+LIBRARY_LOGIN_URL = "http://rg.lib.xjtu.edu.cn:8086/seat/"
+

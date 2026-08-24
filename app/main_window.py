@@ -32,6 +32,8 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
+from .sessions.library_session import LibrarySession
+from .LibraryInterface import LibraryInterface
 from .SchoolCourseInterface import SchoolCourseInterface
 from .sessions.hello_session import HelloSession
 from .sessions.fitness_session import FitnessSession
@@ -68,6 +70,7 @@ def registerSession():
     SessionManager.global_register(GSTESession, "gste")
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
+    SessionManager.global_register(LibrarySession, "library")
     SessionManager.global_register(HelloSession, "hello")
     SessionManager.global_register(FitnessSession, "fitness")
 
@@ -210,6 +213,7 @@ class MainWindow(MSFluentWindow):
         QApplication.processEvents()
         self.venue_interface = VenueInterface(self)
         QApplication.processEvents()
+        self.library_interface = LibraryInterface(self)
         self.school_course_interface = SchoolCourseInterface(self)
         self.profile_interface = ProfileInterface(self)
         self.fitness_interface = FitnessInterface(self)
@@ -339,6 +343,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
         self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
         self.addSubInterface(self.venue_interface, FIF.BASKETBALL, self.tr("体育场馆"))
+        self.addSubInterface(self.library_interface, FIF.BOOK_SHELF, self.tr("图书馆"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",
