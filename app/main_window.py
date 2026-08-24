@@ -394,7 +394,6 @@ class MainWindow(MSFluentWindow):
         ):
             card = self.tool_box_interface.addCard(interface, icon, title, content)
             card.setFixedSize(200, 180)
-
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
                                       position=NavigationItemPosition.BOTTOM)

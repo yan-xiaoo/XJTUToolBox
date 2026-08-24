@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from auth import ServerError
-from auth.constant import LIBRARY_LOGIN_URL, MOBILE_BROWSER_UA
+from auth.constant import LIBRARY_LOGIN_URL
 from auth.new_login import NewLogin, NewWebVPNLogin
 from .common_session import CommonLoginSession
 from .session_backend import AccessMode
@@ -9,8 +9,6 @@ from ..utils import cfg
 
 
 def looks_like_seat_page(body: str) -> bool:
-    if "移动端模式" in body:
-        return False
     return any(marker in body for marker in ("btn-group", "tab-select", "qseat", "座位", "scount"))
 
 
@@ -21,7 +19,6 @@ class LibrarySession(CommonLoginSession):
     site_name = "图书馆"
     supports_webvpn = True
     use_webvpn_when_off_campus = True
-    user_agent = MOBILE_BROWSER_UA
 
     def _login(self, username: str, password: str, **kwargs: object) -> None:
         login_class = NewWebVPNLogin if self.access_mode == AccessMode.WEBVPN else NewLogin
@@ -36,8 +33,6 @@ class LibrarySession(CommonLoginSession):
             allow_qrcode_login=False,
         )
         response = self.get(LIBRARY_LOGIN_URL, allow_redirects=True, timeout=20, _skip_auth_check=True)
-        if "移动端模式" in response.text:
-            raise ServerError(1, "请浏览器调成移动端模式访问！")
         if not looks_like_seat_page(response.text):
             raise ServerError(1, "图书馆座位系统登录失败，请确认已连接校园网或 WebVPN")
         self.reset_timeout()

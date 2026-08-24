@@ -1,10 +1,12 @@
 from .seats import (
-    AREA_MAP,
-    FLOORS,
+    CAMPUSES,
+    CAMPUS_FLOORS,
+    FLOOR_PREFIX_CAMPUS,
     BookResult,
     Library,
     MyBooking,
     SeatInfo,
 )
 
-__all__ = ["AREA_MAP", "FLOORS", "BookResult", "Library", "MyBooking", "SeatInfo"]
+__all__ = ["CAMPUSES", "CAMPUS_FLOORS", "FLOOR_PREFIX_CAMPUS",
+           "BookResult", "Library", "MyBooking", "SeatInfo"]
