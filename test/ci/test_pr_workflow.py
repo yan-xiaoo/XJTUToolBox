@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -21,8 +22,14 @@ from test.ci.check_test_contract import (
     module_name,
     owned_modules,
     product_test_modules,
+    render_domain_matrix_json,
+    render_inventory_markdown,
 )
-from test.ci import run_test_shard
+from test.ci import run_test_regressions, run_test_shard
+from test.ci.run_test_regressions import (
+    build_suite as build_regression_suite,
+    finish_result as finish_regression_result,
+)
 from test.ci.run_test_shard import (
     build_suite,
     canonical_machine,
@@ -30,11 +37,21 @@ from test.ci.run_test_shard import (
     verify_imports,
     verify_machine,
 )
-from test.ci.shards import REGRESSION_MODULES, SHARDS, Shard, get_shard
+from test.ci.shards import (
+    DOMAIN_DEFINITIONS,
+    SHARDS,
+    Shard,
+    get_shard,
+    regression_modules,
+    regression_modules_for_test_root,
+    scan_test_modules,
+    shards_for_test_root,
+)
 
 
 WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "pr-tests.yml"
 TESTING_DOC_PATH = REPOSITORY_ROOT / "docs" / "development" / "testing.md"
+NOTIFICATION_DOC_PATH = REPOSITORY_ROOT / "docs" / "development" / "notification.md"
 PR_TEMPLATE_PATH = REPOSITORY_ROOT / ".github" / "pull_request_template.md"
 
 XDG_RUNNER_TEMP_ENV = (
@@ -53,12 +70,8 @@ HOSTED_PLATFORMS = (
     ("macos-intel-py312", "macos-15-intel", "3.12", "x86_64"),
 )
 
-EXPECTED_DOMAINS = (
-    ("ai", "AI core and features"),
-    ("qt-ui", "Qt and desktop UI"),
-    ("notification-crawler", "Notifications and crawler"),
-    ("auth-session", "Authentication and sessions"),
-    ("schedule", "Schedule"),
+EXPECTED_DOMAINS = tuple(
+    (definition.id, definition.name) for definition in DOMAIN_DEFINITIONS
 )
 
 ARM_IMPORTS = (
@@ -78,6 +91,8 @@ ARM_PINS = (
     "darkdetect==0.8.0",
     "xcffib==1.12.0",
 )
+
+DOMAIN_MATRIX_EXPRESSION = "${{ fromJSON(needs.test-contract.outputs.domains) }}"
 
 
 class TestLocalTestRunner(unittest.TestCase):
@@ -261,8 +276,16 @@ def matrix_records(
     return tuple(records)
 
 
+def matrix_axis_expression(workflow: str, job_id: str, axis: str) -> str | None:
+    """Extract a scalar GitHub Actions expression from a matrix axis."""
+
+    section = job_section(workflow, job_id)
+    match = re.search(rf"(?m)^        {re.escape(axis)}: (.+)$", section)
+    return match.group(1).strip() if match else None
+
+
 def matrix_contract_errors(workflow: str) -> list[str]:
-    """Return exact job, matrix-member, count, and display-name drift."""
+    """Return exact job, platform, matrix-expression, and display-name drift."""
 
     errors: list[str] = []
     jobs_section = workflow.split("jobs:\n", 1)[1] if "jobs:\n" in workflow else ""
@@ -283,23 +306,28 @@ def matrix_contract_errors(workflow: str) -> list[str]:
         }
         for platform_id, runner, python_version, machine in HOSTED_PLATFORMS
     )
-    expected_domains = tuple(
-        {"id": shard.id, "name": shard.name} for shard in SHARDS
-    )
     hosted_platforms = matrix_records(workflow, "test-shards", "platform")
-    hosted_domains = matrix_records(workflow, "test-shards", "domain")
-    arm_domains = matrix_records(workflow, "linux-arm-shards", "domain")
+    hosted_domain_expression = matrix_axis_expression(
+        workflow, "test-shards", "domain"
+    )
+    arm_domain_expression = matrix_axis_expression(
+        workflow, "linux-arm-shards", "domain"
+    )
     if job_ids != expected_job_ids:
         errors.append(f"unexpected workflow jobs: {job_ids!r}")
     if hosted_platforms != expected_platforms:
         errors.append(f"unexpected hosted platforms: {hosted_platforms!r}")
-    if hosted_domains != expected_domains:
-        errors.append(f"unexpected hosted domains: {hosted_domains!r}")
-    if arm_domains != expected_domains:
-        errors.append(f"unexpected QEMU domains: {arm_domains!r}")
-    primary_checks = len(hosted_platforms) * len(hosted_domains) + len(arm_domains)
-    if primary_checks != 30 or primary_checks + 3 != 33:
-        errors.append(f"unexpected check count: primary={primary_checks}")
+    if hosted_domain_expression != DOMAIN_MATRIX_EXPRESSION:
+        errors.append(
+            f"unexpected hosted domain matrix: {hosted_domain_expression!r}"
+        )
+    if arm_domain_expression != DOMAIN_MATRIX_EXPRESSION:
+        errors.append(f"unexpected QEMU domain matrix: {arm_domain_expression!r}")
+    contract = job_section(workflow, "test-contract")
+    if "domains: ${{ steps.domains.outputs.domains }}" not in contract:
+        errors.append("test-contract does not expose the domain matrix output")
+    if "id: domains" not in contract:
+        errors.append("test-contract does not export the domain matrix")
     hosted_name = (
         "    name: ${{ matrix.domain.name }} "
         "(${{ matrix.platform.id }}, Python "
@@ -355,24 +383,13 @@ class TestInventoryContract(unittest.TestCase):
         self.assertEqual(set(), missing)
         self.assertEqual({}, duplicates)
         self.assertEqual(set(), unexpected)
-        self.assertEqual(25, len(product_test_modules()))
+        self.assertEqual(SHARDS, shards_for_test_root())
+        self.assertTrue(all(not shard.modules for shard in DOMAIN_DEFINITIONS))
         self.assertEqual(product_test_modules(), set(owned_modules()))
 
     def test_missing_assignment_is_rejected(self) -> None:
         missing, duplicates, unexpected = inventory_problems(SHARDS[:-1])
-        self.assertEqual(
-            {
-                "test.fitness.test_score_zero",
-                "test.fitness.test_years",
-                "test.hello.test_profile",
-                "test.jwxt.test_calendar_api",
-                "test.jwxt.test_calendar_week",
-                "test.jwxt.test_school_course_headers",
-                "test.schedule.test_lesson",
-                "test.schedule.test_schedule",
-            },
-            missing,
-        )
+        self.assertEqual(set(SHARDS[-1].modules), missing)
         self.assertEqual({}, duplicates)
         self.assertEqual(set(), unexpected)
 
@@ -380,8 +397,9 @@ class TestInventoryContract(unittest.TestCase):
         duplicate = Shard("duplicate", "Duplicate", SHARDS[0].modules)
         missing, duplicates, unexpected = inventory_problems(SHARDS + (duplicate,))
         self.assertEqual(set(), missing)
+        module = SHARDS[0].modules[0]
         self.assertEqual(
-            ["ai", "duplicate"], duplicates["test.ai_assistant.test_ai_core"]
+            ["ai", "duplicate"], duplicates[module]
         )
         self.assertEqual(set(), unexpected)
 
@@ -407,6 +425,361 @@ class TestInventoryContract(unittest.TestCase):
                 module_name(test_root / "feature/ci/test_nested.py", test_root),
             )
 
+    def test_marker_scan_is_ast_only_and_does_not_import_modules(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            test_root = Path(temporary_directory) / "test"
+            module_path = test_root / "explosive.py"
+            module_path.parent.mkdir(parents=True)
+            module_path.write_text(
+                'TEST_DOMAIN = "ai"\n'
+                "TEST_REGRESSION = True\n"
+                'raise RuntimeError("must not import")\n',
+                encoding="utf-8",
+            )
+
+            records = scan_test_modules(test_root)
+
+            self.assertEqual(1, len(records))
+            self.assertEqual("test.explosive", records[0].module)
+            self.assertEqual(("ai",), records[0].marker_values)
+            self.assertEqual((True,), records[0].regression_values)
+            self.assertEqual(
+                ("test.explosive",), shards_for_test_root(test_root)[0].modules
+            )
+            self.assertEqual(
+                ("test.explosive",),
+                regression_modules_for_test_root(test_root),
+            )
+
+    def test_nested_marker_writes_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            path = test_root / "nested_marker.py"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "# TEST_DOMAIN = 'ai'\n"
+                "text = 'TEST_DOMAIN = \\\"ai\\\"'\n"
+                "def configure():\n"
+                "    TEST_DOMAIN = 'ai'\n"
+                "if False:\n"
+                "    TEST_DOMAIN = 'ai'\n",
+                encoding="utf-8",
+            )
+
+            records = scan_test_modules(test_root)
+            errors = contract_errors(
+                repository_root=repository_root,
+                shards=shards_for_test_root(test_root),
+            )
+
+            self.assertEqual((None,), records[0].marker_values)
+            self.assertIn(
+                "TEST_DOMAIN must be a string: test.nested_marker (got None)",
+                errors,
+            )
+
+    def test_malformed_markers_are_rejected_without_evaluation(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            sources = {
+                "duplicate.py": 'TEST_DOMAIN = "ai"\nTEST_DOMAIN = "ai"\n',
+                "unknown.py": 'TEST_DOMAIN = "future"\n',
+                "invalid.py": 'TEST_DOMAIN = "bad_domain"\n',
+                "non_string.py": "TEST_DOMAIN = 123\n",
+                "dynamic.py": 'domain = "ai"\nTEST_DOMAIN = domain\n',
+            }
+            for relative, source in sources.items():
+                path = test_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+
+            errors = contract_errors(
+                repository_root=repository_root,
+                shards=shards_for_test_root(test_root),
+            )
+
+            self.assertIn("duplicate TEST_DOMAIN marker: test.duplicate", errors)
+            self.assertIn("unknown TEST_DOMAIN domain: test.unknown (future)", errors)
+            self.assertIn(
+                "invalid TEST_DOMAIN marker: test.invalid ('bad_domain')", errors
+            )
+            self.assertIn(
+                "TEST_DOMAIN must be a string: test.non_string (got 123)", errors
+            )
+            self.assertIn(
+                "TEST_DOMAIN must be a string: test.dynamic (got None)", errors
+            )
+
+    def test_malformed_regression_markers_are_rejected_without_evaluation(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            sources = {
+                "duplicate.py": (
+                    'TEST_DOMAIN = "ai"\n'
+                    "TEST_REGRESSION = True\n"
+                    "TEST_REGRESSION = True\n"
+                ),
+                "non_boolean.py": (
+                    'TEST_DOMAIN = "ai"\nTEST_REGRESSION = "yes"\n'
+                ),
+                "dynamic.py": (
+                    'TEST_DOMAIN = "ai"\nvalue = True\nTEST_REGRESSION = value\n'
+                ),
+                "chained.py": (
+                    'TEST_DOMAIN = "ai"\nTEST_REGRESSION = other = True\n'
+                ),
+                "false.py": 'TEST_DOMAIN = "ai"\nTEST_REGRESSION = False\n',
+            }
+            for relative, source in sources.items():
+                path = test_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+
+            records = scan_test_modules(test_root)
+            errors = contract_errors(
+                repository_root=repository_root,
+                shards=shards_for_test_root(test_root),
+            )
+
+            self.assertIn(
+                "duplicate TEST_REGRESSION marker: test.duplicate", errors
+            )
+            self.assertIn(
+                "TEST_REGRESSION must be a boolean: test.non_boolean "
+                "(got 'yes')",
+                errors,
+            )
+            self.assertIn(
+                "TEST_REGRESSION must be a boolean: test.dynamic (got None)",
+                errors,
+            )
+            self.assertIn(
+                "TEST_REGRESSION must be a boolean: test.chained (got None)",
+                errors,
+            )
+            self.assertEqual((), regression_modules(records))
+
+    def test_chained_domain_marker_is_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            path = test_root / "chained.py"
+            path.parent.mkdir(parents=True)
+            path.write_text('TEST_DOMAIN = other = "ai"\n', encoding="utf-8")
+
+            errors = contract_errors(
+                repository_root=repository_root,
+                shards=shards_for_test_root(test_root),
+            )
+
+            self.assertIn(
+                "TEST_DOMAIN must be a string: test.chained (got None)", errors
+            )
+
+    def test_top_level_marker_mutations_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            sources = {
+                "domain_augmented.py": (
+                    'TEST_DOMAIN = "ai"\nTEST_DOMAIN += "-changed"\n'
+                ),
+                "domain_deleted.py": 'TEST_DOMAIN = "ai"\ndel TEST_DOMAIN\n',
+                "regression_augmented.py": (
+                    'TEST_DOMAIN = "ai"\n'
+                    "TEST_REGRESSION = True\n"
+                    "TEST_REGRESSION += False\n"
+                ),
+                "regression_deleted.py": (
+                    'TEST_DOMAIN = "ai"\n'
+                    "TEST_REGRESSION = True\n"
+                    "del TEST_REGRESSION\n"
+                ),
+            }
+            for relative, source in sources.items():
+                path = test_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+
+            errors = contract_errors(repository_root=repository_root)
+
+            self.assertIn(
+                "duplicate TEST_DOMAIN marker: test.domain_augmented", errors
+            )
+            self.assertIn(
+                "duplicate TEST_DOMAIN marker: test.domain_deleted", errors
+            )
+            self.assertIn(
+                "duplicate TEST_REGRESSION marker: test.regression_augmented",
+                errors,
+            )
+            self.assertIn(
+                "duplicate TEST_REGRESSION marker: test.regression_deleted",
+                errors,
+            )
+
+    def test_module_control_flow_cannot_mutate_markers(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            sources = {
+                "domain_conditional.py": (
+                    'TEST_DOMAIN = "ai"\n'
+                    "if condition:\n"
+                    '    TEST_DOMAIN = "schedule"\n'
+                ),
+                "regression_conditional.py": (
+                    'TEST_DOMAIN = "ai"\n'
+                    "TEST_REGRESSION = True\n"
+                    "try:\n"
+                    "    TEST_REGRESSION = False\n"
+                    "except Exception:\n"
+                    "    pass\n"
+                ),
+            }
+            for relative, source in sources.items():
+                path = test_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+
+            errors = contract_errors(repository_root=repository_root)
+
+            self.assertIn(
+                "duplicate TEST_DOMAIN marker: test.domain_conditional", errors
+            )
+            self.assertIn(
+                "duplicate TEST_REGRESSION marker: test.regression_conditional",
+                errors,
+            )
+
+    def test_other_module_scope_bindings_cannot_mutate_markers(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            mutations = {
+                "except_target": (
+                    "try:\n    pass\n"
+                    "except Exception as TEST_DOMAIN:\n    pass\n"
+                ),
+                "for_target": "for TEST_DOMAIN in ():\n    pass\n",
+                "with_target": (
+                    "with context_manager() as TEST_DOMAIN:\n    pass\n"
+                ),
+                "import_alias": "import package as TEST_DOMAIN\n",
+                "from_import_alias": "from package import value as TEST_DOMAIN\n",
+                "named_expression": "if (TEST_DOMAIN := 'schedule'):\n    pass\n",
+                "function_name": "def TEST_DOMAIN():\n    pass\n",
+                "class_name": "class TEST_DOMAIN:\n    pass\n",
+                "match_case": (
+                    "match value:\n"
+                    "    case 1:\n"
+                    '        TEST_DOMAIN = "schedule"\n'
+                ),
+                "match_capture": (
+                    "match value:\n"
+                    "    case TEST_DOMAIN:\n"
+                    "        pass\n"
+                ),
+            }
+            for name, mutation in mutations.items():
+                path = test_root / f"{name}.py"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    'TEST_DOMAIN = "ai"\n' + mutation,
+                    encoding="utf-8",
+                )
+
+            errors = contract_errors(repository_root=repository_root)
+
+            for name in mutations:
+                with self.subTest(binding=name):
+                    self.assertIn(
+                        f"duplicate TEST_DOMAIN marker: test.{name}", errors
+                    )
+
+    def test_marker_discovery_is_sorted_and_new_files_need_no_central_edit(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            test_root = Path(temporary_directory) / "test"
+            for relative in ("z_added.py", "a_existing.py", "feature/middle.py"):
+                path = test_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('TEST_DOMAIN = "ai"\n', encoding="utf-8")
+
+            records = scan_test_modules(test_root)
+            shard = shards_for_test_root(test_root)[0]
+
+            self.assertEqual(
+                ("test.a_existing", "test.feature.middle", "test.z_added"),
+                tuple(record.module for record in records),
+            )
+            self.assertEqual(
+                ("test.a_existing", "test.feature.middle", "test.z_added"),
+                shard.modules,
+            )
+            self.assertEqual(
+                tuple(
+                    (definition.id, definition.name)
+                    for definition in DOMAIN_DEFINITIONS
+                ),
+                tuple(
+                    (definition.id, definition.name)
+                    for definition in shards_for_test_root(test_root)
+                ),
+            )
+
+    def test_parallel_pr_additions_compose_without_shared_inventory_edits(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            test_root = Path(temporary_directory) / "test"
+            baseline = {
+                "ai/existing.py": 'TEST_DOMAIN = "ai"\n',
+                "ui/existing.py": 'TEST_DOMAIN = "qt-ui"\n',
+                "notification/existing.py": (
+                    'TEST_DOMAIN = "notification-crawler"\n'
+                ),
+                "auth/existing.py": 'TEST_DOMAIN = "auth-session"\n',
+                "schedule/existing.py": 'TEST_DOMAIN = "schedule"\n',
+            }
+            for relative, source in baseline.items():
+                path = test_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+
+            first_pr = test_root / "feature_a" / "test_first.py"
+            first_pr.parent.mkdir(parents=True)
+            first_pr.write_text('TEST_DOMAIN = "ai"\n', encoding="utf-8")
+            first_inventory = shards_for_test_root(test_root)
+            self.assertIn(
+                "test.feature_a.test_first", first_inventory[0].modules
+            )
+            self.assertNotIn(
+                "test.feature_b.test_second",
+                {module for shard in first_inventory for module in shard.modules},
+            )
+
+            second_pr = test_root / "feature_b" / "test_second.py"
+            second_pr.parent.mkdir(parents=True)
+            second_pr.write_text(
+                'TEST_DOMAIN = "schedule"\nTEST_REGRESSION = True\n',
+                encoding="utf-8",
+            )
+            merged_inventory = shards_for_test_root(test_root)
+
+            self.assertIn("test.feature_a.test_first", merged_inventory[0].modules)
+            self.assertIn(
+                "test.feature_b.test_second", merged_inventory[-1].modules
+            )
+            self.assertEqual(
+                ("test.feature_b.test_second",),
+                regression_modules_for_test_root(test_root),
+            )
+            self.assertEqual(
+                [],
+                contract_errors(repository_root=test_root.parent),
+            )
+
     def test_added_product_module_is_missing(self) -> None:
         product_modules = product_test_modules() | {"test.new_product_test"}
         missing, duplicates, unexpected = inventory_problems(
@@ -417,13 +790,14 @@ class TestInventoryContract(unittest.TestCase):
         self.assertEqual(set(), unexpected)
 
     def test_deleted_product_module_makes_declaration_unexpected(self) -> None:
-        product_modules = product_test_modules() - {"test.schedule.test_schedule"}
+        removed_module = sorted(product_test_modules())[0]
+        product_modules = product_test_modules() - {removed_module}
         missing, duplicates, unexpected = inventory_problems(
             product_modules=product_modules
         )
         self.assertEqual(set(), missing)
         self.assertEqual({}, duplicates)
-        self.assertEqual({"test.schedule.test_schedule"}, unexpected)
+        self.assertEqual({removed_module}, unexpected)
 
     def test_existing_non_product_module_is_unexpected(self) -> None:
         shards = SHARDS + (
@@ -468,10 +842,38 @@ class TestInventoryContract(unittest.TestCase):
     def test_declared_modules_exist_and_parse(self) -> None:
         self.assertEqual([], contract_errors())
 
+    def test_contract_uses_marker_inventory_for_an_isolated_root(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            path = repository_root / "test" / "only.py"
+            path.parent.mkdir(parents=True)
+            path.write_text('TEST_DOMAIN = "ai"\n', encoding="utf-8")
+
+            errors = contract_errors(repository_root=repository_root)
+
+            self.assertIn("empty domain: qt-ui", errors)
+            self.assertNotIn("missing test module: test.only", errors)
+
+    def test_contract_rejects_an_empty_regression_inventory(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            for domain in DOMAIN_DEFINITIONS:
+                path = test_root / domain.id / "test_existing.py"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    f'TEST_DOMAIN = "{domain.id}"\n', encoding="utf-8"
+                )
+
+            errors = contract_errors(repository_root=repository_root)
+
+            self.assertIn("no regression test modules are marked", errors)
+
     def test_regressions_are_unique_and_owned(self) -> None:
-        self.assertEqual(6, len(REGRESSION_MODULES))
-        self.assertEqual(6, len(set(REGRESSION_MODULES)))
-        self.assertLessEqual(set(REGRESSION_MODULES), set(owned_modules()))
+        modules = regression_modules()
+        self.assertTrue(modules)
+        self.assertEqual(len(modules), len(set(modules)))
+        self.assertLessEqual(set(modules), set(owned_modules()))
 
     def test_contract_cli_succeeds(self) -> None:
         result = subprocess.run(
@@ -486,7 +888,78 @@ class TestInventoryContract(unittest.TestCase):
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("25 product test modules", result.stdout)
+        self.assertIn(
+            f"{len(product_test_modules())} product test modules",
+            result.stdout,
+        )
+
+    def test_contract_cli_markdown_uses_runtime_inventory(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "test.ci.check_test_contract",
+                "--format",
+                "markdown",
+            ],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(render_inventory_markdown().strip(), result.stdout.strip())
+
+    def test_domain_json_uses_the_single_validated_definition(self) -> None:
+        payload = json.loads(render_domain_matrix_json())
+
+        self.assertEqual(
+            [
+                {"id": definition.id, "name": definition.name}
+                for definition in DOMAIN_DEFINITIONS
+            ],
+            payload,
+        )
+
+    def test_contract_cli_domain_json_is_machine_readable(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "test.ci.check_test_contract",
+                "--format",
+                "domain-json",
+            ],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(json.loads(render_domain_matrix_json()), json.loads(result.stdout))
+
+    def test_markdown_renderer_rescans_the_requested_test_root(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            test_root = Path(temporary_directory) / "test"
+            for domain in DOMAIN_DEFINITIONS:
+                path = test_root / domain.id / "test_existing.py"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    f'TEST_DOMAIN = "{domain.id}"\n', encoding="utf-8"
+                )
+            added = test_root / "feature" / "test_added.py"
+            added.parent.mkdir(parents=True)
+            added.write_text(
+                'TEST_DOMAIN = "ai"\nTEST_REGRESSION = True\n',
+                encoding="utf-8",
+            )
+
+            markdown = render_inventory_markdown(test_root=test_root)
+
+            self.assertIn("6 product test modules", markdown)
+            self.assertIn("`test.feature.test_added`", markdown)
+            self.assertIn("### Regression modules", markdown)
 
 
 class TestShardRunner(unittest.TestCase):
@@ -569,10 +1042,56 @@ class TestShardRunner(unittest.TestCase):
         hard_exit.assert_not_called()
 
 
+class TestRegressionRunner(unittest.TestCase):
+    @patch("test.ci.run_test_regressions.regression_modules", return_value=())
+    def test_empty_regression_inventory_is_rejected(self, _modules) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "no regression test modules are marked"
+        ):
+            build_regression_suite()
+
+    @patch("test.ci.run_test_regressions.unittest.defaultTestLoader.loadTestsFromName")
+    @patch(
+        "test.ci.run_test_regressions.regression_modules",
+        return_value=("test.first", "test.second"),
+    )
+    def test_suite_loads_only_ast_derived_modules(self, _modules, load_tests) -> None:
+        load_tests.side_effect = lambda module: unittest.FunctionTestCase(
+            lambda: None, description=module
+        )
+
+        suite = build_regression_suite()
+
+        self.assertEqual(2, suite.countTestCases())
+        self.assertEqual(
+            [call("test.first"), call("test.second")], load_tests.call_args_list
+        )
+
+    def test_failure_and_normal_success_return_without_hard_exit(self) -> None:
+        result = Mock()
+        with patch.object(run_test_regressions.os, "_exit") as hard_exit:
+            result.wasSuccessful.return_value = True
+            self.assertEqual(
+                0,
+                finish_regression_result(
+                    result, hard_exit_on_success=False
+                ),
+            )
+            result.wasSuccessful.return_value = False
+            self.assertEqual(
+                1,
+                finish_regression_result(
+                    result, hard_exit_on_success=True
+                ),
+            )
+        hard_exit.assert_not_called()
+
+
 class TestWorkflowContract(unittest.TestCase):
     def test_paths_exist(self) -> None:
         self.assertTrue(WORKFLOW_PATH.is_file())
         self.assertTrue(TESTING_DOC_PATH.is_file())
+        self.assertTrue(NOTIFICATION_DOC_PATH.is_file())
         self.assertTrue(PR_TEMPLATE_PATH.is_file())
 
     def test_triggers_permissions_and_concurrency_are_bounded(self) -> None:
@@ -585,7 +1104,7 @@ class TestWorkflowContract(unittest.TestCase):
         self.assertIn("cancel-in-progress: true", workflow)
         self.assertNotIn("contents: write", workflow)
 
-    def test_hosted_matrix_has_five_platforms_and_five_domains(self) -> None:
+    def test_hosted_matrix_has_static_platforms_and_dynamic_domains(self) -> None:
         section = job_section(
             WORKFLOW_PATH.read_text(encoding="utf-8"), "test-shards"
         )
@@ -597,8 +1116,12 @@ class TestWorkflowContract(unittest.TestCase):
                 self.assertIn(f"os: {runner}", section)
                 self.assertIn(f'python-version: "{python_version}"', section)
                 self.assertIn(f"machine: {machine}", section)
-        for shard in SHARDS:
-            self.assertEqual(1, section.count(f"- id: {shard.id}\n"))
+        self.assertEqual(
+            DOMAIN_MATRIX_EXPRESSION,
+            matrix_axis_expression(
+                WORKFLOW_PATH.read_text(encoding="utf-8"), "test-shards", "domain"
+            ),
+        )
         self.assertIn("uv sync --frozen --group dev", section)
         self.assertIn("--expected-machine ${{ matrix.platform.machine }}", section)
 
@@ -669,26 +1192,31 @@ class TestWorkflowContract(unittest.TestCase):
     def test_matrix_contract_rejects_member_and_job_mutations(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         extra_platform = workflow.replace(
-            "        domain:\n",
+            f"        domain: {DOMAIN_MATRIX_EXPRESSION}\n",
             "          - id: linux-extra-py312\n"
             "            os: ubuntu-22.04\n"
             '            python-version: "3.12"\n'
             "            machine: x86_64\n"
-            "        domain:\n",
+            f"        domain: {DOMAIN_MATRIX_EXPRESSION}\n",
             1,
         )
         missing_hosted_domain = workflow.replace(
-            "          - id: schedule\n            name: Schedule\n",
-            "",
+            f"        domain: {DOMAIN_MATRIX_EXPRESSION}\n",
+            "        domain: []\n",
             1,
         )
         arm_marker = "  linux-arm-shards:"
-        prefix, arm_and_after = workflow.split(arm_marker, 1)
-        duplicate_arm_domain = prefix + arm_marker + arm_and_after.replace(
-            "          - id: ai\n            name: AI core and features\n",
-            "          - id: ai\n            name: AI core and features\n"
-            "          - id: ai\n            name: AI core and features\n",
+        prefix, arm_section = workflow.split(arm_marker, 1)
+        broken_arm_domain = prefix + arm_marker + arm_section.replace(
+            f"        domain: {DOMAIN_MATRIX_EXPRESSION}\n",
+            "        domain: ${{ fromJSON(needs.other.outputs.domains) }}\n",
             1,
+        )
+        self.assertEqual(
+            "${{ fromJSON(needs.other.outputs.domains) }}",
+            matrix_axis_expression(
+                broken_arm_domain, "linux-arm-shards", "domain"
+            ),
         )
         extra_job = workflow.replace(
             "  ci-gate:\n",
@@ -702,13 +1230,13 @@ class TestWorkflowContract(unittest.TestCase):
         for label, mutation in (
             ("extra-platform", extra_platform),
             ("missing-hosted-domain", missing_hosted_domain),
-            ("duplicate-arm-domain", duplicate_arm_domain),
+            ("broken-arm-domain", broken_arm_domain),
             ("extra-job", extra_job),
         ):
             with self.subTest(mutation=label):
                 self.assertTrue(matrix_contract_errors(mutation))
 
-    def test_arm_matrix_has_five_domains_and_complete_qt_runtime(self) -> None:
+    def test_arm_matrix_has_dynamic_domains_and_complete_qt_runtime(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         section = job_section(workflow, "linux-arm-shards")
         self.assertIn("needs: test-contract", section)
@@ -722,8 +1250,14 @@ class TestWorkflowContract(unittest.TestCase):
         self.assertIn("--system-site-packages", section)
         self.assertIn("uv sync --frozen --group dev", section)
         self.assertNotIn("rm -f uv.lock", section)
-        for shard in SHARDS:
-            self.assertEqual(1, section.count(f"- id: {shard.id}\n"))
+        self.assertEqual(
+            DOMAIN_MATRIX_EXPRESSION,
+            matrix_axis_expression(
+                WORKFLOW_PATH.read_text(encoding="utf-8"),
+                "linux-arm-shards",
+                "domain",
+            ),
+        )
         for import_name in ARM_IMPORTS:
             self.assertIn(f"--require-import {import_name}", section)
         for pin in ARM_PINS:
@@ -757,14 +1291,18 @@ class TestWorkflowContract(unittest.TestCase):
             arm_hard_exit_contract_errors(duplicate),
         )
 
-    def test_regression_job_runs_the_registered_modules(self) -> None:
+    def test_regression_job_uses_the_dynamic_runner(self) -> None:
         section = job_section(
             WORKFLOW_PATH.read_text(encoding="utf-8"),
             "existing-bug-regressions",
         )
         self.assertIn("needs: test-contract", section)
-        for module in REGRESSION_MODULES:
-            self.assertEqual(1, section.count(module))
+        self.assertEqual(
+            1,
+            section.count("python -m test.ci.run_test_regressions"),
+        )
+        for module in regression_modules():
+            self.assertNotIn(module, section)
 
     def test_gate_needs_every_required_job(self) -> None:
         section = job_section(
@@ -807,16 +1345,28 @@ class TestWorkflowContract(unittest.TestCase):
 
     def test_documentation_matches_matrix_and_rerun_policy(self) -> None:
         documentation = TESTING_DOC_PATH.read_text(encoding="utf-8")
+        self.assertIn("--domain <domain-id>", documentation)
+        self.assertIn("python -m unittest <module> -v", documentation)
         for shard in SHARDS:
-            self.assertIn(f"--domain {shard.id}", documentation)
-            self.assertIn(shard.name, documentation)
             for module in shard.modules:
-                self.assertIn(module, documentation)
+                self.assertNotIn(module, documentation)
+        self.assertIn("稳定的域 ID、Actions 显示名和矩阵顺序", documentation)
+        self.assertIn("--format markdown", documentation)
         for platform_id, runner, _python_version, _machine in HOSTED_PLATFORMS:
             self.assertIn(platform_id, documentation)
             self.assertIn(runner.replace("windows-latest", "Windows latest").replace("macos-latest", "macOS latest").replace("macos-15-intel", "macOS 15 Intel").replace("ubuntu-22.04", "Ubuntu 22.04"), documentation)
         for phrase in (
             "uv run --frozen local_test.py",
+            "test/ci/shards.py",
+            "TEST_DOMAIN = \"qt-ui\"",
+            "TEST_REGRESSION = True",
+            "python -m test.ci.run_test_regressions",
+            "check_test_contract --format markdown",
+            "不需要修改共享分片清单、workflow 命令",
+            "各自新增测试时只修改自己的测试文件",
+            "新增域只需修改唯一的稳定域定义",
+            "在途分支 rebase 后",
+            "合同检查器通过 AST 扫描",
             "test/ci/**",
             "test/feature/ci/test_case.py",
             "每个产品测试模块恰好属于一个主测试域",
@@ -824,8 +1374,8 @@ class TestWorkflowContract(unittest.TestCase):
             "本地用例数和耗时不能代替",
             "linux-arm64-qemu-py310",
             "<domain display name> (<platform id>, Python <version>)",
-            "30 个分片",
-            "33 个 checks",
+            "各平台 × 当前域定义的分片",
+            "矩阵与 check 数会自动随之变化",
             "QEMU 结果是兼容",
             "synchronize",
             "workflow_dispatch",
@@ -833,6 +1383,13 @@ class TestWorkflowContract(unittest.TestCase):
             "PR 测试成功不能替代构建成功",
         ):
             self.assertIn(phrase, documentation)
+
+    def test_notification_documentation_uses_dynamic_regression_inventory(self) -> None:
+        documentation = NOTIFICATION_DOC_PATH.read_text(encoding="utf-8")
+        self.assertIn("python -m test.ci.run_test_regressions", documentation)
+        self.assertIn("TEST_REGRESSION = True", documentation)
+        for module in product_test_modules():
+            self.assertNotIn(module, documentation)
 
     def test_pr_template_requests_test_evidence_without_credentials(self) -> None:
         template = PR_TEMPLATE_PATH.read_text(encoding="utf-8")

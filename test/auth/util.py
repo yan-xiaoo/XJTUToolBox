@@ -2,6 +2,8 @@ import unittest
 
 from auth import ServerError, getVPNUrl, getOrdinaryUrl
 
+TEST_DOMAIN = "auth-session"
+
 
 class TestAuthUtils(unittest.TestCase):
     def test_servererror(self):

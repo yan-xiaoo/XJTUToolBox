@@ -3,6 +3,8 @@ import unittest
 from auth import JWXT_LOGIN_URL, WEBVPN_LOGIN_URL
 from auth.new_login import NewLogin
 
+TEST_DOMAIN = "auth-session"
+
 # 为了进行此测试，您需要拥有西安交通大学统一身份认证登录的账号
 # 请将账号的用户名与密码填写在下方，然后执行测试
 # 用户名与密码仅会用于登录西安交通大学相关的系统，不会被记录或发送到其他任何服务器。

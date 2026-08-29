@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+TEST_DOMAIN = "ai"
+
 import requests
 
 from ai_assistant import (

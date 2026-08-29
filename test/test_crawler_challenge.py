@@ -8,6 +8,9 @@ import requests
 
 from notification.crawlers import crawler
 
+TEST_DOMAIN = "notification-crawler"
+TEST_REGRESSION = True
+
 
 NEW_CHALLENGE_HTML = """
 <html>

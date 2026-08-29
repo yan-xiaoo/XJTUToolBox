@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+TEST_DOMAIN = "schedule"
+
 from auth import ServerError
 from fitness.score import Fitness, _json
 

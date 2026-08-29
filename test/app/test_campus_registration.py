@@ -3,6 +3,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+TEST_DOMAIN = "qt-ui"
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import Qt

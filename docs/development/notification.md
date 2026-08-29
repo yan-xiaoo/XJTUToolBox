@@ -306,17 +306,13 @@ XDG_STATE_HOME=/tmp/xjtu-test-state \
 XDG_CONFIG_HOME=/tmp/xjtu-test-config \
 XDG_DATA_HOME=/tmp/xjtu-test-data \
 QT_QPA_PLATFORM=offscreen \
-python -m unittest \
-  test.ai_assistant.test_ai_core \
-  test.ai_assistant.test_ai_features \
-  test.app.test_notice_search_ui \
-  test.app.test_ctrl_c \
-  test.auth.test_qrcode_login \
-  test.notification.test_notification_sources \
-  test.test_crawler_challenge
+python -m test.ci.run_test_regressions
 
 python -m scripts.smoke_notification_sources --workers 8
 ```
+
+回归模块由各测试文件中的 `TEST_REGRESSION = True` 标记自动发现；新增或调整回归测试时只需修改
+对应测试文件，不要在本文档维护模块列表。
 
 全仓发现应显式指定顶层目录：`python -m unittest discover -s test -t .`。只写
 `python -m unittest discover -s test` 可能让测试子包遮蔽产品同名包。

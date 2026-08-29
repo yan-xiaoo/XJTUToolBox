@@ -5,6 +5,8 @@ from unittest.mock import Mock
 
 from jwxt.school_course import SchoolCourseQuery
 
+TEST_DOMAIN = "schedule"
+
 
 class SchoolCourseHeadersTest(unittest.TestCase):
     def test_departments_sends_kcbcx_referer(self):
