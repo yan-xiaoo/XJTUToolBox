@@ -33,6 +33,8 @@ from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
 from .SchoolCourseInterface import SchoolCourseInterface
+from .sessions.campus_card_session import CampusCardSession
+from .CampusCardInterface import CampusCardInterface
 from .sessions.hello_session import HelloSession
 from .sessions.fitness_session import FitnessSession
 from .ProfileInterface import ProfileInterface
@@ -68,6 +70,7 @@ def registerSession():
     SessionManager.global_register(GSTESession, "gste")
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
+    SessionManager.global_register(CampusCardSession, "campus_card")
     SessionManager.global_register(HelloSession, "hello")
     SessionManager.global_register(FitnessSession, "fitness")
 
@@ -211,6 +214,7 @@ class MainWindow(MSFluentWindow):
         self.venue_interface = VenueInterface(self)
         QApplication.processEvents()
         self.school_course_interface = SchoolCourseInterface(self)
+        self.campus_card_interface = CampusCardInterface(self)
         self.profile_interface = ProfileInterface(self)
         self.fitness_interface = FitnessInterface(self)
         self.school_calendar_interface = SchoolCalendarInterface(self)
@@ -338,6 +342,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
         self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
         self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
+        self.addSubInterface(self.campus_card_interface, FIF.FOLDER, self.tr("校园卡"))
         self.addSubInterface(self.venue_interface, FIF.BASKETBALL, self.tr("体育场馆"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
