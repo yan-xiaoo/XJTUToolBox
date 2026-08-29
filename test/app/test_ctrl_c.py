@@ -2,6 +2,8 @@ import signal
 import unittest
 from unittest.mock import Mock, patch
 
+TEST_DOMAIN = "qt-ui"
+
 from app.ctrl_c import install_ctrl_c_handler
 
 

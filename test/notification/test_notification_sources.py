@@ -19,6 +19,9 @@ from notification.crawlers.generic import (
 )
 from notification.source import SourceRegistry, source_registry
 
+TEST_DOMAIN = "notification-crawler"
+TEST_REGRESSION = True
+
 
 class DateParserTest(unittest.TestCase):
     def test_supported_date_variants(self):

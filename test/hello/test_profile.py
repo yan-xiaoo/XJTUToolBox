@@ -7,6 +7,8 @@ import requests
 from auth import ServerError
 from hello.profile import HelloProfile
 
+TEST_DOMAIN = "schedule"
+
 
 def _student(**overrides):
     student = {

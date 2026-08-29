@@ -12,6 +12,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+TEST_DOMAIN = "qt-ui"
+TEST_REGRESSION = True
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_STATE_HOME", "/tmp/xjtu-test-state")
 os.environ.setdefault("XDG_CONFIG_HOME", "/tmp/xjtu-test-config")

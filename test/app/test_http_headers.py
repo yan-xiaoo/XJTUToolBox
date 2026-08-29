@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+TEST_DOMAIN = "auth-session"
+
 from app.sessions import common_session
 from app.sessions.campus_card_session import CampusCardSession
 from app.sessions.session_backend import AccessMode

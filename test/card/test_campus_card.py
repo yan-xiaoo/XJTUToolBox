@@ -4,6 +4,8 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+TEST_DOMAIN = "qt-ui"
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from auth import ServerError

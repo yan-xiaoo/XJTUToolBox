@@ -7,6 +7,8 @@ import requests
 from auth import ServerError
 from jwxt.calendar import SchoolCalendar
 
+TEST_DOMAIN = "schedule"
+
 
 def _response(payload=None, *, error=None):
     return SimpleNamespace(

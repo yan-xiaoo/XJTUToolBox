@@ -1,6 +1,8 @@
 import unittest
 from schedule import WeekSchedule, DaySchedule, Schedule, Lesson
 
+TEST_DOMAIN = "schedule"
+
 
 class TestSchedule(unittest.TestCase):
     def setUp(self):

@@ -14,6 +14,8 @@ from app.utils.session_manager import SessionManager
 import app.utils.session_manager as session_manager_module
 from app.utils.session_persistence import SiteSnapshot
 
+TEST_DOMAIN = "auth-session"
+
 
 class NormalTestSession(CommonLoginSession):
     """用于验证普通访问模式创建逻辑的测试 Session。"""

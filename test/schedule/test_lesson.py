@@ -3,6 +3,9 @@ import unittest
 from schedule import Lesson
 from schedule.lesson import _lesson_object_hook
 
+TEST_DOMAIN = "schedule"
+TEST_REGRESSION = True
+
 
 class TestLesson(unittest.TestCase):
     def test_serialize(self):

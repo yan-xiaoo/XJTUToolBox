@@ -32,6 +32,8 @@ from .sessions.gste_session import GSTESession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
+from .sessions.library_session import LibrarySession
+from .LibraryInterface import LibraryInterface
 from .SchoolCourseInterface import SchoolCourseInterface
 from .sessions.campus_card_session import CampusCardSession
 from .CampusCardInterface import CampusCardInterface
@@ -71,6 +73,7 @@ def registerSession():
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
     SessionManager.global_register(CampusCardSession, "campus_card")
+    SessionManager.global_register(LibrarySession, "library")
     SessionManager.global_register(HelloSession, "hello")
     SessionManager.global_register(FitnessSession, "fitness")
 
@@ -213,6 +216,7 @@ class MainWindow(MSFluentWindow):
         QApplication.processEvents()
         self.venue_interface = VenueInterface(self)
         QApplication.processEvents()
+        self.library_interface = LibraryInterface(self)
         self.school_course_interface = SchoolCourseInterface(self)
         self.campus_card_interface = CampusCardInterface(self)
         self.profile_interface = ProfileInterface(self)
@@ -344,6 +348,7 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
         self.addSubInterface(self.campus_card_interface, FIF.FOLDER, self.tr("校园卡"))
         self.addSubInterface(self.venue_interface, FIF.BASKETBALL, self.tr("体育场馆"))
+        self.addSubInterface(self.library_interface, FIF.BOOK_SHELF, self.tr("图书馆"))
         self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
 
         self.navigationInterface.addWidget("GitHub",
@@ -394,7 +399,6 @@ class MainWindow(MSFluentWindow):
         ):
             card = self.tool_box_interface.addCard(interface, icon, title, content)
             card.setFixedSize(200, 180)
-
         # 添加登录界面作为子界面，但是将其隐藏
         button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
                                       position=NavigationItemPosition.BOTTOM)

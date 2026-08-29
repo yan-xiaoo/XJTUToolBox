@@ -25,6 +25,7 @@ class StyleSheet(StyleSheetBase, Enum):
     EMPTY_ROOM_INTERFACE = "empty_room_interface"
     LMS_INTERFACE = "lms_interface"
     VENUE_INTERFACE = "venue_interface"
+    LIBRARY_INTERFACE = "library_interface"
 
     def path(self, theme=Theme.AUTO):
         theme = cfg.theme if theme == Theme.AUTO else theme

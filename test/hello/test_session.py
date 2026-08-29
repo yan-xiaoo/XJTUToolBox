@@ -19,6 +19,8 @@ from app.sessions.hello_session import (
 from app.sessions.session_backend import AccessMode, SessionBackend
 from app.utils.session_manager import SessionManager
 
+TEST_DOMAIN = "auth-session"
+
 
 DEFAULT_SYSTEM_TYPE = "yingxin_student_pc"
 
