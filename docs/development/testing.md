@@ -37,12 +37,13 @@ uv run --frozen python -m test.ci.run_test_shard --domain auth-session
 uv run --frozen python -m test.ci.run_test_shard --domain schedule
 ```
 
-域清单当前覆盖以下 24 个模块，每个产品测试模块恰好属于一个主测试域：
+域清单当前覆盖以下 25 个模块，每个产品测试模块恰好属于一个主测试域：
 
-| 域 ID | Actions 显示名 | 模块 | 2026-08-21 本地完整环境用例数 |
+| 域 ID | Actions 显示名 | 模块 | 2026-08-24 本地完整环境用例数 |
 |---|---|---|---:|
 | `ai` | AI core and features | `test.ai_assistant.test_ai_core`、`test.ai_assistant.test_ai_features` | 71 |
-| `qt-ui` | Qt and desktop UI | `test.app.test_campus_job`、`test.app.test_campus_pages`、`test.app.test_campus_registration`、`test.app.test_ctrl_c`、`test.app.test_notice_search_ui`、`test.app.test_notice_thread` | 77 |
+| `qt-ui` | Qt and desktop UI | `test.app.test_campus_job`、`test.app.test_campus_pages`、`test.app.test_campus_registration`、`test.app.test_ctrl_c`、`test.app.test_notice_search_ui`、`test.app.test_notice_thread`、`test.library.test_booking_parse` | 99 |
+ (fix(ci): 登记图书馆测试到分片契约，新增模块纳入 CI 门禁)
 | `notification-crawler` | Notifications and crawler | `test.notification.test_notification_sources`、`test.test_crawler_challenge` | 28 |
 | `auth-session` | Authentication and sessions | `test.auth.login`、`test.auth.test_qrcode_login`、`test.auth.util`、`test.fitness.test_session`、`test.hello.test_session`、`test.sessions.session_manager` | 56（无凭据时 2 项跳过） |
 | `schedule` | Schedule | `test.fitness.test_score_zero`、`test.fitness.test_years`、`test.hello.test_profile`、`test.jwxt.test_calendar_api`、`test.jwxt.test_calendar_week`、`test.jwxt.test_school_course_headers`、`test.schedule.test_lesson`、`test.schedule.test_schedule` | 46 |

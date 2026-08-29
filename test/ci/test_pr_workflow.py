@@ -355,7 +355,7 @@ class TestInventoryContract(unittest.TestCase):
         self.assertEqual(set(), missing)
         self.assertEqual({}, duplicates)
         self.assertEqual(set(), unexpected)
-        self.assertEqual(24, len(product_test_modules()))
+        self.assertEqual(25, len(product_test_modules()))
         self.assertEqual(product_test_modules(), set(owned_modules()))
 
     def test_missing_assignment_is_rejected(self) -> None:
@@ -486,7 +486,7 @@ class TestInventoryContract(unittest.TestCase):
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("24 product test modules", result.stdout)
+        self.assertIn("25 product test modules", result.stdout)
 
 
 class TestShardRunner(unittest.TestCase):
