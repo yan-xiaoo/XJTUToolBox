@@ -474,18 +474,26 @@ class LibraryInterface(ScrollArea):
         lib = Library(session)
         switched, prev = False, ""
         current = lib.get_current_campus()
-        if target_campus and current and current != target_campus:
+        if target_campus and current != target_campus:
             send_progress(0, "正在切换校区...")
             switched = lib.switch_campus(target_campus)
             prev = current
-        send_progress(15, "正在获取楼层数据...")
-        positions, status = lib.get_seat_layout(floor_code)
-        send_progress(45, "正在加载楼层平面图...")
-        image = lib.get_floor_image(floor_code)
-        send_progress(75, "正在获取区域名称...")
-        names = lib.get_area_names(floor_code)
-        send_progress(100, "已就绪")
-        return positions, status, image, names, switched, (prev if switched else current)
+        try:
+            send_progress(15, "正在获取楼层数据...")
+            positions, status = lib.get_seat_layout(floor_code)
+            send_progress(45, "正在加载楼层平面图...")
+            image = lib.get_floor_image(floor_code)
+            send_progress(75, "正在获取区域名称...")
+            names = lib.get_area_names(floor_code)
+            send_progress(100, "已就绪")
+            return positions, status, image, names, switched, (prev if switched else current)
+        except Exception:
+            if switched and prev:
+                try:
+                    lib.switch_campus(prev)
+                except Exception:
+                    pass
+            raise
 
     @pyqtSlot(object)
     def _onFloorMapLoaded(self, payload):

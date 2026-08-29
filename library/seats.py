@@ -187,14 +187,18 @@ class Library:
         return {key: name for key, name in (payload.get("sp") or {}).items() if key}
 
     def get_current_campus(self) -> str:
-        """当前账号校区 ID（/modify 页 rplace 的选中值），为空表示未知。"""
+        """当前账号校区 ID（/modify 页 rplace 选中项），为空表示未知。"""
         try:
             html = self._get(f"{BASE_URL}/modify", timeout=20).text
         except requests.RequestException as exc:
             logger.debug("get_current_campus: %s", exc)
             return ""
-        match = re.search(r'<option[^>]*selected[^>]*value="([^"]+)"', html)
-        return match.group(1) if match else ""
+        try:
+            tree = lxml_html.fromstring(html)
+            values = tree.xpath("//select[@id='rplace']//option[@selected]/@value")
+            return values[0] if values else ""
+        except Exception:
+            return ""
 
     def switch_campus(self, campus: str) -> bool:
         """切换账号校区（POST /modify 的 rplace），返回是否提交成功。
@@ -231,21 +235,22 @@ class Library:
     def get_floor_image(self, code: str) -> bytes | None:
         """平面图 JPG 字节（/static/images/ui10/{code}.jpg），楼层/区域通用。
 
-        下载失败返回 None，由界面降级为无底图渲染。
+        核心平面图加载失败直接报错（无图不可用），不做静默降级。
         """
         try:
             response = self._get(f"{BASE_URL}/static/images/ui10/{code}.jpg", timeout=20)
-            if response.ok and response.content:
-                return response.content
         except requests.RequestException as exc:
-            logger.debug("get_floor_image: %s", exc)
-        return None
+            raise RuntimeError(f"图书馆平面图加载失败: {code}") from exc
+        if not response.ok or not response.content:
+            raise RuntimeError(f"图书馆平面图加载失败: {code}")
+        return response.content
 
     def get_floor_images(self, area_code: str) -> dict[str, bytes | None]:
         """区域平面图各状态的瓦片图（/static/images/ui10/）。
 
         返回 {状态键: 字节}：base=原图、book=已预约、inside=使用中、
-        leave=中途离开、blanket=取消（全局一张）。任一失败为 None，界面降级。
+        leave=中途离开、blanket=取消（全局一张）。base（原图）加载失败直接报错，
+        其余状态瓦片失败为 None（对应座位按透明处理）。
         """
         variants = {
             "base": f"{area_code}.jpg",
@@ -258,10 +263,17 @@ class Library:
         for key, filename in variants.items():
             try:
                 response = self._get(f"{BASE_URL}/static/images/ui10/{filename}", timeout=20)
-                result[key] = response.content if response.ok else None
             except requests.RequestException as exc:
-                logger.debug("get_floor_images %s: %s", filename, exc)
+                if key == "base":
+                    raise RuntimeError(f"图书馆平面图加载失败: {filename}") from exc
                 result[key] = None
+                continue
+            if not response.ok or not response.content:
+                if key == "base":
+                    raise RuntimeError(f"图书馆平面图加载失败: {filename}")
+                result[key] = None
+                continue
+            result[key] = response.content
         return result
 
     # ---- 动作二：选座位 ----
@@ -310,23 +322,19 @@ class Library:
     def _booking_from_html(self, html: str, url: str = "") -> MyBooking | None:
         """从 /my/ 页解析当前有效预约。
 
-        页面结构固定置：
-        - 当前预约 = 第一张 bs-calltoaction 卡片（历史卡在其后）
-        - 座位行 = 卡内第 1 个 <hr> 的 tail（``区域名&nbsp;座位号``）
-        - 状态 = cta-button 内第 1 个无 class 的 h3
-        无当前预约时第一张卡不含“取消预约”按钮（纯历史页），返回 None。
+        页面结构固定：当前预约卡片是 ``class="well"``（历史卡为 notwell），
+        无 well 卡即无当前预约。座位行 = 卡内第 1 个 <hr> 的 tail（区域名&nbsp;座位号）；
+        状态 = cta-button 内第 1 个无 class 的 h3。
+        入馆后仅渲染“中途离开/返回”的卡片同样适用（与按钮种类无关）。
         """
         try:
             tree = lxml_html.fromstring(html)
         except Exception:
             return None
-        cards = tree.xpath("//div[contains(@class, 'bs-calltoaction')]")
+        cards = tree.xpath("//div[@class='well']")
         if not cards:
             return None
         card = cards[0]
-        # 当前可操作预约才有“取消预约”按钮；纯历史页第一张卡无（结构特征，非文本筛选）
-        if not card.xpath(".//a[contains(text(), '取消预约')]"):
-            return None
         hrs = card.xpath(".//hr")
         if not hrs or not (hrs[0].tail or "").strip():
             return None

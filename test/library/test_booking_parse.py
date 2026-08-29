@@ -11,11 +11,12 @@ def make_response(text: str, url: str = "http://rg.lib.xjtu.edu.cn:8086/seat/"):
 
 
 
-def card_html(area: str, seat: str, status: str, buttons: str = "") -> str:
-    """构造真实 /my/ 预约卡片结构：bs-calltoaction + hr.tail 座位行 + cta-button。"""
+def card_html(area: str, seat: str, status: str, buttons: str = "",
+               cls: str = "well") -> str:
+    """构造真实 /my/ 预约卡片：当前预约 class=well（历史=notwell）+ hr.tail 座位行。"""
     return f"""
-    <div class="container"><div class="row"><div class="notwell"><div class="bg">
-    <div class="bs-calltoaction "><div class="row">
+    <div class="{cls}">
+    <div class="row">
       <div class="col-md-9 cta-contents">
         <h4>2026-08-22</h4><h4>创新港图书资料中心</h4><br>
         <h3 class="cta-title">业务类型:&nbsp;预约座位<br>
@@ -106,6 +107,35 @@ class LibraryBookingTest(unittest.TestCase):
         self.assertEqual(set(booking.action_urls), {"取消预约", "入馆签到"})
         self.assertNotIn("中途离开", booking.action_urls)
         self.assertNotIn("中途返回", booking.action_urls)
+
+    def test_in_site_booking_without_cancel_button(self):
+        """已入馆后仅渲染“中途离开/返回”（无取消预约）：well 卡仍应被识别为当前预约。"""
+        html = card_html(
+            "创新港图书资料中心一层阅览区（西）", "098", "使用中",
+            '<a class="btn">中途离开</a><a class="btn">中途返回</a>') + """
+        <script>showConfirmModal('确认', 'leave', '77')</script>
+        <script>showConfirmModal('确认', 'return', '77')</script>
+        """
+        booking = self.library._booking_from_html(html)
+        self.assertIsNotNone(booking)
+        self.assertEqual(booking.seat_id, "098")
+        self.assertEqual(booking.status_text, "使用中")
+        self.assertEqual(set(booking.action_urls), {"中途离开", "中途返回"})
+
+    def test_history_page_without_well_returns_none(self):
+        """纯历史页（notwell、无 well 卡）→ 无当前预约。"""
+        html = card_html("北楼二层外文库（东）", "D004", "超时未入馆", "", cls="notwell")
+        self.assertIsNone(self.library._booking_from_html(html))
+
+    def test_get_current_campus_xpath(self):
+        """svg value 在 selected 前/后都应识别当前校区。"""
+        from library.seats import Library as L
+        from types import SimpleNamespace
+        lib = L(SimpleNamespace())
+        lib.session.get = lambda *a, **k: make_response(
+            '<select id="rplace"><option value="west" selected>雁塔</option>'
+            '<option selected value="east">兴庆</option></select>')
+        self.assertEqual(lib.get_current_campus(), "west")
 
     def test_reserve_id_from_url_fallback(self):
         """页面无 JS 动作调用时，从地址中的 ri 参数提取。"""
