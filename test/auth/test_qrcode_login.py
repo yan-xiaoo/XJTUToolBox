@@ -7,6 +7,8 @@ from app.utils.interactive_login import login_with_qrcode
 from auth.new_login import LoginState
 from auth.new_qrcode_login import NewQRCodeLogin, QRCodeLoginStatus
 
+TEST_DOMAIN = "auth-session"
+
 
 class FakeResponse:
     """

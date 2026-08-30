@@ -18,6 +18,8 @@ jobs:
   test-contract:
     name: Test contract
     runs-on: ubuntu-22.04
+    outputs:
+      domains: ${{ steps.domains.outputs.domains }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +33,13 @@ jobs:
 
       - name: Validate test inventory and workflow contract
         run: python -m unittest -v test.ci.test_pr_workflow
+
+      - name: Export validated test domains
+        id: domains
+        shell: bash
+        run: |
+          domains=$(python -m test.ci.check_test_contract --format domain-json)
+          echo "domains=$domains" >> "$GITHUB_OUTPUT"
 
   test-shards:
     name: ${{ matrix.domain.name }} (${{ matrix.platform.id }}, Python ${{ matrix.platform.python-version }})
@@ -60,17 +69,7 @@ jobs:
             os: macos-15-intel
             python-version: "3.12"
             machine: x86_64
-        domain:
-          - id: ai
-            name: AI core and features
-          - id: qt-ui
-            name: Qt and desktop UI
-          - id: notification-crawler
-            name: Notifications and crawler
-          - id: auth-session
-            name: Authentication and sessions
-          - id: schedule
-            name: Schedule
+        domain: ${{ fromJSON(needs.test-contract.outputs.domains) }}
     env:
       PYTHONUTF8: "1"
       QT_QPA_PLATFORM: offscreen
@@ -116,17 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        domain:
-          - id: ai
-            name: AI core and features
-          - id: qt-ui
-            name: Qt and desktop UI
-          - id: notification-crawler
-            name: Notifications and crawler
-          - id: auth-session
-            name: Authentication and sessions
-          - id: schedule
-            name: Schedule
+        domain: ${{ fromJSON(needs.test-contract.outputs.domains) }}
     env:
       PYTHONUTF8: "1"
       QT_QPA_PLATFORM: offscreen
@@ -226,7 +215,7 @@ jobs:
           XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
           XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
           XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache
-        run: uv run --frozen python -m unittest -v test.ai_assistant.test_ai_features test.app.test_notice_search_ui test.notification.test_notification_sources test.app.test_notice_thread test.schedule.test_lesson test.test_crawler_challenge
+        run: uv run --frozen python -m test.ci.run_test_regressions
 
   ci-gate:
     name: CI Gate

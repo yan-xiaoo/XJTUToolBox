@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+TEST_DOMAIN = "qt-ui"
+
 import requests
 
 from auth import ServerError

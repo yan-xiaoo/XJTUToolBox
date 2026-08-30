@@ -13,6 +13,8 @@ from auth import ServerError
 from auth.constant import FITNESS_LOGIN_URL
 from app.sessions.fitness_session import FitnessSession
 
+TEST_DOMAIN = "auth-session"
+
 
 FITNESS_AES_KEY = b"Wet2C8d34f62ndi3"
 FITNESS_AES_IV = b"K6iv85jBD8jgf32D"

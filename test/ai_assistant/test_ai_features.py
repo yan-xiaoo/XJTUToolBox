@@ -7,6 +7,9 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+TEST_DOMAIN = "ai"
+TEST_REGRESSION = True
+
 from ai_assistant.capabilities import collect_local_context
 from ai_assistant.config import AIConfigStore, AIProfile, SCHEMA_VERSION, validate_profile
 from ai_assistant.conversations import ConversationStore, MAX_CONTENT_CHARACTERS

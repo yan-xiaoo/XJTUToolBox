@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 from jwxt.calendar import CalendarTerm
 
+TEST_DOMAIN = "schedule"
+
 
 def _term(**overrides) -> CalendarTerm:
     data = {

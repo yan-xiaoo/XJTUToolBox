@@ -3,6 +3,8 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+TEST_DOMAIN = "schedule"
+
 from auth import ServerError
 from fitness.score import Fitness
 

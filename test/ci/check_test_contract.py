@@ -1,43 +1,40 @@
-"""Validate that product tests are registered in exactly one test domain."""
+"""Validate that product tests declare exactly one known test domain."""
 
 from __future__ import annotations
 
+import argparse
 import ast
+import json
 import re
 import sys
 from pathlib import Path
+from typing import Iterable
 
-from test.ci.shards import REGRESSION_MODULES, SHARDS, Shard
-
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-TEST_ROOT = REPOSITORY_ROOT / "test"
-DOMAIN_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-EXPECTED_DOMAINS = (
-    ("ai", "AI core and features"),
-    ("qt-ui", "Qt and desktop UI"),
-    ("notification-crawler", "Notifications and crawler"),
-    ("auth-session", "Authentication and sessions"),
-    ("schedule", "Schedule"),
+from test.ci.shards import (
+    DOMAIN_DEFINITIONS,
+    MINIMUM_REGRESSION_MODULES,
+    REPOSITORY_ROOT,
+    SHARDS,
+    TEST_ROOT,
+    Shard,
+    TestModule,
+    module_name,
+    regression_modules,
+    scan_test_modules,
+    shards_for_records,
 )
 
 
-def module_name(path: Path, test_root: Path = TEST_ROOT) -> str:
-    """Convert a Python path below ``test_root`` into a ``test.*`` import."""
-
-    relative = path.relative_to(test_root).with_suffix("")
-    return "test." + ".".join(relative.parts)
+DOMAIN_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+EXPECTED_DOMAINS = tuple(
+    (definition.id, definition.name) for definition in DOMAIN_DEFINITIONS
+)
 
 
 def product_test_modules(test_root: Path = TEST_ROOT) -> set[str]:
-    """Discover product tests, excluding package markers and ``test/ci``."""
+    """Discover product-test import names without importing test modules."""
 
-    return {
-        module_name(path, test_root)
-        for path in test_root.rglob("*.py")
-        if path.name != "__init__.py"
-        and path.relative_to(test_root).parts[0] != "ci"
-    }
+    return {record.module for record in scan_test_modules(test_root)}
 
 
 def owned_modules(shards: tuple[Shard, ...] = SHARDS) -> dict[str, list[str]]:
@@ -53,11 +50,12 @@ def owned_modules(shards: tuple[Shard, ...] = SHARDS) -> dict[str, list[str]]:
 def inventory_problems(
     shards: tuple[Shard, ...] = SHARDS,
     product_modules: set[str] | None = None,
+    test_root: Path = TEST_ROOT,
 ) -> tuple[set[str], dict[str, list[str]], set[str]]:
     """Return missing, multiply owned, and unexpected declared modules."""
 
     if product_modules is None:
-        product_modules = product_test_modules()
+        product_modules = product_test_modules(test_root)
     owners = owned_modules(shards)
     declared = set(owners)
     missing = product_modules - declared
@@ -70,13 +68,63 @@ def inventory_problems(
     return missing, duplicates, unexpected
 
 
+def _marker_errors(records: Iterable[TestModule], known_domains: set[str]) -> list[str]:
+    """Return deterministic errors for every malformed module marker."""
+
+    errors: list[str] = []
+    for record in records:
+        if record.parse_error is not None:
+            errors.append(f"cannot parse {record.module}: {record.parse_error}")
+            continue
+        if not record.marker_values:
+            errors.append(f"missing TEST_DOMAIN marker: {record.module}")
+            continue
+        if len(record.marker_values) > 1:
+            errors.append(f"duplicate TEST_DOMAIN marker: {record.module}")
+            continue
+        value = record.marker_values[0]
+        if not isinstance(value, str):
+            errors.append(
+                f"TEST_DOMAIN must be a string: {record.module} (got {value!r})"
+            )
+            continue
+        if not DOMAIN_ID_PATTERN.fullmatch(value):
+            errors.append(f"invalid TEST_DOMAIN marker: {record.module} ({value!r})")
+        elif value not in known_domains:
+            errors.append(f"unknown TEST_DOMAIN domain: {record.module} ({value})")
+    return errors
+
+
+def _regression_marker_errors(records: Iterable[TestModule]) -> list[str]:
+    """Validate optional top-level ``TEST_REGRESSION`` boolean markers."""
+
+    errors: list[str] = []
+    for record in records:
+        if record.parse_error is not None or not record.regression_values:
+            continue
+        if len(record.regression_values) > 1:
+            errors.append(f"duplicate TEST_REGRESSION marker: {record.module}")
+            continue
+        value = record.regression_values[0]
+        if not isinstance(value, bool):
+            errors.append(
+                f"TEST_REGRESSION must be a boolean: {record.module} (got {value!r})"
+            )
+    return errors
+
+
 def contract_errors(
-    shards: tuple[Shard, ...] = SHARDS,
+    shards: tuple[Shard, ...] | None = None,
     repository_root: Path = REPOSITORY_ROOT,
     product_modules: set[str] | None = None,
+    minimum_regression_modules: int = MINIMUM_REGRESSION_MODULES,
 ) -> list[str]:
-    """Collect every deterministic inventory, path and syntax violation."""
+    """Collect deterministic inventory, marker, path, and syntax violations."""
 
+    test_root = repository_root / "test"
+    records = scan_test_modules(test_root)
+    if shards is None:
+        shards = shards_for_records(records)
     errors: list[str] = []
     domains = tuple((shard.id, shard.name) for shard in shards)
     ids = [shard.id for shard in shards]
@@ -93,9 +141,13 @@ def contract_errors(
         if not DOMAIN_ID_PATTERN.fullmatch(shard.id):
             errors.append(f"invalid domain ID: {shard.id!r}")
 
+    errors.extend(_marker_errors(records, {shard.id for shard in DOMAIN_DEFINITIONS}))
+    errors.extend(_regression_marker_errors(records))
     if product_modules is None:
-        product_modules = product_test_modules(repository_root / "test")
-    missing, duplicates, unexpected = inventory_problems(shards, product_modules)
+        product_modules = {record.module for record in records}
+    missing, duplicates, unexpected = inventory_problems(
+        shards, product_modules, test_root
+    )
     errors.extend(f"missing test module: {module}" for module in sorted(missing))
     errors.extend(
         f"duplicate test module: {module} ({','.join(owners)})"
@@ -113,27 +165,106 @@ def contract_errors(
             continue
         try:
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except (OSError, SyntaxError) as error:
-            errors.append(f"cannot parse {module}: {error}")
+        except (OSError, SyntaxError, UnicodeError) as error:
+            # Product files are normally parsed by ``scan_test_modules``; this
+            # second check also covers an explicitly declared file under the
+            # excluded ``test/ci`` tree or a synthetic contract fixture.
+            parse_error = f"cannot parse {module}: {error}"
+            if parse_error not in errors:
+                errors.append(parse_error)
 
-    for module in REGRESSION_MODULES:
+    regression_targets = regression_modules(records)
+    if not regression_targets:
+        errors.append("no regression test modules are marked")
+    elif len(regression_targets) < minimum_regression_modules:
+        errors.append(
+            "too few regression test modules are marked: "
+            f"{len(regression_targets)} (minimum {minimum_regression_modules})"
+        )
+    for module in regression_targets:
         if module not in declared:
             errors.append(f"regression module is not in a domain: {module}")
-    if len(REGRESSION_MODULES) != len(set(REGRESSION_MODULES)):
+    if len(regression_targets) != len(set(regression_targets)):
         errors.append("duplicate regression module")
     return errors
 
 
-def main() -> int:
+def render_inventory_markdown(
+    shards: tuple[Shard, ...] | None = None,
+    product_modules: set[str] | None = None,
+    regression_targets: tuple[str, ...] | None = None,
+    test_root: Path = TEST_ROOT,
+) -> str:
+    """Render the current runtime inventory for humans and documentation."""
+
+    records = scan_test_modules(test_root)
+    if shards is None:
+        shards = shards_for_records(records)
+    if product_modules is None:
+        product_modules = {record.module for record in records}
+    if regression_targets is None:
+        regression_targets = regression_modules(records)
+    lines = [
+        f"## Test inventory: {len(product_modules)} product test modules",
+        f"Covered by {len(shards)} domains.",
+        "",
+        "| Domain ID | Display name | Module count | Modules |",
+        "|---|---|---:|---|",
+    ]
+    for shard in shards:
+        modules = ", ".join(f"`{module}`" for module in shard.modules) or "_none_"
+        lines.append(
+            f"| `{shard.id}` | {shard.name} | {len(shard.modules)} | {modules} |"
+        )
+    lines.extend(("", "### Regression modules", ""))
+    if regression_targets:
+        lines.extend(f"- `{module}`" for module in regression_targets)
+    else:
+        lines.append("_none_")
+    return "\n".join(lines) + "\n"
+
+
+def render_domain_matrix_json(
+    definitions: tuple[Shard, ...] = DOMAIN_DEFINITIONS,
+) -> str:
+    """Render the validated domain definitions for GitHub Actions matrices."""
+
+    return json.dumps(
+        [{"id": definition.id, "name": definition.name} for definition in definitions],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _text_output(test_root: Path = TEST_ROOT) -> str:
+    records = scan_test_modules(test_root)
+    shards = shards_for_records(records)
+    return (
+        f"OK: {len(records)} product test modules are "
+        f"covered by {len(shards)} domains."
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--format",
+        choices=("text", "markdown", "domain-json"),
+        default="text",
+        help="output format after the contract passes",
+    )
+    args = parser.parse_args(argv)
     errors = contract_errors()
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print(
-        f"OK: {len(product_test_modules())} product test modules are covered by "
-        f"{len(SHARDS)} domains."
-    )
+    if args.format == "markdown":
+        print(render_inventory_markdown(), end="")
+    elif args.format == "domain-json":
+        print(render_domain_matrix_json())
+    else:
+        print(_text_output())
     return 0
 
 

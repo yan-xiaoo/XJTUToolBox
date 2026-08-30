@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+TEST_DOMAIN = "qt-ui"
+
 from library.seats import ACTION_LABELS, BASE_URL, Library, MyBooking
 
 
