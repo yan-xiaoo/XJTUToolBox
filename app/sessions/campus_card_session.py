@@ -50,9 +50,6 @@ class CampusCardSession(CommonLoginSession):
         self.card_account = ""
         self.user_name = ""
         self.student_no = ""
-        for key in list(self.headers):
-            if key.lower().startswith("x-card-"):
-                del self.headers[key]
         self.headers["synAccessSource"] = "h5"
 
     def _store_token(self) -> None:
@@ -181,5 +178,8 @@ class CampusCardSession(CommonLoginSession):
         if not isinstance(payload, dict) or str(payload.get("code")) != "200":
             return False
         if not all((self.user_name, self.student_no, self.card_account)):
-            self._load_user_profile()
+            try:
+                self._load_user_profile()
+            except ServerError:
+                return False
         return True

@@ -1,13 +1,36 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
 from auth import ServerError
+
+
+class CampusCardTransport(Protocol):
+    """校园卡接口所需的最小 HTTP 传输接口。"""
+
+    def get(self, url: str, **kwargs: Any) -> requests.Response:
+        ...
+
+
+@dataclass(frozen=True)
+class CardProfile:
+    """登录后由上层提供的校园卡用户资料。"""
+
+    name: str
+    student_no: str
+    account: str
+
+    def __post_init__(self) -> None:
+        for field in ("name", "student_no", "account"):
+            value = getattr(self, field)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"校园卡用户资料缺少{field}字段")
 
 
 @dataclass
@@ -56,12 +79,15 @@ class CardTransaction:
 class CampusCard:
     BASE = "https://ncard.xjtu.edu.cn"
 
-    def __init__(self, session: requests.Session):
-        self.session = session
+    def __init__(self, transport: CampusCardTransport, profile: CardProfile):
+        if not isinstance(profile, CardProfile):
+            raise TypeError("profile must be a CardProfile")
+        self.transport = transport
+        self.profile = profile
 
     def get_card_info(self) -> CardInfo:
         operation = "查询校园卡"
-        response = self.session.get(
+        response = self.transport.get(
             f"{self.BASE}/berserker-app/ykt/tsm/queryCard?synAccessSource=h5",
             timeout=20,
         )
@@ -79,9 +105,9 @@ class CampusCard:
         if len(expire) == 8:
             expire = f"{expire[:4]}-{expire[4:6]}-{expire[6:]}"
         return CardInfo(
-            name=str(getattr(self.session, "user_name", "") or ""),
-            student_no=str(getattr(self.session, "student_no", "") or ""),
-            account=str(getattr(self.session, "card_account", "") or ""),
+            name=self.profile.name,
+            student_no=self.profile.student_no,
+            account=self.profile.account,
             balance_cents=_integer(card.get("elec_accamt"), "余额", operation),
             pending_amount_cents=_integer(card.get("unsettle_amount"), "未结算金额", operation),
             lost=card.get("barflag") == 1,
@@ -101,7 +127,7 @@ class CampusCard:
             raise ServerError(1, f"{operation}的分页参数必须为正数")
         end = time_to or date.today()
         start = time_from or (end - timedelta(days=90))
-        response = self.session.get(
+        response = self.transport.get(
             f"{self.BASE}/berserker-search/search/personal/turnover",
             params={
                 "size": page_size,
@@ -165,19 +191,18 @@ class CampusCard:
                 raise ServerError(1, f"{operation}返回的总数在分页过程中发生变化")
 
             if batch:
-                page_signature = json.dumps(
+                page_payload = json.dumps(
                     [asdict(item) for item in batch],
                     ensure_ascii=False,
                     sort_keys=True,
                     separators=(",", ":"),
-                )
+                ).encode("utf-8")
+                page_signature = hashlib.sha256(page_payload).hexdigest()
                 if page_signature in seen_pages:
                     raise ServerError(1, f"{operation}返回了重复分页数据")
                 seen_pages.add(page_signature)
                 records.extend(batch)
 
-            if expected_total is None:
-                raise ServerError(1, f"{operation}未返回总数")
             if len(records) > expected_total:
                 raise ServerError(1, f"{operation}返回的流水记录超过总数")
             if not batch:
@@ -190,11 +215,8 @@ class CampusCard:
                 raise ServerError(1, f"{operation}返回了残缺流水数据")
             page += 1
 
-        raise ServerError(1, f"{operation}返回了残缺流水数据")
-
-
-_INCOME_MARKERS = ("充值", "圈存", "退款", "补助", "recharge", "transfer", "refund", "subsidy")
-_EXPENSE_MARKERS = ("消费", "支出", "扣款", "consume", "expense")
+_INCOME_MARKERS = ("充值", "圈存", "退款", "补助", "recharge", "transfer-in", "refund", "subsidy")
+_EXPENSE_MARKERS = ("消费", "支出", "扣款", "consume", "expense", "transfer-out")
 
 
 def _signed_amount_cents(raw_amount: int, type_name: str, icon: str) -> int:
@@ -202,6 +224,7 @@ def _signed_amount_cents(raw_amount: int, type_name: str, icon: str) -> int:
     if raw_amount < 0:
         return raw_amount
     normalized = f"{type_name} {icon}".casefold()
+    # 收入必须先判断：例如“消费退款”同时包含支出和收入标记，退款应取正。
     if any(marker.casefold() in normalized for marker in _INCOME_MARKERS):
         return abs(raw_amount)
     if any(marker.casefold() in normalized for marker in _EXPENSE_MARKERS):
@@ -210,9 +233,9 @@ def _signed_amount_cents(raw_amount: int, type_name: str, icon: str) -> int:
 
 
 def _json_object(response: requests.Response, operation: str) -> dict[str, Any]:
-    if not getattr(response, "ok", True):
+    if not response.ok:
         raise ServerError(1, f"{operation}请求失败")
-    text = getattr(response, "text", "") or ""
+    text = response.text or ""
     if "移动端模式" in text:
         raise ServerError(1, f"{operation}要求使用移动端模式")
     try:
@@ -226,7 +249,7 @@ def _json_object(response: requests.Response, operation: str) -> dict[str, Any]:
 
 def _require_success(payload: dict[str, Any], operation: str) -> None:
     if "code" not in payload or str(payload.get("code")) != "200":
-        code = payload.get("code") or 1
+        code = payload.get("code", 1)
         message = payload.get("message") or "业务请求失败"
         raise ServerError(code, f"{operation}失败：{message}")
 
@@ -252,6 +275,7 @@ def _integer(value: Any, field: str, operation: str) -> int:
         return value
     if isinstance(value, str):
         text = value.strip()
-        if text and text.removeprefix("-").isdigit():
+        digits = text.removeprefix("-")
+        if text and digits.isascii() and digits.isdigit():
             return int(text)
     raise ServerError(1, f"{operation}返回的{field}格式错误")

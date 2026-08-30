@@ -2,7 +2,7 @@ from PyQt5.QtCore import QDate
 from PyQt5.QtWidgets import QTableWidgetItem
 from qfluentwidgets import BodyLabel, CalendarPicker, PrimaryPushButton
 
-from card import CampusCard
+from card import CampusCard, CardProfile
 from .components.CampusPage import CampusPage
 from .utils import accounts
 
@@ -43,7 +43,6 @@ class CampusCardInterface(CampusPage):
         super().showEvent(event)
         if self._auto_loaded or accounts.current is None:
             return
-        self._auto_loaded = True
         self.refresh()
 
     def refresh(self):
@@ -56,12 +55,18 @@ class CampusCardInterface(CampusPage):
             return
 
         def worker(session):
-            util = CampusCard(session)
+            profile = CardProfile(
+                name=session.user_name,
+                student_no=session.student_no,
+                account=session.card_account,
+            )
+            util = CampusCard(session, profile)
             info = util.get_card_info()
             total, records = util.get_all_transactions(start, end, page_size=80)
             return info, total, records
 
-        self.start_job("campus_card", self.tr("正在登录校园卡..."), worker, self._on_result)
+        if self.start_job("campus_card", self.tr("正在登录校园卡..."), worker, self._on_result):
+            self._auto_loaded = True
 
     def _on_result(self, payload):
         info, total, records = payload

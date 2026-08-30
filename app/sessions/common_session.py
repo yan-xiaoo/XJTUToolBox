@@ -183,20 +183,21 @@ class CommonLoginSession(metaclass=ABCMeta):
         self.backend.reset_timeout()
 
         request_headers = kwargs.pop("headers", None)
+        if request_headers is not None and not isinstance(request_headers, Mapping):
+            raise TypeError("headers should be a mapping")
         skip_auth_check = kwargs.pop("_skip_auth_check", False) is True
         skip_webvpn_rewrite = kwargs.pop("_skip_webvpn_rewrite", False) is True
-        headers: dict[str, str] = {}
+        headers = requests.structures.CaseInsensitiveDict()
         # 使用公用 headers
         headers.update(self.backend.session.headers)
         # 增加站点特殊要求的 headers
         headers.update(self.headers)
-        if request_headers is not None:
-            if not isinstance(request_headers, Mapping):
-                raise TypeError("headers should be a mapping")
-            for key, value in request_headers.items():
-                headers[str(key)] = str(value)
+        # 站点默认 UA 先写入；调用方在下面传入的 headers 可以显式覆盖它。
         if self.user_agent:
             headers["User-Agent"] = self.user_agent
+        if request_headers is not None:
+            for key, value in request_headers.items():
+                headers[str(key)] = str(value)
 
         prepared_url = self.prepare_url_for_access_mode(url, skip_webvpn_rewrite=skip_webvpn_rewrite)
         prepared_headers = self.prepare_headers_for_access_mode(

@@ -14,6 +14,12 @@ from PyQt5.QtCore import QDate
 from PyQt5.QtWidgets import QWidget
 
 CampusCard = campus_card_module.CampusCard
+CardProfile = campus_card_module.CardProfile
+TEST_PROFILE = CardProfile("Test User", "student-id", "card-id")
+
+
+def _campus_card(session):
+    return CampusCard(session, TEST_PROFILE)
 
 
 def _response(payload=None, *, ok=True, error=None, text=""):
@@ -69,13 +75,13 @@ class CampusCardApiTest(unittest.TestCase):
             user_name="Test User",
             student_no="student-id",
             card_account="card-id",
-            headers={"X-Card-Name": "Legacy User", "X-Card-Sno": "legacy-id", "X-Card-Account": "legacy-card"},
+            headers={},
         )
 
     def test_card_info_accepts_string_success_code_and_uses_session_profile(self):
         session = self._card_session(_response(_card_payload("200")))
 
-        info = CampusCard(session).get_card_info()
+        info = _campus_card(session).get_card_info()
 
         self.assertEqual(info.name, "Test User")
         self.assertEqual(info.student_no, "student-id")
@@ -84,18 +90,6 @@ class CampusCardApiTest(unittest.TestCase):
         self.assertEqual(info.pending_amount_cents, 45)
         self.assertIsInstance(info.balance_cents, int)
         self.assertIsInstance(info.pending_amount_cents, int)
-
-    def test_card_info_does_not_fallback_to_x_card_headers(self):
-        session = self._card_session(_response(_card_payload()))
-        session.user_name = ""
-        session.student_no = ""
-        session.card_account = ""
-
-        info = CampusCard(session).get_card_info()
-
-        self.assertEqual(info.name, "")
-        self.assertEqual(info.student_no, "")
-        self.assertEqual(info.account, "")
 
     def test_card_info_rejects_invalid_response_shapes(self):
         cases = (
@@ -112,12 +106,19 @@ class CampusCardApiTest(unittest.TestCase):
         for response in cases:
             with self.subTest(response=response):
                 with self.assertRaisesRegex(ServerError, "查询校园卡"):
-                    CampusCard(self._card_session(response)).get_card_info()
+                    _campus_card(self._card_session(response)).get_card_info()
 
     def test_transaction_code_is_checked(self):
         session = SimpleNamespace(get=Mock(return_value=_response({"code": 500, "message": "查询失败"})))
         with self.assertRaisesRegex(ServerError, "查询校园卡流水"):
-            CampusCard(session).get_transactions(date(2026, 1, 1), date(2026, 1, 2))
+            _campus_card(session).get_transactions(date(2026, 1, 1), date(2026, 1, 2))
+
+    def test_profile_is_required_at_construction(self):
+        with self.assertRaises(TypeError):
+            CampusCard(SimpleNamespace(get=Mock()), object())
+
+        with self.assertRaises(ValueError):
+            CardProfile("", "student-id", "card-id")
 
     def test_transactions_reject_invalid_response_shapes(self):
         cases = (
@@ -134,17 +135,19 @@ class CampusCardApiTest(unittest.TestCase):
             with self.subTest(response=response):
                 session = SimpleNamespace(get=Mock(return_value=response))
                 with self.assertRaisesRegex(ServerError, "查询校园卡流水"):
-                    CampusCard(session).get_transactions(date(2026, 1, 1), date(2026, 1, 2))
+                    _campus_card(session).get_transactions(date(2026, 1, 1), date(2026, 1, 2))
 
     def test_transaction_amounts_are_integer_cents_with_explicit_direction(self):
         cases = (
             ("消费", "consume", 123, -123),
             ("充值", "recharge", 123, 123),
-            ("圈存", "transfer", 123, 123),
+            ("圈存", "transfer-in", 123, 123),
             ("退款", "refund", 123, 123),
             ("补助", "subsidy", 123, 123),
             ("未知类型", "unknown", 123, 123),
             ("未知类型", "unknown", -123, -123),
+            ("转出", "transfer-out", 123, -123),
+            ("未知类型", "transfer", 123, 123),
         )
         records = [
             _transaction_item(amount=amount, type_name=type_name, icon=icon)
@@ -152,7 +155,7 @@ class CampusCardApiTest(unittest.TestCase):
         ]
         session = SimpleNamespace(get=Mock(return_value=_response(_transaction_payload(records))))
 
-        _total, transactions = CampusCard(session).get_transactions()
+        _total, transactions = _campus_card(session).get_transactions()
 
         for transaction, (_type_name, _icon, _amount, expected) in zip(transactions, cases):
             self.assertEqual(transaction.amount_cents, expected)
@@ -180,7 +183,7 @@ class CampusCardApiTest(unittest.TestCase):
             return _response(payload)
 
         session = SimpleNamespace(get=fake_get)
-        total, records = CampusCard(session).get_all_transactions(
+        total, records = _campus_card(session).get_all_transactions(
             date(2026, 1, 1), date(2026, 3, 1), page_size=2,
         )
         self.assertEqual(total, 3)
@@ -197,7 +200,7 @@ class CampusCardApiTest(unittest.TestCase):
 
         session = SimpleNamespace(get=fake_get)
         with self.assertRaisesRegex(ServerError, "查询校园卡流水"):
-            CampusCard(session).get_all_transactions(page_size=2)
+            _campus_card(session).get_all_transactions(page_size=2)
         self.assertEqual(requested_pages, [1, 2])
 
     def test_get_all_transactions_rejects_short_result_after_final_page(self):
@@ -213,7 +216,7 @@ class CampusCardApiTest(unittest.TestCase):
             return _response(pages[params["current"]])
 
         with self.assertRaisesRegex(ServerError, "查询校园卡流水"):
-            CampusCard(SimpleNamespace(get=fake_get)).get_all_transactions(page_size=2)
+            _campus_card(SimpleNamespace(get=fake_get)).get_all_transactions(page_size=2)
         self.assertEqual(requested_pages, [1, 2, 3])
 
     def test_get_all_transactions_rejects_total_changes(self):
@@ -228,7 +231,7 @@ class CampusCardApiTest(unittest.TestCase):
             return _response(pages[params["current"]])
 
         with self.assertRaisesRegex(ServerError, "查询校园卡流水"):
-            CampusCard(SimpleNamespace(get=fake_get)).get_all_transactions(page_size=1)
+            _campus_card(SimpleNamespace(get=fake_get)).get_all_transactions(page_size=1)
         self.assertEqual(requested_pages, [1, 2])
 
     def test_get_all_transactions_rejects_repeated_page_without_unbounded_requests(self):
@@ -242,13 +245,13 @@ class CampusCardApiTest(unittest.TestCase):
             return _response(page)
 
         with self.assertRaisesRegex(ServerError, "查询校园卡流水"):
-            CampusCard(SimpleNamespace(get=fake_get)).get_all_transactions(page_size=1)
+            _campus_card(SimpleNamespace(get=fake_get)).get_all_transactions(page_size=1)
         self.assertEqual(requested_pages, [1, 2])
 
     def test_get_all_transactions_rejects_non_positive_page_size_before_request(self):
         session = SimpleNamespace(get=Mock())
         with self.assertRaisesRegex(ServerError, "查询校园卡流水"):
-            CampusCard(session).get_all_transactions(page_size=0)
+            _campus_card(session).get_all_transactions(page_size=0)
         session.get.assert_not_called()
 
 

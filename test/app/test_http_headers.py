@@ -62,6 +62,7 @@ class CampusCardHeaderTest(unittest.TestCase):
         session = _logged_in_session()
         session.get = CampusCardSession.get.__get__(session)
         session.backend.session.headers.clear()
+        session.backend.session.headers["User-Agent"] = "Desktop UA"
         session.backend.session.request = Mock(return_value=_response({}))
 
         session.get("https://ncard.xjtu.edu.cn/test", _skip_auth_check=True)
@@ -71,6 +72,22 @@ class CampusCardHeaderTest(unittest.TestCase):
             "synAccessSource": "h5",
             "User-Agent": MOBILE_BROWSER_UA,
         })
+
+    def test_explicit_user_agent_overrides_site_default_case_insensitively(self):
+        session = _logged_in_session()
+        session.get = CampusCardSession.get.__get__(session)
+        session.backend.session.headers.clear()
+        session.backend.session.request = Mock(return_value=_response({}))
+
+        session.get(
+            "https://ncard.xjtu.edu.cn/test",
+            headers={"user-agent": "Caller UA"},
+            _skip_auth_check=True,
+        )
+
+        headers = session.backend.session.request.call_args.kwargs["headers"]
+        self.assertEqual(headers["user-agent"], "Caller UA")
+        self.assertNotEqual(headers["user-agent"], MOBILE_BROWSER_UA)
 
     def test_snapshot_restores_token_then_reloads_profile(self):
         source = _logged_in_session()
@@ -97,31 +114,6 @@ class CampusCardHeaderTest(unittest.TestCase):
         self.assertEqual(restored.student_no, "student-id")
         self.assertEqual(restored.card_account, "card-id")
         self.assertEqual(restored.get.call_count, 2)
-
-    def test_restore_discards_legacy_pseudo_headers(self):
-        snapshot = SiteSnapshot(
-            site_key="campus_card",
-            access_mode=AccessMode.NORMAL.value,
-            headers={
-                "Synjones-Auth": "bearer test-token",
-                "synAccessSource": "h5",
-                "X-Card-Access-Token": "legacy-token",
-                "X-Card-Name": "Legacy User",
-                "X-Card-Sno": "legacy-student-id",
-                "X-Card-Account": "legacy-card-id",
-            },
-            saved_at=1.0,
-        )
-
-        restored = CampusCardSession()
-        restored.restore_site_snapshot(snapshot)
-
-        self.assertEqual(restored.access_token, "test-token")
-        self.assertEqual(restored.user_name, "")
-        self.assertEqual(restored.student_no, "")
-        self.assertEqual(restored.card_account, "")
-        self.assertFalse(any(key.lower().startswith("x-card-") for key in restored.headers))
-
 
 class CampusCardProfileTest(unittest.TestCase):
     def test_profile_accepts_integer_string_and_absent_success_code(self):
@@ -170,7 +162,7 @@ class CampusCardProfileTest(unittest.TestCase):
 
         self.assertFalse(session.has_login)
 
-    def test_restored_valid_token_propagates_profile_failure(self):
+    def test_restored_valid_token_returns_false_on_profile_failure(self):
         session = CampusCardSession()
         session.restore_site_snapshot(SiteSnapshot(
             site_key="campus_card",
@@ -186,8 +178,7 @@ class CampusCardProfileTest(unittest.TestCase):
             _response({"code": 500, "data": {}}),
         ])
 
-        with self.assertRaisesRegex(ServerError, "校园卡用户资料"):
-            session.validate_login()
+        self.assertFalse(session.validate_login())
 
 
 class CampusCardAuthFailureTest(unittest.TestCase):

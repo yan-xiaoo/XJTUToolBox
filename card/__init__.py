@@ -1,3 +1,3 @@
-from .campus_card import CampusCard, CardInfo, CardTransaction
+from .campus_card import CampusCard, CampusCardTransport, CardInfo, CardProfile, CardTransaction
 
-__all__ = ["CampusCard", "CardInfo", "CardTransaction"]
+__all__ = ["CampusCard", "CampusCardTransport", "CardInfo", "CardProfile", "CardTransaction"]
