@@ -12,6 +12,7 @@ from typing import Iterable
 
 from test.ci.shards import (
     DOMAIN_DEFINITIONS,
+    MINIMUM_REGRESSION_MODULES,
     REPOSITORY_ROOT,
     SHARDS,
     TEST_ROOT,
@@ -20,7 +21,7 @@ from test.ci.shards import (
     module_name,
     regression_modules,
     scan_test_modules,
-    shards_for_test_root,
+    shards_for_records,
 )
 
 
@@ -116,13 +117,14 @@ def contract_errors(
     shards: tuple[Shard, ...] | None = None,
     repository_root: Path = REPOSITORY_ROOT,
     product_modules: set[str] | None = None,
+    minimum_regression_modules: int = MINIMUM_REGRESSION_MODULES,
 ) -> list[str]:
     """Collect deterministic inventory, marker, path, and syntax violations."""
 
     test_root = repository_root / "test"
-    if shards is None:
-        shards = shards_for_test_root(test_root)
     records = scan_test_modules(test_root)
+    if shards is None:
+        shards = shards_for_records(records)
     errors: list[str] = []
     domains = tuple((shard.id, shard.name) for shard in shards)
     ids = [shard.id for shard in shards]
@@ -174,6 +176,11 @@ def contract_errors(
     regression_targets = regression_modules(records)
     if not regression_targets:
         errors.append("no regression test modules are marked")
+    elif len(regression_targets) < minimum_regression_modules:
+        errors.append(
+            "too few regression test modules are marked: "
+            f"{len(regression_targets)} (minimum {minimum_regression_modules})"
+        )
     for module in regression_targets:
         if module not in declared:
             errors.append(f"regression module is not in a domain: {module}")
@@ -192,7 +199,7 @@ def render_inventory_markdown(
 
     records = scan_test_modules(test_root)
     if shards is None:
-        shards = shards_for_test_root(test_root)
+        shards = shards_for_records(records)
     if product_modules is None:
         product_modules = {record.module for record in records}
     if regression_targets is None:
@@ -230,9 +237,10 @@ def render_domain_matrix_json(
 
 
 def _text_output(test_root: Path = TEST_ROOT) -> str:
-    shards = shards_for_test_root(test_root)
+    records = scan_test_modules(test_root)
+    shards = shards_for_records(records)
     return (
-        f"OK: {len(product_test_modules(test_root))} product test modules are "
+        f"OK: {len(records)} product test modules are "
         f"covered by {len(shards)} domains."
     )
 

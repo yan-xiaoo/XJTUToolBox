@@ -479,6 +479,46 @@ class TestInventoryContract(unittest.TestCase):
                 errors,
             )
 
+    def test_global_and_nonlocal_marker_declarations_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            sources = {
+                "global_marker.py": (
+                    'TEST_DOMAIN = "ai"\n'
+                    "def configure():\n"
+                    "    global TEST_DOMAIN\n"
+                    '    TEST_DOMAIN = "schedule"\n'
+                ),
+                "nested_nonlocal.py": (
+                    'TEST_DOMAIN = "ai"\n'
+                    "def configure():\n"
+                    '    value = "outer"\n'
+                    "    def nested():\n"
+                    "        nonlocal TEST_DOMAIN\n"
+                    '        TEST_DOMAIN = "schedule"\n'
+                ),
+            }
+            for relative, source in sources.items():
+                path = test_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+
+            records = scan_test_modules(test_root)
+            errors = contract_errors(
+                repository_root=repository_root,
+                minimum_regression_modules=0,
+            )
+
+            self.assertIn(None, records[0].marker_values)
+            self.assertIn(None, records[1].marker_values)
+            self.assertIn(
+                "duplicate TEST_DOMAIN marker: test.global_marker", errors
+            )
+            self.assertIn(
+                "duplicate TEST_DOMAIN marker: test.nested_nonlocal", errors
+            )
+
     def test_malformed_markers_are_rejected_without_evaluation(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             repository_root = Path(temporary_directory)
@@ -777,7 +817,10 @@ class TestInventoryContract(unittest.TestCase):
             )
             self.assertEqual(
                 [],
-                contract_errors(repository_root=test_root.parent),
+                contract_errors(
+                    repository_root=test_root.parent,
+                    minimum_regression_modules=1,
+                ),
             )
 
     def test_added_product_module_is_missing(self) -> None:
@@ -868,6 +911,29 @@ class TestInventoryContract(unittest.TestCase):
             errors = contract_errors(repository_root=repository_root)
 
             self.assertIn("no regression test modules are marked", errors)
+
+    def test_contract_enforces_the_regression_module_floor(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            repository_root = Path(temporary_directory)
+            test_root = repository_root / "test"
+            for domain in DOMAIN_DEFINITIONS:
+                path = test_root / domain.id / "test_existing.py"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                marker = "\nTEST_REGRESSION = True" if domain.id == "ai" else ""
+                path.write_text(
+                    f'TEST_DOMAIN = "{domain.id}"{marker}\n',
+                    encoding="utf-8",
+                )
+
+            errors = contract_errors(
+                repository_root=repository_root,
+                minimum_regression_modules=2,
+            )
+
+            self.assertIn(
+                "too few regression test modules are marked: 1 (minimum 2)",
+                errors,
+            )
 
     def test_regressions_are_unique_and_owned(self) -> None:
         modules = regression_modules()
@@ -1093,6 +1159,21 @@ class TestWorkflowContract(unittest.TestCase):
         self.assertTrue(TESTING_DOC_PATH.is_file())
         self.assertTrue(NOTIFICATION_DOC_PATH.is_file())
         self.assertTrue(PR_TEMPLATE_PATH.is_file())
+
+    def test_domain_export_propagates_contract_command_failures(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        step = named_step_section(
+            workflow, "test-contract", "Export validated test domains"
+        )
+        self.assertIn(
+            "run: |\n"
+            "          domains=$(python -m test.ci.check_test_contract --format domain-json)\n"
+            "          echo \"domains=$domains\" >> \"$GITHUB_OUTPUT\"",
+            step,
+        )
+        self.assertNotIn(
+            'run: echo "domains=$(python -m test.ci.check_test_contract', step
+        )
 
     def test_triggers_permissions_and_concurrency_are_bounded(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")

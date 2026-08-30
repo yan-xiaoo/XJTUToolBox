@@ -37,7 +37,9 @@ jobs:
       - name: Export validated test domains
         id: domains
         shell: bash
-        run: echo "domains=$(python -m test.ci.check_test_contract --format domain-json)" >> "$GITHUB_OUTPUT"
+        run: |
+          domains=$(python -m test.ci.check_test_contract --format domain-json)
+          echo "domains=$domains" >> "$GITHUB_OUTPUT"
 
   test-shards:
     name: ${{ matrix.domain.name }} (${{ matrix.platform.id }}, Python ${{ matrix.platform.python-version }})

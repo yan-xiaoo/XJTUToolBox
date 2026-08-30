@@ -17,6 +17,11 @@ from typing import Any, Iterator
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 TEST_ROOT = REPOSITORY_ROOT / "test"
 
+# Keep a meaningful floor on historical regression coverage.  New regression
+# modules are discovered from their own markers; changing this value is an
+# intentional decision to reduce the protected bug surface.
+MINIMUM_REGRESSION_MODULES = 6
+
 
 @dataclass(frozen=True)
 class Shard:
@@ -139,6 +144,27 @@ def _marker_values(
             if bound_name == marker_name:
                 self.values.append(None)
 
+        def _visit_scope_declarations(self, body: list[ast.stmt]) -> None:
+            """Reject global/nonlocal marker declarations in skipped scopes."""
+
+            # Function and class bodies are intentionally skipped below so
+            # ordinary local assignments do not look like module metadata.
+            # ``global`` is an exception: it can write the module binding, and
+            # ``nonlocal`` is similarly surprising for a marker declaration.
+            for statement in body:
+                for node in ast.walk(statement):
+                    if isinstance(node, (ast.Global, ast.Nonlocal)):
+                        if marker_name in node.names:
+                            self.values.append(None)
+
+        def visit_Global(self, node: ast.Global) -> None:
+            if marker_name in node.names:
+                self.values.append(None)
+
+        def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+            if marker_name in node.names:
+                self.values.append(None)
+
         def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
             if node.name == marker_name:
                 self.values.append(None)
@@ -177,9 +203,11 @@ def _marker_values(
 
         def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
             self._visit_definition_header(node)
+            self._visit_scope_declarations(node.body)
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
             self._visit_definition_header(node)
+            self._visit_scope_declarations(node.body)
 
         def visit_Lambda(self, node: ast.Lambda) -> None:
             for default in (*node.args.defaults, *node.args.kw_defaults):
@@ -195,6 +223,7 @@ def _marker_values(
                 self.visit(base)
             for keyword in node.keywords:
                 self.visit(keyword.value)
+            self._visit_scope_declarations(node.body)
 
     visitor = MarkerBindingVisitor()
     visitor.read_direct_declarations()
@@ -224,11 +253,11 @@ def scan_test_modules(test_root: Path = TEST_ROOT) -> tuple[TestModule, ...]:
     return tuple(records)
 
 
-def shards_for_test_root(test_root: Path = TEST_ROOT) -> tuple[Shard, ...]:
-    """Build domain shards from valid markers below ``test_root``."""
+def shards_for_records(records: tuple[TestModule, ...]) -> tuple[Shard, ...]:
+    """Build domain shards from a previously scanned record collection."""
 
     modules_by_domain = {definition.id: [] for definition in DOMAIN_DEFINITIONS}
-    for record in scan_test_modules(test_root):
+    for record in records:
         if len(record.marker_values) != 1:
             continue
         domain = record.marker_values[0]
@@ -238,6 +267,12 @@ def shards_for_test_root(test_root: Path = TEST_ROOT) -> tuple[Shard, ...]:
         Shard(definition.id, definition.name, tuple(modules_by_domain[definition.id]))
         for definition in DOMAIN_DEFINITIONS
     )
+
+
+def shards_for_test_root(test_root: Path = TEST_ROOT) -> tuple[Shard, ...]:
+    """Build domain shards from valid markers below ``test_root``."""
+
+    return shards_for_records(scan_test_modules(test_root))
 
 
 def regression_modules(
@@ -266,14 +301,15 @@ def regression_modules_for_test_root(test_root: Path = TEST_ROOT) -> tuple[str, 
     return regression_modules(scan_test_modules(test_root))
 
 
-# The runner imports this value directly.  It is generated once per process,
-# while the contract checker can rescan an arbitrary root for isolated tests.
-SHARDS: tuple[Shard, ...] = shards_for_test_root()
+# The runner imports these values directly.  Keep one default AST scan for the
+# two generated views; callers checking another checkout can rescan explicitly.
+_DEFAULT_TEST_MODULES = scan_test_modules()
+SHARDS: tuple[Shard, ...] = shards_for_records(_DEFAULT_TEST_MODULES)
 
 # Backward-compatible generated view for callers that imported the former
 # hand-maintained constant.  New code should call ``regression_modules()`` so
 # it can rescan an alternate test root when needed.
-REGRESSION_MODULES: tuple[str, ...] = regression_modules()
+REGRESSION_MODULES: tuple[str, ...] = regression_modules(_DEFAULT_TEST_MODULES)
 
 
 def get_shard(shard_id: str) -> Shard:
