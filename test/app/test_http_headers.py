@@ -115,6 +115,7 @@ class CampusCardHeaderTest(unittest.TestCase):
         self.assertEqual(restored.card_account, "card-id")
         self.assertEqual(restored.get.call_count, 2)
 
+
 class CampusCardProfileTest(unittest.TestCase):
     def test_profile_accepts_integer_string_and_absent_success_code(self):
         for payload in (

@@ -215,6 +215,7 @@ class CampusCard:
                 raise ServerError(1, f"{operation}返回了残缺流水数据")
             page += 1
 
+
 _INCOME_MARKERS = ("充值", "圈存", "退款", "补助", "recharge", "transfer-in", "refund", "subsidy")
 _EXPENSE_MARKERS = ("消费", "支出", "扣款", "consume", "expense", "transfer-out")
 
