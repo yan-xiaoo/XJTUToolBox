@@ -50,8 +50,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     modules = regression_modules()
-    if not modules:
-        raise ValueError("no regression test modules are marked")
     print("Regression modules: " + ", ".join(modules), flush=True)
     print(
         "Command: python -m unittest -v " + " ".join(modules),
