@@ -64,6 +64,8 @@ class CommonLoginSession(metaclass=ABCMeta):
     supports_webvpn = False
     # 自动检测为校外网络时，当前站点是否需要通过 WebVPN 访问。
     use_webvpn_when_off_campus = True
+    # 非空时覆盖共享后端的桌面 UA。一卡通、图书馆座位等站点会校验移动端标识。
+    user_agent = ""
 
     def __init__(self, backend: SessionBackend | None = None, site_key: str | None = None,
                  timeout: int = 15 * 60) -> None:
@@ -181,21 +183,26 @@ class CommonLoginSession(metaclass=ABCMeta):
         self.backend.reset_timeout()
 
         request_headers = kwargs.pop("headers", None)
+        if request_headers is not None and not isinstance(request_headers, Mapping):
+            raise TypeError("headers should be a mapping")
         skip_auth_check = kwargs.pop("_skip_auth_check", False) is True
         skip_webvpn_rewrite = kwargs.pop("_skip_webvpn_rewrite", False) is True
-        headers: dict[str, str] = {}
+        headers = requests.structures.CaseInsensitiveDict()
         # 使用公用 headers
         headers.update(self.backend.session.headers)
         # 增加站点特殊要求的 headers
         headers.update(self.headers)
+        # 站点默认 UA 先写入；调用方在下面传入的 headers 可以显式覆盖它。
+        if self.user_agent:
+            headers["User-Agent"] = self.user_agent
         if request_headers is not None:
-            if not isinstance(request_headers, Mapping):
-                raise TypeError("headers should be a mapping")
             for key, value in request_headers.items():
                 headers[str(key)] = str(value)
 
         prepared_url = self.prepare_url_for_access_mode(url, skip_webvpn_rewrite=skip_webvpn_rewrite)
-        prepared_headers = self.prepare_headers_for_access_mode(headers, skip_webvpn_rewrite=skip_webvpn_rewrite)
+        prepared_headers = self.prepare_headers_for_access_mode(
+            headers, skip_webvpn_rewrite=skip_webvpn_rewrite
+        )
         response = self.backend.session.request(method, prepared_url, headers=prepared_headers, **kwargs)
         if skip_auth_check or self._login_depth > 0 or not self.is_auth_failure_response(response):
             return response

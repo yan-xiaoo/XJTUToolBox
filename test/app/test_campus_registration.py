@@ -10,11 +10,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 
+from app.CampusCardInterface import CampusCardInterface
 from app.FitnessInterface import FitnessInterface
 from app.HomeInterface import HomeFrame, validate_card_ids
 from app.ProfileInterface import ProfileInterface
 from app.SchoolCalendarInterface import SchoolCalendarInterface
 from app.main_window import registerSession
+from app.sessions.campus_card_session import CampusCardSession
 from app.sessions.fitness_session import FitnessSession
 from app.sessions.hello_session import HelloSession
 from app.utils.session_manager import SessionManager
@@ -26,20 +28,22 @@ APP = QApplication.instance() or QApplication([])
 
 
 class CampusRegistrationSmokeTest(unittest.TestCase):
-    def test_hello_and_fitness_register_under_exact_keys(self):
+    def test_campus_sessions_register_under_exact_keys(self):
         registerSession()
+        self.assertIs(SessionManager.sessions["campus_card"], CampusCardSession)
         self.assertIs(SessionManager.sessions["hello"], HelloSession)
         self.assertIs(SessionManager.sessions["fitness"], FitnessSession)
 
-    def test_three_pages_construct_with_unique_object_names(self):
-        pages = [ProfileInterface(), FitnessInterface(), SchoolCalendarInterface()]
+    def test_four_pages_construct_with_unique_object_names(self):
+        pages = [CampusCardInterface(), ProfileInterface(), FitnessInterface(), SchoolCalendarInterface()]
         for page in pages:
             page.close()
-        self.assertEqual(len({page.objectName() for page in pages}), 3)
+        self.assertEqual(len({page.objectName() for page in pages}), 4)
 
     def test_home_card_ids_and_callbacks_target_new_pages(self):
         frame = HomeFrame.__new__(HomeFrame)
         frame.main_window = type("Main", (), {
+            "campus_card_interface": object(),
             "profile_interface": object(),
             "fitness_interface": object(),
             "school_calendar_interface": object(),
@@ -52,13 +56,13 @@ class CampusRegistrationSmokeTest(unittest.TestCase):
         self.assertEqual(tuple(cards), validate_card_ids(cards.keys()))
         with self.assertRaises(ValueError):
             validate_card_ids(["duplicate", "duplicate"])
-        for key in ("profile", "fitness", "school_calendar"):
+        for key in ("campus_card", "profile", "fitness", "school_calendar"):
             self.assertIn(key, cards)
             cards[key]["callback"]()
         self.assertEqual(
             [call.args[0] for call in frame.main_window.switchTo.call_args_list],
-            [frame.main_window.profile_interface, frame.main_window.fitness_interface,
-             frame.main_window.school_calendar_interface],
+            [frame.main_window.campus_card_interface, frame.main_window.profile_interface,
+             frame.main_window.fitness_interface, frame.main_window.school_calendar_interface],
         )
 
     def test_source_and_frozen_resource_paths_resolve(self):
@@ -72,8 +76,8 @@ class CampusRegistrationSmokeTest(unittest.TestCase):
 
     def test_new_modules_import_without_qt6_webengine(self):
         for name in (
-            "app.ProfileInterface", "app.FitnessInterface", "app.SchoolCalendarInterface",
-            "hello.profile", "fitness.score", "jwxt.calendar",
+            "app.CampusCardInterface", "app.ProfileInterface", "app.FitnessInterface",
+            "app.SchoolCalendarInterface", "hello.profile", "fitness.score", "jwxt.calendar",
         ):
             with self.subTest(name=name):
                 __import__(name)
