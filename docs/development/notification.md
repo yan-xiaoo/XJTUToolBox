@@ -312,10 +312,10 @@ python -m scripts.smoke_notification_sources --workers 8
 ```
 
 回归模块由各测试文件中的 `TEST_REGRESSION = True` 标记自动发现；新增或调整回归测试时只需修改
-对应测试文件，不要在本文档维护模块列表。本命令现在统一运行 CI 标记的 6 个历史回归模块；此前
-文档命令额外包含的 `test_ai_core`、`test_ctrl_c`、`test_qrcode_login` 不再由此命令单独运行，
-而 `test_notice_thread`、`test_schedule_lesson` 已纳入统一入口。若需核对当前集合，请运行
-`python -m test.ci.check_test_contract --format markdown`。
+对应测试文件，不要在本文档维护模块列表。本命令现在统一运行 CI 标记的历史回归模块；此前文档命令
+额外包含的 `test_ai_core`、`test_ctrl_c`、`test_qrcode_login` 不再由此命令单独运行，而
+`test_notice_thread`、`test_schedule_lesson` 已纳入统一入口。当前数量和完整列表请运行
+`python -m test.ci.check_test_contract --format markdown` 查看。
 
 全仓发现应显式指定顶层目录：`python -m unittest discover -s test -t .`。只写
 `python -m unittest discover -s test` 可能让测试子包遮蔽产品同名包。
