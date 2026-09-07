@@ -88,7 +88,26 @@ jobs:
           "
 
       # 4. 发布到三个不同的 AUR 仓库
+      - name: Wait for AUR SSH service to be available
+        id: check-aur
+        run: |
+          for i in {1..20}; do
+            AUR_STATUS=$(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new aur@aur.archlinux.org 2>&1 || true)
+            if echo "$AUR_STATUS" | grep -qi "down due to maintenance"; then
+              echo "⏳ AUR is in maintenance mode. Waiting 30 seconds... ($i/20)"
+              sleep 30
+              continue
+            fi
+            echo "✅ AUR SSH service is available."
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          done
+
+          echo "⚠️ AUR stayed in maintenance mode. Skipping publish steps in this run."
+          echo "available=false" >> "$GITHUB_OUTPUT"
+
       - name: Publish to AUR (xjtutoolbox)
+        if: steps.check-aur.outputs.available == 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
         with:
           pkgname: xjtutoolbox
@@ -99,6 +118,7 @@ jobs:
           commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
 
       - name: Publish to AUR (xjtutoolbox-bin)
+        if: steps.check-aur.outputs.available == 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
         with:
           pkgname: xjtutoolbox-bin
@@ -109,6 +129,7 @@ jobs:
           commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
 
       - name: Publish to AUR (xjtutoolbox-git)
+        if: steps.check-aur.outputs.available == 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
         with:
           pkgname: xjtutoolbox-git
@@ -117,3 +138,7 @@ jobs:
           commit_email: "github-actions[bot]@users.noreply.github.com"
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
+
+      - name: Notice skipped AUR publish
+        if: steps.check-aur.outputs.available != 'true'
+        run: echo "AUR maintenance detected. Re-run this workflow after maintenance to publish updates."
