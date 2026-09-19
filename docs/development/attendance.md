@@ -94,7 +94,7 @@ GUI 程序通过 `AttendanceSession` 接入 Session 管理层。它的关键配�
 | 类型 | 含义 |
 | --- | --- |
 | `FlowRecordType` | 刷卡流水状态 |
-| `WaterType` | 已结束课程的考勤状态 |
+| `WaterType` | 课程的考勤状态 |
 | `AttendanceFlow` | 一条刷卡流水 |
 | `AttendanceWaterRecord` | 一节课的考勤结果 |
 
@@ -114,6 +114,9 @@ GUI 程序通过 `AttendanceSession` 接入 Session 管理层。它的关键配�
 | `LATE` | 迟到 |
 | `ABSENCE` | 缺勤 |
 | `LEAVE` | 请假 |
+| `PENDING` | 待考勤：该课次尚未产生考勤结果 |
+| `NOT_REQUIRED` | 不考勤：该课次无需考勤 |
+| `UNKNOWN` | 未知：服务端返回了未识别的状态 |
 
 `AttendanceFlow` 的关键字段：
 

@@ -1,5 +1,3 @@
-import concurrent.futures
-
 import requests
 from PyQt5.QtCore import pyqtSignal
 
@@ -74,15 +72,10 @@ class ScheduleThread(ProcessThread):
         return True
 
     def try_attendance(self, term_name: str) -> list | None:
-        """尝试从考勤系统获取课表，15 秒超时后返回 None。"""
+        """尝试从考勤系统获取课表，失败后返回 None。"""
         try:
             self.messageChanged.emit("正在通过考勤系统获取课表...")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(self._attendance.getScheduleLessons, term_name=term_name)
-                return future.result(timeout=15)
-        except concurrent.futures.TimeoutError:
-            logger.warning("考勤系统课表超时 (15s)，切换至回退方案")
-            return None
+            return self._attendance.getScheduleLessons(term_name=term_name)
         except Exception as e:
             logger.warning("考勤系统课表获取失败: %s", e)
             return None

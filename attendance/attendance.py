@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 from auth import ATTENDANCE_URL, ATTENDANCE_WEBVPN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL, ServerError
 from auth.new_login import NewLogin, NewWebVPNLogin
 from auth.new_qrcode_login import QRCodeLoginMixin
+from schedule.schedule_service import ScheduleService
 
 
 def attendance_domain(is_postgraduate: bool) -> str:
@@ -26,19 +27,24 @@ class FlowRecordType(Enum):
 
 
 class WaterType(Enum):
-    """已经结束的课程的考勤状态"""
+    """课程的考勤状态"""
     NORMAL = 1  # 正常
     LATE = 2  # 迟到
     ABSENCE = 3  # 缺勤
     LEAVE = 5  # 请假
+    PENDING = 6  # 待考勤：该课次尚未产生考勤结果
+    NOT_REQUIRED = 7  # 不考勤：该课次无需考勤
+    UNKNOWN = 9  # 未知：服务端返回了未识别的状态
 
 
-# 新版考勤系统返回的考勤状态字符串
+# 新版考勤系统返回的考勤状态字符串，取值与前端状态标签一致
 _ATTENDANCE_STATUS = {
+    "PENDING": WaterType.PENDING,
     "NORMAL": WaterType.NORMAL,
     "LATE": WaterType.LATE,
     "ABSENT": WaterType.ABSENCE,
     "LEAVE": WaterType.LEAVE,
+    "NOT_REQUIRED": WaterType.NOT_REQUIRED,
 }
 
 # 学期名称到学期编号后缀的映射
@@ -119,7 +125,8 @@ class AttendanceWaterRecord:
     def from_response_json(cls, json, term_string: str):
         """从考勤系统的考勤记录接口返回中创建一条考勤记录"""
         return cls(str(json["resultId"]), term_string, json["startSection"], json["endSection"], json["courseWeek"],
-                   json["classroomName"], json["teacherName"], _ATTENDANCE_STATUS[json["attendanceStatus"]],
+                   json["classroomName"], json["teacherName"],
+                   _ATTENDANCE_STATUS.get(json["attendanceStatus"], WaterType.UNKNOWN),
                    datetime.datetime.strptime(json["attendanceDate"], "%Y-%m-%d").date())
 
 
@@ -176,27 +183,27 @@ class AttendanceNewWebVPNQRCodeLogin(QRCodeLoginMixin, AttendanceNewWebVPNLogin)
         super().__init__(session=session, is_postgraduate=is_postgraduate, visitor_id=visitor_id)
 
 
-AttendanceNewQRCodeWebVPNLogin = AttendanceNewWebVPNQRCodeLogin
-
-
 class Attendance:
     """
     此类封装了一系列考勤系统接口，可以用来查询考勤信息等。
     请注意：考勤系统对同一个 session 的连接存在时间限制。因此，不要持久性的存储此类的对象；每次使用时通过 AttendanceNewLogin 或
     AttendanceNewWebVPNLogin 重新得到一个登录的 session，然后重新创建此对象。
     """
-    def __init__(self, session, is_postgraduate=False):
+    def __init__(self, session, is_postgraduate=False, timeout=15):
         """
         创建一个接口对象
         :param session: 已经登录考勤系统的 session 对象
         :param is_postgraduate: 是否为研究生。true：是；false：不是（本科生）
         本科生和研究生的网站接口完全一致，但是二者不在同一域名下（bk-kq.xjtu.edu.cn 和 yjs-kq.xjtu.edu.cn）。此参数将用于决定访问哪个系统。
+        :param timeout: 单次请求的超时时间，单位为秒
         """
         self.session = session
         # 缓存学期列表
         self._semesters = None
         # 是否为研究生
         self.is_postgraduate = is_postgraduate
+        # 单次请求的超时时间
+        self.timeout = timeout
 
     def _request(self, method: str, path: str, **kwargs):
         """
@@ -204,7 +211,7 @@ class Attendance:
         :raise ServerError: 如果服务器返回了非 0 的业务错误码
         """
         url = f"https://{attendance_domain(self.is_postgraduate)}/sa{path}"
-        response = self.session.request(method, url, **kwargs)
+        response = self.session.request(method, url, timeout=self.timeout, **kwargs)
         response.raise_for_status()
         result = response.json()
         if result["code"] != 0:
@@ -248,19 +255,6 @@ class Attendance:
         semester = self.semesters[0]
         return {**semester, "name": self._term_name(semester)}
 
-    @staticmethod
-    def _parse_week_ranges(week_ranges: str) -> set[int]:
-        """
-        解析课表中的周次字符串，如 "1-16"、"1-8,10-16"
-        :param week_ranges: 原始周次字符串
-        :return: 周次集合
-        """
-        weeks = set()
-        for part in week_ranges.split(","):
-            start, _, end = part.partition("-")
-            weeks.update(range(int(start), int(end or start) + 1))
-        return weeks
-
     def getScheduleLessons(self, term_name: str = None) -> list:
         """
         获取整学期课表，返回与 jwxt 兼容的课程 dict 列表。
@@ -279,10 +273,12 @@ class Attendance:
         for course in courses:
             key = (course["courseName"], course["teacherName"], course["classroomName"],
                    course["dayOfWeek"], course["startSection"], course["endSection"])
-            groups.setdefault(key, set()).update(self._parse_week_ranges(course["weekRanges"]))
+            groups.setdefault(key, set()).update(ScheduleService.parse_weeks_string(course["weekRanges"]))
 
         lessons = []
         for (name, teacher, location, day, start_time, end_time), weeks in groups.items():
+            if not weeks:
+                continue
             skzc = "".join("1" if week in weeks else "0" for week in range(1, max(weeks) + 1))
             lessons.append({
                 "KCM": name,
