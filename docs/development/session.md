@@ -136,7 +136,7 @@ session = account.session_manager.get_session("jwxt")
 | `to_site_snapshot()` | 导出站点专用快照 |
 | `restore_site_snapshot()` | 恢复站点专用快照 |
 
-站点 Session 的 `headers` 用于保存站点专用认证信息。例如考勤系统登录后会保存 `Synjones-Auth`。
+站点 Session 的 `headers` 用于保存站点专用认证信息。例如考勤系统登录后会保存 `X-Business-Token`。
 
 ## 访问方式选择
 
@@ -359,7 +359,7 @@ class CustomSession(CommonLoginSession):
 
 如果目标系统登录成功后需要 token/header，登录器子类的 `postLogin()` 负责提取这些值。站点 Session 只需要使用对应登录器。
 
-例如考勤系统会在登录器中提取 `Synjones-Auth`，并写入站点 Session headers。
+例如考勤系统会在登录器中提取 `X-Business-Token`，并写入站点 Session headers。
 
 ### 3. 实现 validate_login()
 

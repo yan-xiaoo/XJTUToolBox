@@ -50,7 +50,7 @@ XJTUToolBox 是一个基于 PyQt5 的桌面应用，支持 Windows、macOS 与 G
 存在特殊登录机制的系统如下：
 
 1.  **`attendance`**: 本科生/研究生考勤系统
-    -   **要求**: 请求头需携带 `Synjones-Auth` 字段，其值为特定 Token。
+    -   **要求**: 统一认证后需用回调参数换取业务 Token，并在请求头携带 `X-Business-Token` 字段。
 2.  **`jwapp`**: [本科生移动教务系统](https://jwapp.xjtu.edu.cn)
     -   **要求**: 请求头需携带 `Authorization` 字段，其值为特定 Token。
 3.  **`ywtb`**: [新师生综合服务大厅](https://ywtb.xjtu.edu.cn)

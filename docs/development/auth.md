@@ -208,7 +208,7 @@ class CustomSiteLogin(NewLogin):
 
 | 系统 | 站点专用状态 |
 | --- | --- |
-| `attendance` | `Synjones-Auth` |
+| `attendance` | `X-Business-Token` |
 | `jwapp` | `Authorization` |
 | `ywtb` | `x-id-token`、`x-device-info`、`x-terminal-info` |
 

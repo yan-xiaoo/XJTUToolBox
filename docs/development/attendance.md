@@ -12,7 +12,7 @@
 - 研究生考勤系统访问。
 - 普通访问与 WebVPN 访问。
 - 用户名密码登录与二维码登录。
-- 登录后提取并维护 `Synjones-Auth` header。
+- 登录后提取并维护 `X-Business-Token` header。
 - 查询刷卡流水。
 - 查询课程维度的考勤状态。
 - 查询考勤系统中的课表数据。
@@ -31,18 +31,20 @@
 
 ## 系统入口与域名
 
-考勤系统按用户类型分为两个站点：
+考勤系统按用户类型分为两个站点，隶属于“电子考勤管理平台”（`kq.xjtu.edu.cn`）：
 
-| 用户类型 | 普通访问域名 | WebVPN 入口常量 |
+| 用户类型 | 域名 | 登录入口常量 |
 | --- | --- | --- |
-| 本科生 | `bkkq.xjtu.edu.cn` | `ATTENDANCE_WEBVPN_URL` |
-| 研究生 | `yjskq.xjtu.edu.cn` | `POSTGRADUATE_ATTENDANCE_WEBVPN_URL` |
+| 本科生 | `bk-kq.xjtu.edu.cn` | `ATTENDANCE_URL` / `ATTENDANCE_WEBVPN_URL` |
+| 研究生 | `yjs-kq.xjtu.edu.cn` | `POSTGRADUATE_ATTENDANCE_URL` / `POSTGRADUATE_ATTENDANCE_WEBVPN_URL` |
 
-`Attendance` 类中的 `_build_url()` 会根据 `is_postgraduate` 选择域名，并把接口路径拼接为完整 URL。新增 API 方法时，应继续使用 `_get()` / `_post()` 访问接口，让域名选择、HTTP 错误处理保持一致。
+两个站点的业务接口完全一致，统一位于 `/sa` 路径下。`Attendance` 类中的 `_request()` 会根据 `is_postgraduate` 选择域名，并把接口路径拼接为完整 URL，同时解析响应外壳（`{"code": 0, "data": ...}`）并返回其中的 `data`。新增 API 方法时，应继续使用 `_get()` / `_post()` 访问接口，让域名选择、错误处理保持一致。
 
-## 登录与 Synjones-Auth
+新版系统只提供统一认证入口，普通访问与 WebVPN 访问使用同一个入口地址，两者仅在是否通过 `webvpn.xjtu.edu.cn` 转发上有区别。
 
-考勤系统完成统一认证后，还需要在后续请求中携带 `Synjones-Auth` header。模块通过专用登录类提取 token 并写入 session headers。
+## 登录与 X-Business-Token
+
+考勤系统完成统一认证后，还需要在后续请求中携带 `X-Business-Token` header。模块通过专用登录类换取业务 token 并写入 session headers。
 
 | 登录类 | 访问方式 | 二维码 |
 | --- | --- | --- |
@@ -53,11 +55,12 @@
 
 这些登录类复用 `auth` 模块的统一认证状态机。普通登录类继承 `NewLogin`，WebVPN 登录类继承 `NewWebVPNLogin`，二维码登录类通过 `QRCodeLoginMixin` 复用扫码登录流程。
 
-考勤系统的 token 提取逻辑位于 `postLogin()`：
+考勤系统的 token 换取逻辑位于 `_AttendanceTokenMixin.postLogin()`：
 
-1. 统一认证完成后进入考勤系统入口。
-2. 从最终跳转 URL 中读取 `token` 参数。
-3. 写入 `self.session.headers["Synjones-Auth"]`。
+1. 统一认证完成后，浏览器会跳转到 `<考勤系统域名>/cas/callback?loginRequestId=...&ticket=...`。
+2. 从最终跳转 URL 中读取 `loginRequestId` 与 `ticket`。
+3. 向 `<考勤系统域名>/sa/auth/cas/exchange` 提交这两个参数，换取 `data.tokenValue`。
+4. 写入 `self.session.headers["X-Business-Token"]`。
 
 这个 header 是 `AttendanceSession.validate_login()` 判断考勤站点状态的前置条件，也是后续所有考勤接口请求的认证凭据。
 
@@ -82,7 +85,7 @@ GUI 程序通过 `AttendanceSession` 接入 Session 管理层。它的关键配�
 - 本科生账号使用 `NewLogin.UNDERGRADUATE`。
 - 研究生账号使用 `NewLogin.POSTGRADUATE`。
 
-`validate_login()` 使用 `/attendance-student/global/getStuInfo` 验证登录态。它会先检查 `Synjones-Auth` 是否存在，再访问当前账号类型对应的考勤系统域名。
+`validate_login()` 使用 `/sa/student/home` 验证登录态。它会先检查 `X-Business-Token` 是否存在，再访问当前账号类型对应的考勤系统域名。
 
 ## 核心数据结构
 
@@ -101,7 +104,6 @@ GUI 程序通过 `AttendanceSession` 接入 Session 管理层。它的关键配�
 | --- | --- |
 | `VALID` | 有效刷卡 |
 | `INVALID` | 无效刷卡 |
-| `REPEATED` | 重复刷卡 |
 | `UNKNOWN` | 未知状态 |
 
 `WaterType` 包含：
@@ -111,7 +113,6 @@ GUI 程序通过 `AttendanceSession` 接入 Session 管理层。它的关键配�
 | `NORMAL` | 正常 |
 | `LATE` | 迟到 |
 | `ABSENCE` | 缺勤 |
-| `EARLY_LEAVE` | 早退 |
 | `LEAVE` | 请假 |
 
 `AttendanceFlow` 的关键字段：
@@ -147,7 +148,7 @@ GUI 程序通过 `AttendanceSession` 接入 Session 管理层。它的关键配�
 
 课程考勤状态来自 `attendanceDetailByTime()`。它包含周数、节次、地点、教师、日期和最终考勤状态，因此可以较自然地绑定到课表中的某节课上。`ScheduleAttendanceThread` 会使用这类数据为课表更新考勤状态。
 
-考勤流水来自 `getFlowRecordWithPage()`、`getFlowRecord()` 或 `getFlowRecordByTime()`。它表示刷卡行为本身，适合回答“有没有刷卡、什么时候刷卡、在哪个教室刷卡、刷卡是否有效”。流水记录和课程的关联信息较少，直接绑定到某节课上需要额外推断。
+考勤流水来自 `getFlowRecordWithPage()` 或 `getFlowRecordByTime()`。它表示刷卡行为本身，适合回答“有没有刷卡、什么时候刷卡、在哪个教室刷卡、刷卡是否有效”。流水记录和课程的关联信息较少，直接绑定到某节课上需要额外推断。新版考勤系统只区分“有效流水”（`effective=true`）与“未匹配”（`effective=false`），因此 `AttendanceFlow.type_` 只会是 `VALID` 或 `INVALID`。
 
 如果功能需要把考勤结果显示到课表格子上，优先使用 `attendanceDetailByTime()` 返回的 `AttendanceWaterRecord`。如果功能需要展示刷卡历史或分页查询流水，使用 `getFlowRecordWithPage()` / `getFlowRecordByTime()` 返回的 `AttendanceFlow`。
 
@@ -155,39 +156,32 @@ GUI 程序通过 `AttendanceSession` 接入 Session 管理层。它的关键配�
 
 `Attendance` 类是考勤系统 API 包装器。它接收一个已经登录考勤系统的 session，并根据 `is_postgraduate` 选择本科生或研究生域名。
 
-学生与学期：
+学期：
 
 | 方法 | 用途 |
 | --- | --- |
-| `getStudentInfo()` | 获取当前登录学生信息 |
-| `getNearTerm()` | 获取当前学期信息 |
-| `getTermNoMap()` | 获取学期字符串到考勤系统学期编号的映射 |
+| `getNearTerm()` | 获取当前学期信息（含学期编号 `name`、开始日期 `startDate`） |
 
-考勤统计：
+考勤记录：
 
 | 方法 | 用途 |
 | --- | --- |
-| `attendanceCurrentWeek()` | 获取当前周课程考勤统计 |
-| `attendanceByTime(start_date, end_date)` | 获取时间段内按课程聚合的考勤统计 |
-| `attendanceNumberByTime(start_date, end_date)` | 获取时间段内全部课程考勤总数 |
-| `attendanceDetailByTime(start_date, end_date, current, page_size, termNo)` | 获取时间段内课程考勤状态详情 |
+| `attendanceDetailByTime(start_date, end_date, current, page_size)` | 获取时间段内课程考勤状态详情 |
 
 课表：
 
 | 方法 | 用途 |
 | --- | --- |
-| `getWeekSchedule(week, termNo)` | 获取某一周课表 |
-| `getSchedule(termNo)` | 获取整个学期课表 |
+| `getScheduleLessons(term_name)` | 获取整个学期课表（jwxt 兼容格式） |
 
 考勤流水：
 
 | 方法 | 用途 |
 | --- | --- |
 | `getFlowRecordWithPage(current, page_size)` | 分页获取流水，并返回总数、页码等信息 |
-| `getFlowRecord(current, page_size)` | 获取流水列表 |
 | `getFlowRecordByTime(start_date, end_date)` | 按日期范围获取流水列表 |
 
-接口返回 `success == False` 时，方法会抛出 `ServerError`。HTTP 状态错误由 `_get()` / `_post()` 中的 `raise_for_status()` 抛出。
+响应中的 `code != 0` 时，方法会抛出 `ServerError`。HTTP 状态错误由 `_request()` 中的 `raise_for_status()` 抛出。
 
 ## 典型调用流程
 
@@ -256,7 +250,7 @@ records = util.getFlowRecordWithPage(1, 10)
 
 当前有两个 UI 入口使用考勤模块。
 
-`AttendanceInterface` 是独立考勤流水页面。它创建 `AttendanceFlowThread`，接收 `flowRecord` 后把 `AttendanceFlow` 列表显示到表格中。表格中会将 `FlowRecordType` 映射为“有效”“无效”“重复”“未知”。
+`AttendanceInterface` 是独立考勤流水页面。它创建 `AttendanceFlowThread`，接收 `flowRecord` 后把 `AttendanceFlow` 列表显示到表格中。表格中会将 `FlowRecordType` 映射为“有效”“无效”“未知”。
 
 `ScheduleInterface` 在课表页面中集成考勤能力。它创建 `ScheduleAttendanceThread` 和 `ScheduleAttendanceMonitorThread`，接收 `AttendanceWaterRecord` 与 `AttendanceFlow` 后，把课程考勤结果合并到课表显示和本地课表数据库状态中。
 
@@ -276,10 +270,10 @@ records = util.getFlowRecordWithPage(1, 10)
 
 ## 维护注意事项
 
-- 考勤系统依赖 `Synjones-Auth`，登录后 header 丢失会导致验证失败。
-- 本科生和研究生域名不同，新增接口时通过 `_build_url()` 拼接地址。
-- 新增 API 方法时统一检查 `result["success"]`，失败时抛出 `ServerError`。
-- 日期参数通常使用 `%Y-%m-%d`，部分接口可接受 `%Y-%m-%d %H:%M:%S`。
+- 考勤系统依赖 `X-Business-Token`，登录后 header 丢失会导致验证失败。
+- 本科生和研究生域名不同，新增接口时通过 `_request()` 拼接地址。
+- 新增 API 方法时统一检查 `result["code"] != 0`，失败时抛出 `ServerError`。
+- 日期参数通常使用 `%Y-%m-%d`。
 - 课程维度结果优先解析为 `AttendanceWaterRecord`。
 - 刷卡流水结果优先解析为 `AttendanceFlow`。
 - WebVPN 访问方式由 `AttendanceSession` 和 `CommonLoginSession` 处理，API 方法保持接口路径和普通域名逻辑。
@@ -288,9 +282,9 @@ records = util.getFlowRecordWithPage(1, 10)
 ## 已知限制
 
 - 考勤系统接口有时响应较慢。
-- 考勤流水接口返回的总页数信息不可靠，当前实现根据 `totalCount` 和 `page_size` 重新计算。
 - 部分字段命名来自学校接口，含义按当前功能使用场景解释。
-- 考勤系统登录态和 `Synjones-Auth` 有时效，调用前应通过 `AttendanceSession.ensure_login()` 确认。
+- 考勤系统登录态和 `X-Business-Token` 有时效，调用前应通过 `AttendanceSession.ensure_login()` 确认。
+- 服务端只返回刷卡的布尔有效性，无法区分“重复刷卡”与“无效刷卡”；本地缓存中无法识别的状态会归为 `UNKNOWN`。
 
 ## 继续阅读
 

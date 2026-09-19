@@ -33,8 +33,7 @@ class StyleSheet(StyleSheetBase, Enum):
 
 
 class Color:
-    # 课表不同状态的不同颜色
+    # 考勤流水不同状态的不同颜色
     INVALID_COLOR = QColor(255, 0, 0)
     VALID_COLOR = QColor(0, 255, 0)
-    REPEAT_COLOR = QColor(0, 0, 255)
     UNKNOWN_COLOR = QColor(122, 122, 122)

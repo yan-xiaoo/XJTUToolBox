@@ -187,7 +187,7 @@ class SessionManagerTestCase(unittest.TestCase):
         self.assertTrue(response.closed)
 
     def test_campus_probe_rejects_bad_gateway(self) -> None:
-        """校外访问 bkkq 返回 5xx 时不应被当作可直连校园网。"""
+        """校外访问考勤系统返回 5xx 时不应被当作可直连校园网。"""
         response = ProbeResponse(502)
         original_get = session_manager_module.requests.get
 

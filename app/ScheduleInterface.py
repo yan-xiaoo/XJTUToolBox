@@ -759,9 +759,6 @@ class ScheduleInterface(ScrollArea):
         if end_date > datetime.date.today():
             end_date = datetime.date.today()
 
-        term_number = self.schedule_service.getCurrentTerm()
-        self.schedule_attendance_thread.term_number = term_number
-
         self.schedule_attendance_thread.start_date = start_date
         self.schedule_attendance_thread.end_date = end_date
         self.lock()
@@ -1183,8 +1180,8 @@ class ScheduleInterface(ScrollArea):
             updated.append(lesson)
 
         for page in water_page:
-            # 不管是有效的还是重复的，都说明这门课已经打卡了
-            if page.type_ == FlowRecordType.VALID or page.type_ == FlowRecordType.REPEATED:
+            # 只有有效的流水说明这门课已经打卡了
+            if page.type_ == FlowRecordType.VALID:
                 water_time = datetime.datetime.strptime(
                     page.water_time, "%Y-%m-%d %H:%M:%S")
                 date = water_time.date()

@@ -1,6 +1,6 @@
 import typing
 
-from PyQt5.QtWidgets import QWidget, QStackedWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractItemView
+from PyQt5.QtWidgets import QWidget, QStackedWidget, QTableWidgetItem, QFrame, QAbstractItemView
 from PyQt5.QtCore import Qt, pyqtSlot
 from qfluentwidgets import ScrollArea, VBoxLayout, Pivot, BodyLabel, PrimaryPushButton, TableWidget, \
     CommandBar, Action, FluentIcon, InfoBar, InfoBarPosition, PipsPager, PipsScrollButtonDisplayMode
@@ -239,8 +239,6 @@ class AttendanceFlowWidget(QFrame):
             return self.tr("有效")
         elif type_ == FlowRecordType.INVALID:
             return self.tr("无效")
-        elif type_ == FlowRecordType.REPEATED:
-            return self.tr("重复")
         else:
             return self.tr("未知")
 
@@ -254,8 +252,6 @@ class AttendanceFlowWidget(QFrame):
                 statusWidget.setForeground(Color.VALID_COLOR)
             elif record[i].type_ == FlowRecordType.INVALID:
                 statusWidget.setForeground(Color.INVALID_COLOR)
-            elif record[i].type_ == FlowRecordType.REPEATED:
-                statusWidget.setForeground(Color.REPEAT_COLOR)
             else:
                 statusWidget.setForeground(Color.UNKNOWN_COLOR)
             self.tableWidget.setItem(i, 2, statusWidget)

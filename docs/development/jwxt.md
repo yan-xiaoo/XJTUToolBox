@@ -50,7 +50,7 @@ GUI 程序通过 `JWXTSession` 复用本科教务系统登录态。它的关键�
 - `AccessMode.NORMAL`：`NewLogin` / `NewQRCodeLogin`
 - `AccessMode.WEBVPN`：`NewWebVPNLogin` / `NewWebVPNQRCodeLogin`
 
-登录入口是 `JWXT_LOGIN_URL`。本科教务系统主要依赖统一认证后的 cookie，登录后没有像考勤系统那样额外提取 `Synjones-Auth`。
+登录入口是 `JWXT_LOGIN_URL`。本科教务系统主要依赖统一认证后的 cookie，登录后没有像考勤系统那样额外提取 `X-Business-Token`。
 
 `validate_login()` 会访问 `currentUser.do` 接口，并检查返回结果中 `code == "0"` 且 `datas` 为字典。这个接口也是 `JWXTUtil.getUserRoles()` 使用的用户信息接口。
 

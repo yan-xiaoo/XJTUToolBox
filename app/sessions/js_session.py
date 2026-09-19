@@ -108,7 +108,7 @@ class JsSession(CommonLoginSession):
         """获取整学期课表，返回 jwxt 兼容的课程 dict 列表。
 
         :param xnxqdm: 学期代码如 '2025-2026-2'。None 时根据当前日期推测。
-        :param total_weeks: 学期总周数。调用方应传入实际值（如从 bkkq getNearTerm 获取）。
+        :param total_weeks: 学期总周数。调用方应传入实际值（如从考勤系统 getNearTerm 获取）。
         """
         if xnxqdm is None:
             import datetime

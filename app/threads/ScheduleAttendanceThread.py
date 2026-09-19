@@ -20,13 +20,11 @@ class ScheduleAttendanceThread(ProcessThread):
     # 获取考勤流水完成（与监视线程通信）
     water_page_finished = pyqtSignal()
 
-    def __init__(self, term_number=None, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.util = None
         self.start_date = None
         self.end_date = None
-        self.term_number = term_number
-        self.term_map = None
         # 考勤流水（打卡信息）
         self.water_page = []
         # 考勤信息
@@ -109,18 +107,9 @@ class ScheduleAttendanceThread(ProcessThread):
 
             self.progressChanged.emit(66)
             self.messageChanged.emit(self.tr("正在查询考勤信息..."))
-            if self.term_map is None:
-                self.term_map = self.util.getTermNoMap()
-
-            try:
-                records = self.util.attendanceDetailByTime(self.start_date.strftime("%Y-%m-%d"), self.end_date.strftime("%Y-%m-%d"), 1, 50,
-                                                           termNo=self.term_map[self.term_number])
-            except KeyError:
-                self.error.emit(self.tr("学期错误"), self.tr("当前学期尚无法查询考勤信息"))
-                self.canceled.emit()
-                return
-
-            self.records = records
+            self.records = self.util.attendanceDetailByTime(
+                self.start_date.strftime("%Y-%m-%d"),
+                self.end_date.strftime("%Y-%m-%d"), 1, 50)
             self.progressChanged.emit(100)
 
         except QRCodeLoginCancelledError as e:
@@ -160,5 +149,5 @@ class ScheduleAttendanceThread(ProcessThread):
             self.error.emit(self.tr("其他错误"), str(e))
             self.canceled.emit()
         else:
-            self.result.emit(records, water_page)
+            self.result.emit(self.records, water_page)
             self.hasFinished.emit()

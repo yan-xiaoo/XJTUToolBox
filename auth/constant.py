@@ -9,14 +9,13 @@ WEBVPN_LOGIN_URL = "https://webvpn.xjtu.edu.cn/login?cas_login=true"
 # 思源学堂（新版）登录地址
 LMS_LOGIN_URL = "https://lms.xjtu.edu.cn"
 # 本科生考勤系统登录地址
-ATTENDANCE_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1372&redirectUri=https://bkkq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
-ATTENDANCE_WEBVPN_URL = "http://bkkq.xjtu.edu.cn"
+# 新版考勤系统（电子考勤管理平台）只提供统一认证入口，普通访问与 WebVPN 访问使用同一个地址，
+# 两者仅在是否通过 webvpn.xjtu.edu.cn 转发上有区别。
+ATTENDANCE_URL = "https://bk-kq.xjtu.edu.cn/sa/auth/cas/login/student-pc"
+ATTENDANCE_WEBVPN_URL = "https://bk-kq.xjtu.edu.cn/sa/auth/cas/login/student-pc"
 # 研究生考勤登录地址
-POSTGRADUATE_ATTENDANCE_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1245&redirectUri=https://yjskq.xjtu.edu.cn/berserker-auth/auth/attendance-pc/casReturn&responseType=code&scope=user_info&state=1234"
-POSTGRADUATE_ATTENDANCE_WEBVPN_URL = "http://yjskq.xjtu.edu.cn"
-
-# 没有 AppId 的考勤系统登录地址
-BASE_URL = "https://org.xjtu.edu.cn/openplatform/login.html"
+POSTGRADUATE_ATTENDANCE_URL = "https://yjs-kq.xjtu.edu.cn/sa/auth/cas/login/student-pc"
+POSTGRADUATE_ATTENDANCE_WEBVPN_URL = "https://yjs-kq.xjtu.edu.cn/sa/auth/cas/login/student-pc"
 
 # 移动教务的登录地址
 JWAPP_URL = "https://org.xjtu.edu.cn/openplatform/oauth/authorize?appId=1370&redirectUri=http://jwapp.xjtu.edu.cn/app/index&responseType=code&scope=user_info&state=1234"

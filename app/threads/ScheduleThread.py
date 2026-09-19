@@ -18,7 +18,7 @@ from jwxt.schedule import Schedule
 class ScheduleThread(ProcessThread):
     """
     获取课表相关信息的线程。
-    课表来源优先级：考勤系统 (bkkq) > 教学服务平台 (js.xjtu.edu.cn)
+    课表来源优先级：考勤系统 (bk-kq / yjs-kq) > 教学服务平台 (js.xjtu.edu.cn)
     考试来源：教务系统 (jwxt)
     """
     schedule = pyqtSignal(dict)
@@ -73,18 +73,18 @@ class ScheduleThread(ProcessThread):
         self.setIndeterminate.emit(False)
         return True
 
-    def try_bkkq(self, term_name: str) -> list | None:
-        """尝试从 bkkq 获取课表，15 秒超时后返回 None。"""
+    def try_attendance(self, term_name: str) -> list | None:
+        """尝试从考勤系统获取课表，15 秒超时后返回 None。"""
         try:
             self.messageChanged.emit("正在通过考勤系统获取课表...")
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(self._attendance.getScheduleLessons, term_name=term_name)
                 return future.result(timeout=15)
         except concurrent.futures.TimeoutError:
-            logger.warning("bkkq 课表超时 (15s)，切换至回退方案")
+            logger.warning("考勤系统课表超时 (15s)，切换至回退方案")
             return None
         except Exception as e:
-            logger.warning("bkkq 课表获取失败: %s", e)
+            logger.warning("考勤系统课表获取失败: %s", e)
             return None
 
     def try_js(self, term_name: str) -> list | None:
@@ -113,27 +113,27 @@ class ScheduleThread(ProcessThread):
             return
 
         try:
-            # ---- 课表来源：bkkq → js 回退 ----
+            # ---- 课表来源：考勤系统 → js 回退 ----
             term_name = self.term_number
             self.progressChanged.emit(25)
 
-            # Step 1: 尝试 bkkq
-            bkkq_ok = self.login_attendance()
+            # Step 1: 尝试考勤系统
+            attendance_ok = self.login_attendance()
             lessons = None
             term_info = None
-            if bkkq_ok:
-                lessons = self.try_bkkq(term_name)
+            if attendance_ok:
+                lessons = self.try_attendance(term_name)
                 if lessons is not None:
                     term_info = self._attendance.getNearTerm()
 
-            # Step 2: bkkq 失败 → js 回退
+            # Step 2: 考勤系统失败 → js 回退
             if lessons is None:
                 lessons = self.try_js(term_name)
 
             if lessons is None:
                 raise ServerError(500, self.tr("无法获取课表：所有数据源均失败"))
 
-            start_date = term_info["startdate"] if term_info else None
+            start_date = term_info["startDate"] if term_info else None
             term_number = term_name or (term_info["name"] if term_info else "")
 
             self.progressChanged.emit(66)

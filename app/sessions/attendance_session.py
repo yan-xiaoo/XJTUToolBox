@@ -8,13 +8,14 @@ from attendance.attendance import (
     AttendanceNewQRCodeLogin,
     AttendanceNewWebVPNLogin,
     AttendanceNewWebVPNQRCodeLogin,
+    attendance_domain,
 )
 from auth.new_login import NewLogin
 
 
 class AttendanceSession(CommonLoginSession):
     """
-    bkkq.xjtu.edu.cn 登录用的 Session
+    bk-kq.xjtu.edu.cn / yjs-kq.xjtu.edu.cn 登录用的 Session
     """
     site_key = "attendance"
     site_name = "考勤系统"
@@ -42,19 +43,18 @@ class AttendanceSession(CommonLoginSession):
     _re_login = _login
 
     def validate_login(self) -> bool:
-        """通过考勤系统学生信息接口验证站点登录态。"""
-        if "Synjones-Auth" not in self.headers:
+        """通过考勤系统首页接口验证站点登录态。"""
+        if "X-Business-Token" not in self.headers:
             return False
 
         is_postgraduate = False
         if self._login_context is not None:
             is_postgraduate = self._login_context.kwargs.get("is_postgraduate") is True
 
-        domain = "yjskq.xjtu.edu.cn" if is_postgraduate else "bkkq.xjtu.edu.cn"
-        url = f"https://{domain}/attendance-student/global/getStuInfo"
+        url = f"https://{attendance_domain(is_postgraduate)}/sa/student/home"
 
-        response = self.post(url, timeout=10, _skip_auth_check=True)
-        if not response.ok or self.is_auth_failure_response(response):
+        response = self.get(url, timeout=10, _skip_auth_check=True)
+        if not response.ok:
             return False
 
         try:
@@ -62,4 +62,4 @@ class AttendanceSession(CommonLoginSession):
         except ValueError:
             return False
 
-        return result.get("success") is True
+        return result.get("code") == 0

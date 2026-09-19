@@ -1,44 +1,64 @@
 from __future__ import annotations
 
 import datetime
-
 import math
-import time
 from enum import Enum
-
-import requests
+from urllib.parse import parse_qs, urlparse
 
 from auth import ATTENDANCE_URL, ATTENDANCE_WEBVPN_URL, POSTGRADUATE_ATTENDANCE_URL, POSTGRADUATE_ATTENDANCE_WEBVPN_URL, ServerError
 from auth.new_login import NewLogin, NewWebVPNLogin
 from auth.new_qrcode_login import QRCodeLoginMixin
-from schedule import Schedule, WeekSchedule, Lesson
+
+
+def attendance_domain(is_postgraduate: bool) -> str:
+    """
+    本科与研究生考勤系统接口完全一致，但部署在不同域名下。
+    :param is_postgraduate: 是否为研究生
+    """
+    return "yjs-kq.xjtu.edu.cn" if is_postgraduate else "bk-kq.xjtu.edu.cn"
 
 
 class FlowRecordType(Enum):
-    """考勤流水的状态，一共三种。"""
-    INVALID = 0  # 无效：指在某个教室没有课但刷了卡
-    VALID = 1  # 有效：指在有课的教室成功刷卡
-    REPEATED = 2  # 重复：在某个有课的教室多次刷卡
-    UNKNOWN = 9  # 未知：不清楚是什么情况
+    """考勤流水的状态。新版考勤系统只区分“有效流水”与“未匹配”。"""
+    INVALID = 0  # 无效：刷卡时不在任何课程的考勤范围内
+    VALID = 1  # 有效：刷卡时间落在某门课程的考勤范围内
+    UNKNOWN = 9  # 未知：本地缓存中的状态无法识别
 
 
 class WaterType(Enum):
-    """已经结束的课程的考勤状态，一共五种"""
-    NORMAL = 1 # 正常
-    LATE = 2 # 迟到
-    ABSENCE = 3 # 缺勤
-    EARLY_LEAVE = 4 # 早退
-    LEAVE = 5 # 请假
+    """已经结束的课程的考勤状态"""
+    NORMAL = 1  # 正常
+    LATE = 2  # 迟到
+    ABSENCE = 3  # 缺勤
+    LEAVE = 5  # 请假
+
+
+# 新版考勤系统返回的考勤状态字符串
+_ATTENDANCE_STATUS = {
+    "NORMAL": WaterType.NORMAL,
+    "LATE": WaterType.LATE,
+    "ABSENT": WaterType.ABSENCE,
+    "LEAVE": WaterType.LEAVE,
+}
+
+# 学期名称到学期编号后缀的映射
+_SEMESTER_ORDINALS = {
+    "第一学期": 1,
+    "第二学期": 2,
+    "第三学期": 3,
+    "第四学期": 4,
+}
 
 
 class AttendanceFlow:
+    """一次刷卡流水"""
     def __init__(self, sbh: str, place: str, water_time: str, type_: FlowRecordType):
         """
         创建一个考勤记录信息
-        :param sbh: 此考勤信息的编号，可以在接口中查询到此考勤相关的课程、教师等很多信息
+        :param sbh: 此考勤信息的编号
         :param place: 打卡的地点（教室）
         :param water_time: 打卡的时间
-        :param type_: 打卡类型，有效/无效/重复
+        :param type_: 打卡类型，有效/无效
         """
         self.sbh = sbh
         self.place = place
@@ -50,28 +70,37 @@ class AttendanceFlow:
 
     @classmethod
     def from_json(cls, json):
+        """从本地缓存中恢复一条考勤流水"""
         try:
             type_ = FlowRecordType(int(json["isdone"]))
         except ValueError:
             type_ = FlowRecordType.UNKNOWN
         return cls(json["sBh"], json["eqno"], json["watertime"], type_)
 
+    @classmethod
+    def from_response_json(cls, json):
+        """从考勤系统的流水接口返回中创建一条考勤流水"""
+        return cls(json["id"], json["classroomName"], json["collectTime"],
+                   FlowRecordType.VALID if json["effective"] else FlowRecordType.INVALID)
+
     def json(self):
         return {"sBh": self.sbh, "eqno": self.place, "watertime": self.water_time, "isdone": self.type_.value}
 
 
 class AttendanceWaterRecord:
+    """一条课程考勤记录"""
     def __init__(self, sbh: str, term_string: str, start_time: int, end_time: int, week: int, location: str, teacher: str, status: WaterType, date: datetime.date):
         """
         创建一个考勤流水信息
-        :param sbh: 此考勤信息的编号，可以在接口中查询到此考勤相关的课程、教师等很多信息
-        :param term_string: 学期字符串
-        :param start_time: 开始时间
-        :param end_time: 结束时间
+        :param sbh: 此考勤信息的编号
+        :param term_string: 学期字符串，如 "2026-2027-1"
+        :param start_time: 开始节次
+        :param end_time: 结束节次
         :param week: 周数
         :param location: 地点
         :param teacher: 教师
         :param status: 状态
+        :param date: 上课日期
         """
         self.sbh = sbh
         self.term_string = term_string
@@ -87,94 +116,67 @@ class AttendanceWaterRecord:
         return f"{self.__class__.__name__}(sbh={self.sbh}, term_string={self.term_string}, start_time={self.start_time}, end_time={self.end_time}, week={self.week}, location={self.location}, teacher={self.teacher}, status={self.status}, date={self.date})"
 
     @classmethod
-    def from_json(cls, json):
-        return cls(json["sBh"], json["termString"], json["startTime"], json["endTime"], json["week"], json["location"], json["teacher"], WaterType(int(json["status"])), datetime.datetime.strptime(json["date"], "%Y-%m-%d").date())
-
-    @classmethod
-    def from_response_json(cls, json):
-        # 研究生系统的学年学期编号在 calendarBean 里，本科生系统在 stuClassBean 里
-        return cls(str(json["classWaterBean"]["bh"]), json["calendarBean"]["name"] or json["stuClassBean"]["termNo"], json["accountBean"]["startJc"], json["accountBean"]["endJc"]
-                   , json["accountBean"]["week"], json["buildBean"]["name"] + "-" + json["roomBean"]["roomnum"], json["teachNameList"], WaterType(int(json["classWaterBean"]["status"])),
-                   datetime.datetime.strptime(json["accountBean"]["checkdate"], "%Y-%m-%d").date())
-
-    def json(self):
-        return {"sBh": self.sbh, "termString": self.term_string, "startTime": self.start_time, "endTime": self.end_time, "week": self.week, "location": self.location, "teacher": self.teacher, "status": self.status.value, "date": self.date.strftime("%Y-%m-%d")}
+    def from_response_json(cls, json, term_string: str):
+        """从考勤系统的考勤记录接口返回中创建一条考勤记录"""
+        return cls(str(json["resultId"]), term_string, json["startSection"], json["endSection"], json["courseWeek"],
+                   json["classroomName"], json["teacherName"], _ATTENDANCE_STATUS[json["attendanceStatus"]],
+                   datetime.datetime.strptime(json["attendanceDate"], "%Y-%m-%d").date())
 
 
-class AttendanceNewLogin(NewLogin):
+class _AttendanceTokenMixin:
     """
-        考勤系统在登录后的每一个请求的头部都需要添加一个特殊的 header: "Synjones-Auth"
-        此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
-        """
+    新版考勤系统在完成统一认证后，还需要用回调 URL 中的 loginRequestId 与 ticket
+    向 /sa/auth/cas/exchange 换取业务 token，并在后续请求中携带 X-Business-Token header。
+    """
+    is_postgraduate: bool
 
-    def __init__(self, session: requests.Session = None, is_postgraduate=False, visitor_id=None):
+    def postLogin(self, login_response) -> None:
+        query = parse_qs(urlparse(login_response.url).query)
+        response = self._post(
+            f"https://{attendance_domain(self.is_postgraduate)}/sa/auth/cas/exchange",
+            json={"loginRequestId": query["loginRequestId"][0], "ticket": query["ticket"][0]},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        result = response.json()
+        if result["code"] != 0:
+            raise ServerError(result["code"], result["message"])
+        self.session.headers.update({"X-Business-Token": result["data"]["tokenValue"]})
+
+
+class AttendanceNewLogin(_AttendanceTokenMixin, NewLogin):
+    """通过统一身份认证登录考勤系统。"""
+
+    def __init__(self, session=None, is_postgraduate=False, visitor_id=None):
         super().__init__(POSTGRADUATE_ATTENDANCE_URL if is_postgraduate else ATTENDANCE_URL, session, visitor_id=visitor_id)
         self.is_postgraduate = is_postgraduate
 
-    def postLogin(self, login_response) -> None:
-        response = self._get(POSTGRADUATE_ATTENDANCE_URL if self.is_postgraduate else ATTENDANCE_URL, allow_redirects=True)
-        try:
-            token = response.url.split("token=")[1].split('&')[0]
-        except IndexError:
-            raise ServerError(500, "登录失败：服务器出现错误。")
-        self.session.headers.update({"Synjones-Auth": "bearer " + token})
 
+class AttendanceNewWebVPNLogin(_AttendanceTokenMixin, NewWebVPNLogin):
+    """通过 WebVPN 登录考勤系统。"""
 
-class AttendanceNewWebVPNLogin(NewWebVPNLogin):
-    """
-        考勤系统在登录后的每一个请求的头部都需要添加一个特殊的 header: "Synjones-Auth"
-        此类会在执行登录后，把登录的 header 添加到 session 头部，这样每次访问都会带上这个 token
-        """
-
-    def __init__(self, session: requests.Session = None, is_postgraduate=False, visitor_id=None):
+    def __init__(self, session=None, is_postgraduate=False, visitor_id=None):
         super().__init__(POSTGRADUATE_ATTENDANCE_WEBVPN_URL if is_postgraduate else ATTENDANCE_WEBVPN_URL, session=session,
                          visitor_id=visitor_id)
-
-    def postLogin(self, login_response) -> None:
-        try:
-            token = login_response.url.split("token=")[1].split('&')[0]
-        except IndexError:
-            raise ServerError(500, "登录失败：服务器出现错误。")
-        self.session.headers.update({"Synjones-Auth": "bearer " + token})
-
-        return self.session
+        self.is_postgraduate = is_postgraduate
 
 
 class AttendanceNewQRCodeLogin(QRCodeLoginMixin, AttendanceNewLogin):
-    """
-    使用二维码登录考勤系统，并复用考勤系统 token 提取逻辑。
-    """
+    """使用二维码登录考勤系统。"""
 
-    def __init__(self, session: requests.Session | None = None, is_postgraduate: bool = False,
+    def __init__(self, session: object | None = None, is_postgraduate: bool = False,
                  visitor_id: str | None = None) -> None:
-        """
-        创建考勤系统二维码登录器。
-        """
         super().__init__(session=session, is_postgraduate=is_postgraduate, visitor_id=visitor_id)
 
 
 class AttendanceNewWebVPNQRCodeLogin(QRCodeLoginMixin, AttendanceNewWebVPNLogin):
-    """
-    通过 WebVPN 使用二维码登录考勤系统，并复用考勤系统 token 提取逻辑。
-    """
+    """通过 WebVPN 使用二维码登录考勤系统。"""
 
-    def __init__(self, session: requests.Session | None = None, is_postgraduate: bool = False,
+    def __init__(self, session: object | None = None, is_postgraduate: bool = False,
                  visitor_id: str | None = None) -> None:
-        """
-        创建考勤系统 WebVPN 二维码登录器。
-        """
         super().__init__(session=session, is_postgraduate=is_postgraduate, visitor_id=visitor_id)
 
 
 AttendanceNewQRCodeWebVPNLogin = AttendanceNewWebVPNQRCodeLogin
-
-
-def _getNowTime():
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-
-def _getNowDay():
-    return time.strftime("%Y-%m-%d", time.localtime())
 
 
 class Attendance:
@@ -183,326 +185,81 @@ class Attendance:
     请注意：考勤系统对同一个 session 的连接存在时间限制。因此，不要持久性的存储此类的对象；每次使用时通过 AttendanceNewLogin 或
     AttendanceNewWebVPNLogin 重新得到一个登录的 session，然后重新创建此对象。
     """
-    def __init__(self, session: requests.Session, is_postgraduate=False):
+    def __init__(self, session, is_postgraduate=False):
         """
         创建一个接口对象
         :param session: 已经登录考勤系统的 session 对象
         :param is_postgraduate: 是否为研究生。true：是；false：不是（本科生）
-        本科生和研究生的网站接口完全一致，但是二者不在同一域名下（bkkq.xjtu.edu.cn 和 yjskq.xjtu.edu.cn）。此参数将用于决定访问哪个系统。
+        本科生和研究生的网站接口完全一致，但是二者不在同一域名下（bk-kq.xjtu.edu.cn 和 yjs-kq.xjtu.edu.cn）。此参数将用于决定访问哪个系统。
         """
         self.session = session
-        # 缓存学期编号
-        self._bh = None
+        # 缓存学期列表
+        self._semesters = None
         # 是否为研究生
         self.is_postgraduate = is_postgraduate
 
-    def getStudentInfo(self):
+    def _request(self, method: str, path: str, **kwargs):
         """
-        获得当前登录学生相关的信息。
-
-        :raise ServerError: 如果服务器返回错误信息
-        :raise HTTPError: 如果请求出现错误
-        :return: 登录信息，具体返回格式示例如下：
-        {
-            "id": 整数,
-            "account": "学号",
-            "password": null,
-            "sno": "学号",
-            "idNumber": null,
-            "cardId": "一串字符形式的数字",
-            "cardAccount": null,
-            "examNumber": "exam_number",
-            "name": "学生姓名",
-            "sex": 性别，整数，0女1男,
-            "birthdate": null,
-            "countryCode": null,
-            "nationCode": null,
-            "politicsStatusCode": null,
-            "identityCode": "0",
-            "identity": "本科生",
-            "campusCode": "1",
-            "campusName": "兴庆校区",
-            "enterSchoolDate": null,
-            "leaveSchoolDate": null,
-            "grade": 年级，整数,
-            "academyCode": null,
-            "academyName": null,
-            "departmentCode": "一串数字",
-            "departmentName": "学院名称",
-            "professionCode": null,
-            "professionName": null,
-            "classCode": null,
-            "className": null,
-            "schoolingLen": null,
-            "origin": null,
-            "phoneNumber": null,
-            "email": null,
-            "qq": null,
-            "wechat": null,
-            "flag": null,
-            "pictureId": null,
-            "nameIsLike": null,
-            "snos": null
-        }
+        向考勤系统发起请求并返回响应中的 data 字段。
+        :raise ServerError: 如果服务器返回了非 0 的业务错误码
         """
-        response = self._post("/attendance-student/global/getStuInfo")
+        url = f"https://{attendance_domain(self.is_postgraduate)}/sa{path}"
+        response = self.session.request(method, url, **kwargs)
+        response.raise_for_status()
         result = response.json()
-        if not result["success"]:
-            raise ServerError(result['code'], result["msg"])
-        return result['data']
+        if result["code"] != 0:
+            raise ServerError(result["code"], result["message"])
+        return result["data"]
 
-    def getNearTerm(self):
-        """
-        获得当前学期的信息。
+    def _get(self, path: str, **kwargs):
+        """发起 GET 请求并返回 data 字段"""
+        return self._request("GET", path, **kwargs)
 
-        :raise ServerError: 如果服务器返回错误信息
-        :raise HTTPError: 如果请求出现错误
-        :return: 示例如下：
-        {
-            "pageSize": 10,
-            "current": 1,
-            "offset": 0,
-            "orderByField": null,
-            "orderByType": null,
-            "bh": 525, // 学期编号
-            "name": "2023-2024-2",
-            "startdate": "2024-02-26", // 学期开始日期
-            "enddate": "2024-06-30", // 学期结束日期
-            "weeks": 18, // 学期周数
-            "pid": "0", // 不知道是啥
-            "currentWeek": null,
-            "currentDate": null,
-            "idenName": null
-        }
-        在返回值中，只有“编号”（bh）这一项是有用的，有的接口查询需要这一参数。
-        """
-        response = self._post("/attendance-student/global/getNearTerm")
-        result = response.json()
-        if not result["success"]:
-            raise ServerError(result['code'], result["msg"])
-        return result['data']
+    def _post(self, path: str, **kwargs):
+        """发起 POST 请求并返回 data 字段"""
+        return self._request("POST", path, **kwargs)
 
-    def attendanceCurrentWeek(self):
-        """
-        获得当前周的考勤信息。
-        :raise ServerError: 如果服务器返回错误信息
-        :raise HTTPError: 如果请求出现错误
-        :return: 考勤信息，具体返回格式示例如下：
-        （一般所有考勤信息相关接口返回的单个课程信息都是一样的）
-        [{
-            "sno": null,
-            "termNo": null,
-            "startDate": null,
-            "endDate": null,
-            "subjectCode": "课程编号",
-            "subjectname": "课程名称",
-            "normalCount": 2, // 正常出勤次数
-            "lateCount": 0, // 迟到次数
-            "absenceCount": 0, // 缺勤次数
-            "leaveEarlyCount": 0, // 早退次数（考勤系统真的能记录人早退吗？）
-            "leaveCount": 0, // 请假次数
-            "actualCount": 2, // 实际出勤次数
-            "total": 2, // 查询期间内总共课程次数
-            "subjectCount": null,
-            "subjectTotal": null,
-            "mouth": null,
-            "teachNoList": null,
-            "teachNameList": null,
-            "roomnum": null,
-            "buildName": null,
-            "buildAddress": null,
-            "calendarStartdate": null,
-            "calendarEnddate": null,
-            "week": "5",
-            "firstDateWeek": "2024-03-25", // 查询周开始日期
-            "currentDateWeek": "2024-03-30" // 查询周当前的日期
-        }, ...]
-        """
-        response = self._post("/attendance-student/kqtj/getKqtjCurrentWeek")
-        result = response.json()
-        if not result["success"]:
-            raise ServerError(result['code'], result["msg"])
-        return result['data']
+    @property
+    def semesters(self) -> list:
+        """获得所有学期的列表，第一个元素为当前学期，尽可能返回缓存的内容"""
+        if self._semesters is None:
+            self._semesters = self._get("/student/service/timetable/semesters")
+        return self._semesters
 
-    def attendanceDetailByTime(self, start_date: str, end_date: str, current: int = 1, page_size: int = 10, termNo=None):
-        """
-        根据时间段查询考勤信息。
-        :param start_date: 开始日期，格式为 "%Y-%m-%d"
-        :param end_date: 结束日期，格式为 "%Y-%m-%d"
-        :param current: 当前页数
-        :param page_size: 每页的数量
-        :param termNo: 学期编号。如果为 None，则会自动获取当前学期的编号。
-        :return: 考勤信息
-        """
-        if termNo is None:
-            if self._bh is not None:
-                termNo = self._bh
-            else:
-                result = self.getNearTerm()
-                termNo = self._bh = result["bh"]
+    @staticmethod
+    def _term_name(semester: dict) -> str:
+        """把学期信息转换为学期编号，如 "2026-2027-1" """
+        return f"{semester['academicYear']}-{_SEMESTER_ORDINALS[semester['semesterName']]}"
 
-        response = self._post("/attendance-student/classWater/getClassWaterPage",
-                              json={"startDate": start_date, "endDate": end_date, "current": current, "pageSize": page_size,
-                              "timeCondition": '', "subjectBean": {"sCode": ""}, "classWaterBean": {"status": ""},
-                              "classBean": {"termNo": termNo}})
-        result = response.json()
-        if not result["success"]:
-            raise ServerError(result['code'], result["msg"])
-        return [AttendanceWaterRecord.from_response_json(one) for one in result['data']['list']]
+    def _find_semester(self, term_name: str = None) -> dict:
+        """根据学期编号查找学期，term_name 为空时返回当前学期"""
+        if term_name is None:
+            return self.semesters[0]
+        for semester in self.semesters:
+            if self._term_name(semester) == term_name:
+                return semester
+        raise ValueError(f"未找到学期 {term_name}")
 
-    def attendanceByTime(self, start_date: str, end_date: str = None):
+    def getNearTerm(self) -> dict:
         """
-        根据时间段查询考勤信息。
-        :param start_date: 开始日期，格式为 "%Y-%m-%d"
-        :param end_date: 结束日期，格式可以为 "%Y-%m-%d" 或者 "%Y-%m-%d %H:%M:%S"。如果为 None，则默认为当前时间。
-        :return: 考勤信息，具体返回格式示例如下：
-        [{
-            "sno": null,
-            "termNo": null,
-            "startDate": null,
-            "endDate": null,
-            "subjectCode": "MATH295507", // 课程序号
-            "subjectname": "概率论与数理统计", // 课程名
-            "normalCount": 1, // 正常到课次数
-            "lateCount": 0, // 迟到次数（大概）
-            "absenceCount": 0, // 缺勤次数
-            "leaveEarlyCount": 0, // 天知道什么次数
-            "leaveCount": 0, // 请假次数
-            "actualCount": 1, // 正常次数+请假次数
-            "total": 1, // 总共课程次数
-            "subjectCount": null,
-            "subjectTotal": null,
-            "mouth": null,
-            "teachNoList": null,
-            "teachNameList": null,
-            "roomnum": null,
-            "buildName": null,
-            "buildAddress": null,
-            "calendarStartdate": null,
-            "calendarEnddate": null,
-            "week": null,
-            "firstDateWeek": null,
-            "currentDateWeek": null
-        },...]
+        获得当前学期的信息。返回的字典包含学期编号（name）、学期编号 ID（semesterId）、
+        学期开始日期（startDate）、学期结束日期（endDate）等字段。
         """
-        if end_date is None:
-            end_date = _getNowTime()
-        response = self._post("/attendance-student/kqtj/getKqtjByTime",
-                              json={"startDate": start_date, "endDate": end_date})
-        result = response.json()
-        if not result["success"]:
-            raise ServerError(result['code'], result["msg"])
-        return result['data']
+        semester = self.semesters[0]
+        return {**semester, "name": self._term_name(semester)}
 
-    def attendanceNumberByTime(self, start_date: str, end_date: str = None):
+    @staticmethod
+    def _parse_week_ranges(week_ranges: str) -> set[int]:
         """
-        查询特定时间段内的考勤信息。请注意，此考勤信息只返回所有课程考勤数据的总和，不包含每门课程的考勤情况。
-        :param start_date: 开始日期，格式为 "%Y-%m-%d"
-        :param end_date: 结束日期，格式可以为 "%Y-%m-%d" 或者 "%Y-%m-%d %H:%M:%S"。如果为 None，则默认为当前时间。
-        :return: 考勤信息（所有课程信息总和），具体如下：
-        {
-            "sno": null,
-            "termNo": null,
-            "startDate": null,
-            "endDate": null,
-            "subjectCode": null,
-            "subjectname": null,
-            "normalCount": 90, // 正常到课次数
-            "lateCount": 0, // 迟到次数（大概）
-            "absenceCount": 5, // 缺勤次数
-            "leaveEarlyCount": 0, // 天知道是什么次数
-            "leaveCount": 4, // 请假次数。为什么请假次数是 leave??
-            "actualCount": 94, // 似乎是正常到课数+请假次数
-            "total": 99, // 总共上的课程数
-            "subjectCount": null,
-            "subjectTotal": null,
-            "mouth": null,
-            "teachNoList": null,
-            "teachNameList": null,
-            "roomnum": null,
-            "buildName": null,
-            "buildAddress": null,
-            "calendarStartdate": null,
-            "calendarEnddate": null,
-            "week": null,
-            "firstDateWeek": null,
-            "currentDateWeek": null
-        }
-        这个返回值一看就是上一个函数的接口改的…里面有一大堆用不着的键
+        解析课表中的周次字符串，如 "1-16"、"1-8,10-16"
+        :param week_ranges: 原始周次字符串
+        :return: 周次集合
         """
-        if end_date is None:
-            end_date = _getNowTime()
-        response = self._post("/attendance-student/kqtj/getKqtjNumByTime",
-                              json={"startDate": start_date, "endDate": end_date})
-        result = response.json()
-        if not result["success"]:
-            raise ServerError(result['code'], result["msg"])
-        return result['data']
-
-    def getTermNoMap(self):
-        """
-        获得学期编号的映射表。
-        :return: 学期编号的映射表，格式如下：
-        {
-            "2020-2021-1": 525,
-            "2020-2021-2": 526,
-            ...
-        }
-        """
-        response = self._post("/attendance-student/global/getBeforeTodayTerm")
-        result = response.json()
-        if not result["success"]:
-            raise ServerError(result['code'], result["msg"])
-        mapping = {}
-        for data in result["data"]:
-            mapping[data["name"]] = data["bh"]
-        return mapping
-
-    def getWeekSchedule(self, week: int, termNo: int = None) -> WeekSchedule:
-        """
-        获得特定周的课程表。
-        :param week: 周数，一般是 1~18
-        :param termNo: 学期编号。如果为 None，则会自动获取当前学期的编号。
-        :return: 课程表
-        """
-        if termNo is None:
-            if self._bh is not None:
-                termNo = self._bh
-            else:
-                result = self.getNearTerm()
-                termNo = self._bh = result["bh"]
-
-        response = self._post("/attendance-student/rankClass/getWeekSchedule2",
-                              json={"week": week, "termNo": termNo})
-        result = response.json()
-        if not result['success']:
-            raise ServerError(result['code'], result['msg'])
-        else:
-            week_schedule = WeekSchedule()
-            data = result['data']
-            for course in data:
-                lesson = Lesson(course["subjectSName"], course["subjectSCode"], course["teachNameList"], f"{course['buildName']}-{course['roomRoomnum']}")
-                periods = course["accountJtNo"].split('-')
-                for period in range(int(periods[0]), int(periods[1])+1):
-                    week_schedule.set(int(course["accountWeeknum"]), period, lesson)
-            return week_schedule
-
-    def getSchedule(self, termNo: int = None) -> Schedule:
-        """
-        获得整个学期的课程表
-        :param termNo: 周数，一般是 1-18，可以为空
-        :return: 整学期的课程表
-        """
-        result = self.getNearTerm()
-        weeks = result['weeks']
-        if termNo is None:
-            termNo = result["bh"]
-
-        schedule = Schedule(weeks=weeks)
-        for week in range(1, weeks+1):
-            week_schedule = self.getWeekSchedule(week, termNo)
-            schedule.set_week_lessons(week, week_schedule.lessons)
-        return schedule
+        weeks = set()
+        for part in week_ranges.split(","):
+            start, _, end = part.partition("-")
+            weeks.update(range(int(start), int(end or start) + 1))
+        return weeks
 
     def getScheduleLessons(self, term_name: str = None) -> list:
         """
@@ -510,90 +267,36 @@ class Attendance:
         每个 dict 包含 KCM/SKJS/JASMC/SKXQ/KSJC/JSJC/SKZC/XNXQDM 字段，
         可直接用于 schedule_service.getCourseGroupFromJson。
 
-        :param term_name: 学期名称，如 '2025-2026-2'。None 表示当前学期。
+        :param term_name: 学期编号，如 '2026-2027-1'。None 表示当前学期。
         :return: 课程 dict 列表
         """
-        # 查找学期对应的 bh 和总周数
-        current = self.getNearTerm()
-        if term_name is None or term_name == current["name"]:
-            bh = current["bh"]
-            weeks = current["weeks"]
-        else:
-            # 查历史学期列表获取 bh 和 weeks
-            mapping_response = self._post("/attendance-student/global/getBeforeTodayTerm")
-            mapping_data = mapping_response.json()
-            if not mapping_data["success"]:
-                raise ServerError(mapping_data["code"], mapping_data["msg"])
-            bh = None
-            weeks = None
-            for item in mapping_data["data"]:
-                if item["name"] == term_name:
-                    bh = item["bh"]
-                    weeks = item["weeks"]
-                    break
-            if bh is None:
-                raise ValueError(f"未找到学期 {term_name}")
+        semester = self._find_semester(term_name)
+        courses = self._get("/student/service/timetable/weekly",
+                            params={"semesterId": semester["semesterId"]})["courses"]
 
-        lesson_map: dict[tuple, list[int]] = {}
-
-        for week in range(1, weeks + 1):
-            response = self._post(
-                "/attendance-student/rankClass/getWeekSchedule2",
-                json={"week": week, "termNo": bh},
-            )
-            data = response.json()
-            if not data["success"]:
-                raise ServerError(data["code"], data["msg"])
-
-            for course in data["data"]:
-                jt_no = course.get("accountJtNo")
-                if not isinstance(jt_no, str) or "-" not in jt_no:
-                    continue
-                periods = jt_no.split("-")
-                key = (
-                    course["subjectSName"],
-                    course["teachNameList"],
-                    f"{course['buildName']}-{course['roomRoomnum']}",
-                    int(course["accountWeeknum"]),
-                    int(periods[0]),
-                    int(periods[1]),
-                )
-                lesson_map.setdefault(key, []).append(week)
+        # 同一门课程可能分多段周次返回，按上课时间合并周次
+        groups = {}
+        for course in courses:
+            key = (course["courseName"], course["teacherName"], course["classroomName"],
+                   course["dayOfWeek"], course["startSection"], course["endSection"])
+            groups.setdefault(key, set()).update(self._parse_week_ranges(course["weekRanges"]))
 
         lessons = []
-        for (name, teacher, location, day, ks, js), week_list in lesson_map.items():
-            skzc = ["0"] * weeks
-            for w in week_list:
-                skzc[w - 1] = "1"
+        for (name, teacher, location, day, start_time, end_time), weeks in groups.items():
+            skzc = "".join("1" if week in weeks else "0" for week in range(1, max(weeks) + 1))
             lessons.append({
                 "KCM": name,
                 "SKJS": teacher,
                 "JASMC": location,
                 "SKXQ": str(day),
-                "KSJC": str(ks),
-                "JSJC": str(js),
-                "SKZC": "".join(skzc),
-                "XNXQDM": term_name or current["name"],
+                "KSJC": str(start_time),
+                "JSJC": str(end_time),
+                "SKZC": skzc,
+                "XNXQDM": self._term_name(semester),
             })
-
         return lessons
 
-    def getFlowRecordByTime(self, start_date: str, end_date: str = None):
-        """
-        根据时间段查询考勤流水信息。
-        :param start_date: 开始日期，格式为 "%Y-%m-%d"
-        :param end_date: 结束日期，格式为 "%Y-%m-%d"。如果为 None，则默认为当前时间。
-        """
-        if end_date is None:
-            end_date = _getNowDay()
-        response = self._post("/attendance-student/waterList/page",
-                              json={"startdate": start_date, "enddate": end_date, "current": 1, "pageSize": 50, "calendarBh": ""})
-        result = response.json()
-        if not result['success']:
-            raise ServerError(result['code'], result['msg'])
-        return [AttendanceFlow.from_json(one) for one in result['data']['list']]
-
-    def getFlowRecordWithPage(self, current=1, page_size=10):
+    def getFlowRecordWithPage(self, current=1, page_size=10) -> dict:
         """
         获得包含总页数、总数量、当前页数等信息的考勤流水信息
         :param current: 目前获取第几页
@@ -604,54 +307,40 @@ class Attendance:
         - total_count: 总数量
         - current_page: 当前页数
         """
-        response = self._post("/attendance-student/waterList/page", json={
-            "calendarBh": "", "enddate": "", "startdate": "", "pageSize": page_size, "current": current
-        })
-        result = response.json()
-        if not result['success']:
-            raise ServerError(result['code'], result['msg'])
-        else:
-            return {
-                "data": [AttendanceFlow.from_json(one) for one in result['data']['list']],
-                # 网站返回的总页数信息不正确
-                "total_pages": math.ceil(result['data']['totalCount'] / page_size),
-                "total_count": result['data']['totalCount'],
-                "current_page": current
-            }
+        data = self._post("/student/pc/attendance-streams/page",
+                          json={"pageNum": current, "pageSize": page_size, "data": {}})
+        return {
+            "data": [AttendanceFlow.from_response_json(one) for one in data["rows"]],
+            "total_pages": math.ceil(data["total"] / page_size),
+            "total_count": data["total"],
+            "current_page": current,
+        }
 
-    def getFlowRecord(self, current=1, page_size=10):
+    def getFlowRecordByTime(self, start_date: str, end_date: str = None) -> list:
         """
-        获得考勤流水信息。
-        :param current: 目前获取第几页
-        :param page_size: 每页包含多少流水信息
-        :return: 考勤流水信息的列表
+        根据时间段查询考勤流水信息。
+        :param start_date: 开始日期，格式为 "%Y-%m-%d"
+        :param end_date: 结束日期，格式为 "%Y-%m-%d"。如果为 None，则默认为当前日期。
         """
-        response = self._post("/attendance-student/waterList/page", json={
-            "calendarBh": "", "enddate": "", "startdate": "", "pageSize": page_size, "current": current
-        })
-        result = response.json()
-        if not result['success']:
-            raise ServerError(result['code'], result['msg'])
-        else:
-            data = result['data']['list']
-            records = [AttendanceFlow.from_json(one) for one in data]
-            return records
+        if end_date is None:
+            end_date = datetime.date.today().isoformat()
+        data = self._post("/student/pc/attendance-streams/page",
+                          json={"pageNum": 1, "pageSize": 50,
+                                "data": {"startDate": start_date, "endDate": end_date}})
+        return [AttendanceFlow.from_response_json(one) for one in data["rows"]]
 
-    def _get(self, url, **kwargs):
-        url = self._build_url(url)
-        response = self.session.get(url, **kwargs)
-        response.raise_for_status()
-        return response
-
-    def _post(self, url, **kwargs):
-        url = self._build_url(url)
-        response = self.session.post(url, **kwargs)
-        response.raise_for_status()
-        return response
-
-    def _build_url(self, path: str) -> str:
+    def attendanceDetailByTime(self, start_date: str, end_date: str, current: int = 1, page_size: int = 10) -> list:
         """
-        将接口路径与域名（bkkq.xjtu.edu.cn 或 yjskq.xjtu.edu.cn）拼接成完整的 URL
+        根据时间段查询课程考勤记录。
+        :param start_date: 开始日期，格式为 "%Y-%m-%d"
+        :param end_date: 结束日期，格式为 "%Y-%m-%d"
+        :param current: 当前页数
+        :param page_size: 每页的数量
+        :return: 考勤记录（AttendanceWaterRecord）列表
         """
-        domain = "yjskq.xjtu.edu.cn" if self.is_postgraduate else "bkkq.xjtu.edu.cn"
-        return f"https://{domain}{path}"
+        data = self._post("/student/pc/attendance-records/page",
+                          json={"pageNum": current, "pageSize": page_size,
+                                "data": {"startDate": start_date, "endDate": end_date}})
+        term_names = {semester["semesterId"]: self._term_name(semester) for semester in self.semesters}
+        return [AttendanceWaterRecord.from_response_json(one, term_names[one["semesterId"]])
+                for one in data["rows"]]
