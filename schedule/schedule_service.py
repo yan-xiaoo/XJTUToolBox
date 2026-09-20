@@ -138,6 +138,14 @@ class ScheduleService:
         if current:
             set_config("current_term", term_number)
 
+    @staticmethod
+    def _parse_start_date(day_string: str) -> datetime.date:
+        """
+        把 Term.start_date 的 "YYYY-MM-DD" 字符串解析为日期
+        """
+        year, month, day = map(int, day_string.split("-"))
+        return datetime.date(year, month, day)
+
     def getStartOfTerm(self):
         """
         获取学期的第一周的周一日期, 如果不存在则返回 None
@@ -146,9 +154,7 @@ class ScheduleService:
             current_term = self.getCurrentTerm()
             if current_term is None:
                 return None
-            day_string = Term.get(Term.term_number == current_term).start_date
-            year, month, day = map(int, day_string.split("-"))
-            return datetime.date(year, month, day)
+            return self._parse_start_date(Term.get(Term.term_number == current_term).start_date)
         except DoesNotExist:
             return None
 
@@ -517,15 +523,26 @@ class ScheduleService:
 
         return result
 
-    def addExamFromJson(self, exam_json: dict):
+    def addExamFromJson(self, exam_json: dict) -> int:
         """
         从 json 文件中创建考试对象，
         :param exam_json: 考试的 json 字典
-        """
-        result = []
+        :return: 因缺少学期开始日期而跳过的考试数量
 
+        考试需要按所在学期的开始日期换算到课表周次。该学期没有开始日期时（例如尚未获取
+        过该学期课表），不能换算出周次，此时不写入任何考试，也不会删除已有考试。
+        """
         exams = exam_json["exams"]
         term_number = exam_json["term_number"]
+
+        # 考试所属的学期不一定是当前学期，因此按考试自己的学期取开始日期
+        term = Term.get_or_none(Term.term_number == term_number)
+        if term is None:
+            return len(exams)
+        start_of_term = self._parse_start_date(term.start_date)
+
+        result = []
+
         for one in exams:
             time_string = one.get("KSSJMS", "")
             date_part, time_part = time_string.split(' ')
@@ -566,7 +583,7 @@ class ScheduleService:
 
             end_time = start_time + 1
 
-            week = (start_dt.date() - self.getStartOfTerm()).days // 7 + 1
+            week = (start_dt.date() - start_of_term).days // 7 + 1
             day_of_week = start_dt.isoweekday()  # 获取 ISO 周几（1-7）
 
             exam = Exam(name=one["KCM"] + "考试",
@@ -584,6 +601,7 @@ class ScheduleService:
 
         with self.database.atomic():
             Exam.bulk_create(result)
+        return 0
 
     def addCourseFromGroup(self, course_group, merge_with_existing: bool = False):
         """

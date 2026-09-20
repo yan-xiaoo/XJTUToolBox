@@ -774,6 +774,11 @@ class ScheduleInterface(ScrollArea):
         if not self.schedule_service.getCurrentTerm():
             self.error(self.tr("未获取课表"), self.tr("请先获取课表"), parent=self)
             return
+        if self.schedule_service.getStartOfTerm() is None:
+            self.error(self.tr("未设置学期开始日期"),
+                       self.tr("考试需要按学期开始日期换算到课表周次，请先获取课表或设置学期开始日期"),
+                       parent=self)
+            return
 
         self.process_widget_exam.setVisible(True)
         self.lock()
@@ -795,7 +800,7 @@ class ScheduleInterface(ScrollArea):
                 self.getExamAction.setEnabled(True)
                 self.changeTermStartAction.setEnabled(True)
             else:
-                self.getExamAction.setEnabled(True)
+                self.getExamAction.setEnabled(False)
                 self.changeTermStartAction.setEnabled(False)
 
             # 重新根据学期长度设置下拉框
@@ -1151,7 +1156,11 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot(dict)
     def onReceiveExam(self, exam: dict):
-        self.schedule_service.addExamFromJson(exam)
+        skipped = self.schedule_service.addExamFromJson(exam)
+        if skipped:
+            self.warning(self.tr("部分考试未导入"),
+                         self.tr("{count} 场考试因缺少学期开始日期未导入，请先获取课表或设置学期开始日期").format(count=skipped),
+                         parent=self)
         self.loadSchedule()
 
     @pyqtSlot(list, list)
@@ -1179,14 +1188,14 @@ class ScheduleInterface(ScrollArea):
             lesson.save()
             updated.append(lesson)
 
+        start_of_term = self.schedule_service.getStartOfTerm()
         for page in water_page:
-            # 只有有效的流水说明这门课已经打卡了
-            if page.type_ == FlowRecordType.VALID:
+            # 只有有效的流水说明这门课已经打卡了；没有学期开始日期时无法换算到课表周次
+            if page.type_ == FlowRecordType.VALID and start_of_term is not None:
                 water_time = datetime.datetime.strptime(
                     page.water_time, "%Y-%m-%d %H:%M:%S")
                 date = water_time.date()
-                week = (water_time.date() -
-                        self.schedule_service.getStartOfTerm()).days // 7 + 1
+                week = (date - start_of_term).days // 7 + 1
                 lessons = self.schedule_service.selectCourse(
                     CourseInstance.week_number == week,
                     CourseInstance.day_of_week == date.weekday() + 1,
