@@ -4,115 +4,106 @@ from unittest.mock import Mock
 
 import requests
 
-from auth import ServerError
-from jwxt.calendar import SchoolCalendar
+from jwxt.calendar import CALENDAR_PAGE_URL, CalendarImage, SchoolCalendar
 
 TEST_DOMAIN = "schedule"
 
+# 教务处页面的真实结构：正文是一串 <a href="图片"><img ...></a>
+_PAGE_HTML = """
+<div id="vsb_content"><div><body>
+<p><a href="../2025-2026-new.png" target="_blank"></a></p>
+<p><a href="../2026-2027.jpg" target="_blank">
+    <img src="/__local/8/E0/8B/example.jpg" class="img_vsb_content"></a></p>
+<p><a href="../2025-2026-new.png" target="_blank">
+    <img src="/__local/D/27/0D/example.png" class="img_vsb_content"></a></p>
+<p><a href="../upload.png" target="_blank">
+    <img src="/__local/B/4B/F4/example.jpg" alt="13180"></a></p>
+<p><a href="http://jwc.xjtu.edu.cn/__local/6/B2/5C/abc_4E08F.jpg" target="_blank">&nbsp;
+    <img src="/__local/6/B2/5C/abc_4E08F.jpg"></a></p>
+<p><a title="2015-2016学年校历" href="/__local/F/59/FF/def_57EF5.jpg?e=.jpg" target="_blank">
+    <img src="/__local/F/59/FF/def_57EF5.jpg?e=.jpg"></a></p>
+<p><a href="../2026-2027.jpg" target="_blank">
+    <img src="/__local/8/E0/8B/example.jpg"></a></p>
+</body></div></div>
+"""
 
-def _response(payload=None, *, error=None):
-    return SimpleNamespace(
-        json=Mock(side_effect=error) if error else Mock(return_value=payload),
+
+def _session_with(html: str, status: int = 200) -> SimpleNamespace:
+    response = SimpleNamespace(
+        text=html,
+        status_code=status,
+        raise_for_status=Mock(
+            side_effect=None if status < 400
+            else requests.HTTPError(f"{status} error")
+        ),
     )
+    return SimpleNamespace(get=Mock(return_value=response))
 
 
-def _term(**overrides):
-    item = {
-        "id": 2,
-        "start_date": "2024-02-26 00:00:00",
-        "end_date": "2024-07-14 00:00:00",
-        "term_num": "2",
-        "year_num": "2023-2024",
-        "week_number": 20,
-        "work_days": 5,
-        "holidays": [{
-            "holiday_name": "劳动节",
-            "start_date": "2024-05-01",
-            "end_date": "2024-05-05",
-            "holiday_days": 5,
-            "holiday_remark": "调休",
-        }],
-    }
-    item.update(overrides)
-    return item
+class SchoolCalendarImageTest(unittest.TestCase):
+    def test_parses_year_from_file_name_title_and_falls_back_to_none(self):
+        images = SchoolCalendar.parse_calendar_images(_PAGE_HTML)
 
-
-class SchoolCalendarApiTest(unittest.TestCase):
-    def test_warmup_failure_does_not_block_post_and_ajax_headers_are_exact(self):
-        session = SimpleNamespace(
-            get=Mock(side_effect=requests.ConnectionError("warmup")),
-            post=Mock(return_value=_response({"code": 200, "data": []})),
+        self.assertEqual(
+            [image.year for image in images],
+            ["2026-2027", "2025-2026", None, None, "2015-2016"],
         )
-        self.assertEqual(SchoolCalendar(session).get_terms(), [])
-        session.post.assert_called_once()
-        _, kwargs = session.post.call_args
-        self.assertEqual(kwargs["headers"], {
-            "X-Requested-With": "XMLHttpRequest",
-            "Origin": "http://one2020.xjtu.edu.cn",
-            "Referer": SchoolCalendar.SHOW_URL,
-        })
-
-    def test_api_error_malformed_json_non_object_and_empty_terms(self):
-        cases = (
-            (_response({"code": 500, "msg": "denied"}), ServerError),
-            (_response(error=ValueError("broken")), ServerError),
-            (_response(["not", "object"]), ServerError),
-            (_response({"code": 200, "data": []}), None),
+        self.assertEqual(
+            [image.label for image in images],
+            ["2026-2027 学年", "2025-2026 学年", "未标注学年", "未标注学年", "2015-2016 学年"],
         )
-        for response, error_type in cases:
-            with self.subTest(response=response):
-                session = SimpleNamespace(get=Mock(), post=Mock(return_value=response))
-                if error_type:
-                    with self.assertRaises(error_type):
-                        SchoolCalendar(session).get_terms()
-                else:
-                    self.assertEqual(SchoolCalendar(session).get_terms(), [])
 
-    def test_wrong_typed_data_terms_holidays_and_holiday_items_are_rejected(self):
-        payloads = (
-            {"code": 200, "data": {}},
-            {"code": 200, "data": ["not-object"]},
-            {"code": 200, "data": [_term(holidays={})]},
-            {"code": 200, "data": [_term(holidays=["not-object"])]},
+    def test_urls_are_absolute_and_upgraded_to_https(self):
+        images = SchoolCalendar.parse_calendar_images(_PAGE_HTML)
+
+        self.assertEqual(images[0].url, "https://dean.xjtu.edu.cn/2026-2027.jpg")
+        # 老校历的 title 提供学年，href 指向 __local
+        self.assertEqual(
+            images[-1].url,
+            "https://dean.xjtu.edu.cn/__local/F/59/FF/def_57EF5.jpg?e=.jpg",
         )
-        for payload in payloads:
-            with self.subTest(payload=payload):
-                session = SimpleNamespace(get=Mock(), post=Mock(return_value=_response(payload)))
-                with self.assertRaises(ServerError):
-                    SchoolCalendar(session).get_terms()
+        self.assertTrue(all(image.url.startswith("https://") for image in images))
+        # 页面里 http://jwc.xjtu.edu.cn 的旧链接被升级为 https
+        self.assertIn("https://jwc.xjtu.edu.cn/__local/6/B2/5C/abc_4E08F.jpg",
+                      [image.url for image in images])
 
-    def test_complete_term_and_holiday_fields_map(self):
-        session = SimpleNamespace(
-            get=Mock(), post=Mock(return_value=_response({"code": 200, "data": [_term()]})),
+    def test_skips_anchors_without_image_and_deduplicates_urls(self):
+        images = SchoolCalendar.parse_calendar_images(_PAGE_HTML)
+
+        # 没有内嵌 <img> 的空锚点被跳过
+        self.assertEqual(len(images), 5)
+        # 末尾重复的 2026-2027 链接只保留一次
+        self.assertEqual([image.url for image in images].count("https://dean.xjtu.edu.cn/2026-2027.jpg"), 1)
+
+    def test_page_without_calendar_images_returns_empty_list(self):
+        self.assertEqual(SchoolCalendar.parse_calendar_images("<div>没有图片</div>"), [])
+
+    def test_relative_url_is_resolved_against_the_page_url(self):
+        html = '<a href="sub/x.png"><img src="x"></a>'
+        self.assertEqual(
+            SchoolCalendar.parse_calendar_images(html)[0].url,
+            "https://dean.xjtu.edu.cn/xxfw/sub/x.png",
         )
-        term = SchoolCalendar(session).get_terms()[0]
-        self.assertEqual((term.term_id, term.start_date, term.end_date),
-                         ("2", "2024-02-26 00:00:00", "2024-07-14 00:00:00"))
-        self.assertEqual((term.term_num, term.year_num, term.week_number, term.work_days),
-                         ("2", "2023-2024", "20", "5"))
-        holiday = term.holidays[0]
-        self.assertEqual((holiday.name, holiday.start_date, holiday.end_date, holiday.days, holiday.remark),
-                         ("劳动节", "2024-05-01", "2024-05-05", "5", "调休"))
 
-    def test_missing_optional_holiday_fields_are_empty(self):
-        session = SimpleNamespace(
-            get=Mock(), post=Mock(return_value=_response({
-                "code": 200, "data": [_term(holidays=[{}])],
-            })),
-        )
-        holiday = SchoolCalendar(session).get_terms()[0].holidays[0]
-        self.assertEqual((holiday.name, holiday.start_date, holiday.end_date, holiday.days, holiday.remark),
-                         ("", "", "", "", ""))
+    def test_annotation_free_image_keeps_none_year(self):
+        html = '<a href="/__local/A/B/C/hash_12345.jpg"><img src="x"></a>'
+        image = SchoolCalendar.parse_calendar_images(html)[0]
 
-    def test_multiple_terms_have_stable_newest_first_order(self):
-        older = _term(id=1, start_date="2023-09-01", year_num="2023-2024", term_num="1")
-        newer = _term(id=3, start_date="2024-09-01", year_num="2024-2025", term_num="1")
-        middle = _term(id=2, start_date="2024-02-26", year_num="2023-2024", term_num="2")
-        session = SimpleNamespace(
-            get=Mock(), post=Mock(return_value=_response({"code": 200, "data": [older, newer, middle]})),
-        )
-        self.assertEqual([item.term_id for item in SchoolCalendar(session).get_terms()], ["3", "2", "1"])
+        self.assertIsNone(image.year)
+        self.assertEqual(image.label, "未标注学年")
+
+    def test_get_calendar_images_uses_page_url_and_returns_parsed_result(self):
+        session = _session_with(_PAGE_HTML)
+        images = SchoolCalendar(session).get_calendar_images()
+
+        self.assertEqual(session.get.call_args[0][0], CALENDAR_PAGE_URL)
+        self.assertEqual(len(images), 5)
+        self.assertIsInstance(images[0], CalendarImage)
+
+    def test_http_error_propagates(self):
+        with self.assertRaises(requests.HTTPError):
+            SchoolCalendar(_session_with("", status=500)).get_calendar_images()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import QApplication, QWidget
 from app.FitnessInterface import FitnessInterface
 from app.ProfileInterface import ProfileInterface
 from app.SchoolCalendarInterface import SchoolCalendarInterface
-from jwxt.calendar import CalendarHoliday, CalendarTerm
+from jwxt.calendar import CalendarImage
 from fitness.score import FitnessItem, FitnessScore, FitnessYear
 from hello.profile import StudentProfile
 
@@ -59,20 +59,8 @@ class _ProcessWidget(QWidget):
         super().__init__(parent)
 
 
-def _term(term_id="1", *, current_week=None, holidays=None):
-    term = CalendarTerm(
-        term_id=term_id,
-        start_date="2024-02-26",
-        end_date="2024-07-14",
-        term_num="2",
-        year_num="2023-2024",
-        week_number="20",
-        work_days="5",
-        holidays=holidays or [],
-    )
-    if current_week is not None:
-        term = SimpleNamespace(**vars(term), current_week=current_week)
-    return term
+def _image(year="2026-2027", url="https://dean.xjtu.edu.cn/2026-2027.jpg"):
+    return CalendarImage(year=year, url=url)
 
 
 class CampusPageLifecycleTest(unittest.TestCase):
@@ -91,7 +79,7 @@ class CampusPageLifecycleTest(unittest.TestCase):
         for page_type, method in (
             (ProfileInterface, "refresh"),
             (FitnessInterface, "load_years"),
-            (SchoolCalendarInterface, "load_terms"),
+            (SchoolCalendarInterface, "load_calendar"),
         ):
             with self.subTest(page=page_type.__name__), patch(
                 f"app.{page_type.__name__}.accounts",
@@ -175,32 +163,37 @@ class CampusPageLifecycleTest(unittest.TestCase):
         start.assert_not_called()
         warn.assert_called_once()
 
-    def test_calendar_invalid_index_does_not_change_table(self):
+    def test_calendar_images_fill_the_year_selector(self):
         page = SchoolCalendarInterface()
         self._track(page)
-        page.table.setRowCount(2)
-        page._show_term(-1)
-        page._show_term(1)
-        page._show_term(99)
-        self.assertEqual(page.table.rowCount(), 2)
+        with patch.object(page, "start_job") as start, patch.object(page, "success"):
+            page._on_images([_image(), _image(year=None, url="https://dean.xjtu.edu.cn/upload.png")])
+        self.assertEqual(page.yearBox.count(), 2)
+        self.assertEqual(page.yearBox.itemText(0), "2026-2027 学年")
+        self.assertEqual(page.yearBox.itemText(1), "未标注学年")
+        # 选中学年后会去下载对应的图片
+        self.assertEqual(start.call_count, 1)
 
-    def test_calendar_refresh_clears_old_rows_and_empty_response(self):
+    def test_calendar_empty_response_warns_instead_of_reporting_success(self):
+        """回归：校历数据为空时曾经也提示“查询成功”。"""
         page = SchoolCalendarInterface()
         self._track(page)
-        with patch.object(page, "success"):
-            page._on_terms([_term(holidays=[CalendarHoliday("holiday", "s", "e", "1", "")])])
-            self.assertEqual(page.table.rowCount(), 1)
-            page._on_terms([])
-        self.assertEqual(page.table.rowCount(), 0)
-        self.assertEqual(page.termBox.count(), 0)
+        with patch.object(page, "success") as success, patch.object(page, "warn") as warn:
+            page._on_images([])
+        success.assert_not_called()
+        warn.assert_called_once()
+        self.assertEqual(page.yearBox.count(), 0)
+        self.assertEqual(page.images, [])
 
-    def test_calendar_out_of_term_summary_omits_current_week(self):
+    def test_calendar_invalid_image_index_is_ignored(self):
         page = SchoolCalendarInterface()
         self._track(page)
-        term = _term(current_week=None)
-        page.terms = [term]
-        page._show_term(0)
-        self.assertNotIn("当前约第", page.summary.text())
+        page.images = [_image()]
+        with patch.object(page, "start_job") as start:
+            page._show_image(-1)
+            page._show_image(1)
+            page._show_image(99)
+        start.assert_not_called()
 
     def test_profile_refresh_and_bad_photo_clear_existing_photo(self):
         page = ProfileInterface()
