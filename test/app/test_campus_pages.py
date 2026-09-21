@@ -79,7 +79,6 @@ class CampusPageLifecycleTest(unittest.TestCase):
         for page_type, method in (
             (ProfileInterface, "refresh"),
             (FitnessInterface, "load_years"),
-            (SchoolCalendarInterface, "load_calendar"),
         ):
             with self.subTest(page=page_type.__name__), patch(
                 f"app.{page_type.__name__}.accounts",
@@ -98,6 +97,21 @@ class CampusPageLifecycleTest(unittest.TestCase):
                 accounts.current = None
                 page.showEvent(QShowEvent())
                 loader.assert_called_once()
+
+    def test_calendar_auto_loads_once_without_any_account(self):
+        """校历读取的是公开的教务处页面，没有账号也应当自动加载，且不需要登录。"""
+        page = SchoolCalendarInterface()
+        self._track(page)
+        with patch.object(page, "load_calendar") as loader:
+            page.showEvent(QShowEvent())
+            page.showEvent(QShowEvent())
+        loader.assert_called_once()
+        self.assertTrue(page._auto_loaded)
+
+        page.on_account_changed()
+        self.assertFalse(page._auto_loaded)
+        page.showEvent(QShowEvent())
+        loader.assert_called_once()
 
     def test_fitness_checked_year_auto_queries_and_switch_queries_again(self):
         page = FitnessInterface()

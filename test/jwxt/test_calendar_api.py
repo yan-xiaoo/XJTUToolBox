@@ -41,16 +41,17 @@ def _session_with(html: str, status: int = 200) -> SimpleNamespace:
 
 
 class SchoolCalendarImageTest(unittest.TestCase):
-    def test_parses_year_from_file_name_title_and_falls_back_to_none(self):
+    def test_parses_year_from_file_name_and_title_then_infers_the_rest(self):
         images = SchoolCalendar.parse_calendar_images(_PAGE_HTML)
 
+        # 文件名给出 2026-2027、2025-2026，title 给出 2015-2016，中间两张按页面顺序推定
         self.assertEqual(
             [image.year for image in images],
-            ["2026-2027", "2025-2026", None, None, "2015-2016"],
+            ["2026-2027", "2025-2026", "2024-2025", "2023-2024", "2015-2016"],
         )
         self.assertEqual(
             [image.label for image in images],
-            ["2026-2027 学年", "2025-2026 学年", "未标注学年", "未标注学年", "2015-2016 学年"],
+            ["2026-2027 学年", "2025-2026 学年", "2024-2025 学年", "2023-2024 学年", "2015-2016 学年"],
         )
 
     def test_urls_are_absolute_and_upgraded_to_https(self):
@@ -85,7 +86,41 @@ class SchoolCalendarImageTest(unittest.TestCase):
             "https://dean.xjtu.edu.cn/xxfw/sub/x.png",
         )
 
-    def test_annotation_free_image_keeps_none_year(self):
+    def test_leading_annotated_free_images_are_inferred_backwards(self):
+        """最新的一届没有标注时，从后面第一个已知学年往前推。"""
+        html = (
+            '<a href="/x/a.jpg"><img src="x"></a>'
+            '<a href="/x/b.jpg"><img src="x"></a>'
+            '<a title="2024-2025学年校历" href="/x/c.jpg"><img src="x"></a>'
+        )
+        self.assertEqual(
+            [image.year for image in SchoolCalendar.parse_calendar_images(html)],
+            ["2026-2027", "2025-2026", "2024-2025"],
+        )
+
+    def test_inference_resyncs_on_a_later_known_year(self):
+        html = (
+            '<a href="/x/2026-2027.jpg"><img src="x"></a>'
+            '<a href="/x/mid.png"><img src="x"></a>'
+            '<a title="2023-2024学年校历" href="/x/late.jpg"><img src="x"></a>'
+        )
+        # 中间那张按 2026-2027 递减得 2025-2026；后面已知的 2023-2024 以它为准
+        self.assertEqual(
+            [image.year for image in SchoolCalendar.parse_calendar_images(html)],
+            ["2026-2027", "2025-2026", "2023-2024"],
+        )
+
+    def test_inferred_years_are_strictly_decreasing(self):
+        html = "".join(
+            f'<a href="/x/{name}"><img src="x"></a>' for name in
+            ["2026-2027.jpg", "cal-a.png", "cal-b.png", "cal-c.png", "2015-2016.jpg", "2014-2015.jpg"]
+        )
+        self.assertEqual(
+            [image.year for image in SchoolCalendar.parse_calendar_images(html)],
+            ["2026-2027", "2025-2026", "2024-2025", "2023-2024", "2015-2016", "2014-2015"],
+        )
+
+    def test_without_any_anchor_years_stay_unknown(self):
         html = '<a href="/__local/A/B/C/hash_12345.jpg"><img src="x"></a>'
         image = SchoolCalendar.parse_calendar_images(html)[0]
 

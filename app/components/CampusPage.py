@@ -91,25 +91,27 @@ class CampusPage(ScrollArea):
             self.processWidget = ProcessWidget(self.thread, self.jobSlot, hide_on_end=True)
             self.jobLayout.addWidget(self.processWidget)
 
-        def _guarded(payload):
+        def _stale() -> bool:
+            """任务是否已过期：换过页内任务，或（需要登录时）当前账号已变"""
+            if job_generation != self._job_generation:
+                return True
+            if not need_login:
+                # 公开页面：结果与账号无关，没有账号时也要交付
+                return False
             current = accounts.current
-            if (
-                job_generation != self._job_generation
-                or started_uuid is None
+            return (
+                started_uuid is None
                 or current is None
                 or getattr(current, "uuid", None) != started_uuid
-            ):
+            )
+
+        def _guarded(payload):
+            if _stale():
                 return
             on_result(payload)
 
         def _guarded_error(title, message):
-            current = accounts.current
-            if (
-                job_generation != self._job_generation
-                or started_uuid is None
-                or current is None
-                or getattr(current, "uuid", None) != started_uuid
-            ):
+            if _stale():
                 return
             self.warn(title, message)
 
