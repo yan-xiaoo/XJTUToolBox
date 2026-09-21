@@ -204,7 +204,12 @@ class CommonLoginSession(metaclass=ABCMeta):
             headers, skip_webvpn_rewrite=skip_webvpn_rewrite
         )
         response = self.backend.session.request(method, prepared_url, headers=prepared_headers, **kwargs)
-        if skip_auth_check or self._login_depth > 0 or not self.is_auth_failure_response(response):
+        # stream=True 的响应由调用方自己逐块消费（下载大文件）。此处不能对它做登录页判定：
+        # is_auth_failure_response 会读 response.text，把整个响应拉进内存 —— 实测思源学堂 954 MB
+        # 的回放视频就是这样被整个缓冲的，下载线程一直停在 0%、内存涨到 1 GB。
+        # 非流式响应在此之前已经被 requests 完整读出，再判一次不会额外占内存，因此只跳过流式响应。
+        if (skip_auth_check or self._login_depth > 0 or kwargs.get("stream")
+                or not self.is_auth_failure_response(response)):
             return response
 
         self.invalidate_login()
