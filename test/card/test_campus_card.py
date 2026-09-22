@@ -169,6 +169,41 @@ class CampusCardApiTest(unittest.TestCase):
             [expected for _type_name, _icon, _amount, expected in cases],
         )
 
+    def test_qrcode_payment_is_expense(self):
+        # 回归：食堂扫码支付 icon=qrCode-payment / 二维码支付 曾被当成正数收入。
+        session = SimpleNamespace(get=Mock(return_value=_response(_transaction_payload([
+            _transaction_item(amount=850, type_name="二维码支付", icon="qrCode-payment"),
+        ]))))
+
+        _total, transactions = _campus_card(session).get_transactions()
+
+        self.assertEqual(transactions[0].amount_cents, -850)
+
+    def test_type_from_decides_direction_before_keywords(self):
+        cases = (
+            ({"typeFrom": "1"}, "消费", "consume", 100),
+            ({"typeFrom": "2"}, "充值", "recharge", -100),
+            ({"typeFrom": 1}, "未知类型", "unknown", 100),
+        )
+        records = [_transaction_item(amount=100, type_name=t, icon=i, **extra) for extra, t, i, _ in cases]
+        session = SimpleNamespace(get=Mock(return_value=_response(_transaction_payload(records))))
+
+        _total, transactions = _campus_card(session).get_transactions()
+
+        self.assertEqual([t.amount_cents for t in transactions], [expected for *_rest, expected in cases])
+
+    def test_unknown_type_falls_back_to_destination_account(self):
+        records = [
+            _transaction_item(amount=100, type_name="新渠道", icon="new", toAccount=0, fromAccount=12),
+            _transaction_item(amount=100, type_name="新渠道", icon="new", toAccount="12", fromAccount="12"),
+            _transaction_item(amount=100, type_name="新渠道", icon="new", toAccount=345, fromAccount=12),
+        ]
+        session = SimpleNamespace(get=Mock(return_value=_response(_transaction_payload(records))))
+
+        _total, transactions = _campus_card(session).get_transactions()
+
+        self.assertEqual([t.amount_cents for t in transactions], [100, 100, -100])
+
     def test_get_all_transactions_pages_until_total(self):
         pages = {
             1: _transaction_payload([
