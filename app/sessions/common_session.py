@@ -204,7 +204,13 @@ class CommonLoginSession(metaclass=ABCMeta):
             headers, skip_webvpn_rewrite=skip_webvpn_rewrite
         )
         response = self.backend.session.request(method, prepared_url, headers=prepared_headers, **kwargs)
-        if skip_auth_check or self._login_depth > 0 or not self.is_auth_failure_response(response):
+        # 流式下载可能没有 Content-Type，不能读取正文；HTML/text 仍需检测登录页。
+        content_type = response.headers.get("Content-Type", "").lower()
+        skip_stream_body = (
+            kwargs.get("stream") and "html" not in content_type and "text" not in content_type
+        )
+        if (skip_auth_check or self._login_depth > 0 or skip_stream_body
+                or not self.is_auth_failure_response(response)):
             return response
 
         self.invalidate_login()
@@ -559,7 +565,12 @@ class CommonLoginSession(metaclass=ABCMeta):
             retry_kwargs["headers"] = request_headers
         retry_kwargs["_skip_auth_check"] = True
         retry_response = self.request(method, url, **retry_kwargs)
-        if self.is_auth_failure_response(retry_response):
+        # 重登后的下载响应也必须保留流式读取。
+        content_type = retry_response.headers.get("Content-Type", "").lower()
+        skip_stream_body = (
+            request_kwargs.get("stream") and "html" not in content_type and "text" not in content_type
+        )
+        if not skip_stream_body and self.is_auth_failure_response(retry_response):
             self.invalidate_login()
             raise ServerError(102, "当前业务系统登录态已失效，需要重新进行安全验证。")
         return retry_response
