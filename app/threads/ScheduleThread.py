@@ -26,33 +26,35 @@ class ScheduleThread(ProcessThread):
         super().__init__(parent)
         self.term_number = term_number
         self._attendance = None
+        # 本次任务使用的账户快照，由 run() 在任务开始时设置
+        self.account = None
 
     @property
     def attendance_session(self) -> AttendanceSession:
-        return accounts.current.session_manager.get_session("attendance")
+        return self.account.session_manager.get_session("attendance")
 
     @property
     def jwxt_session(self) -> JWXTSession:
-        return accounts.current.session_manager.get_session("jwxt")
+        return self.account.session_manager.get_session("jwxt")
 
     @property
     def js_session(self) -> JsSession:
-        return accounts.current.session_manager.get_session("js")
+        return self.account.session_manager.get_session("js")
 
     def login_attendance(self) -> bool:
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录考勤系统..."))
         self.attendance_session.ensure_login(
-            accounts.current.username, accounts.current.password,
-            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
-            account=accounts.current,
-            mfa_provider=accounts.current.session_manager.mfa_provider,
+            self.account.username, self.account.password,
+            is_postgraduate=self.account.type == self.account.POSTGRADUATE,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
         )
         if not self.can_run:
             return False
         self._attendance = Attendance(
             self.attendance_session,
-            is_postgraduate=accounts.current.type == accounts.current.POSTGRADUATE,
+            is_postgraduate=self.account.type == self.account.POSTGRADUATE,
         )
         self.setIndeterminate.emit(False)
         return True
@@ -61,9 +63,9 @@ class ScheduleThread(ProcessThread):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
         self.jwxt_session.ensure_login(
-            accounts.current.username, accounts.current.password,
-            account=accounts.current,
-            mfa_provider=accounts.current.session_manager.mfa_provider,
+            self.account.username, self.account.password,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
         )
         if not self.can_run:
             return False
@@ -85,10 +87,10 @@ class ScheduleThread(ProcessThread):
         try:
             self.messageChanged.emit("正在通过教学服务平台获取课表...")
             self.js_session.ensure_login(
-                accounts.current.username,
-                accounts.current.password,
-                account=accounts.current,
-                mfa_provider=accounts.current.session_manager.mfa_provider,
+                self.account.username,
+                self.account.password,
+                account=self.account,
+                mfa_provider=self.account.session_manager.mfa_provider,
             )
             return self.js_session.get_schedule_lessons(term_name)
         except (MFACancelledError, QRCodeLoginCancelledError,
@@ -100,9 +102,9 @@ class ScheduleThread(ProcessThread):
 
     def run(self):
         self.can_run = True
-        # 捕获任务开始时的账户，避免任务中途账户被移除或切换后 MFA 信号发错对象
-        account = accounts.current
-        if account is None:
+        # 任务开始时快照账户，后续 session/登录/错误处理统一使用它，避免中途被移除或切换后混用
+        self.account = accounts.current
+        if self.account is None:
             self.error.emit(self.tr("未登录"), self.tr("请先添加一个账户"))
             self.canceled.emit()
             return
@@ -166,7 +168,7 @@ class ScheduleThread(ProcessThread):
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:
                 self.error.emit(self.tr("登录问题"), self.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"))
-                request_mfa(account)
+                request_mfa(self.account)
             else:
                 self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()
