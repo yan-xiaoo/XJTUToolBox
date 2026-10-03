@@ -22,9 +22,10 @@ FITNESS_SIGN_SALT = "rDJiNB9j7vD2"
 
 
 def _response(
-        url="https://tyxylp.xjtu.edu.cn/callback", *, ok=True, payload=None, error=None, text=""
+        url="https://tyxylp.xjtu.edu.cn/callback", *, ok=True, status_code=200,
+        payload=None, error=None, text=""
 ):
-    response = SimpleNamespace(url=url, ok=ok)
+    response = SimpleNamespace(url=url, ok=ok, status_code=status_code)
     response.json = Mock(side_effect=error) if error else Mock(return_value=payload)
     response.headers = {"Content-Type": "application/json"}
     response.text = text
@@ -179,6 +180,41 @@ class FitnessLoginTest(unittest.TestCase):
         self.assertEqual(payload["token"], "session-token")
         self.assertNotEqual(payload["token"], "query-token")
 
+    def test_login_entry_error_status_is_reported_before_callback_parsing(self):
+        """回归：登录入口返回 5xx 错误页时不应误报为“回调缺少会话参数”。"""
+        cases = ((500, "暂时不可用"), (503, "暂时不可用"), (403, "响应异常"))
+        for status, expected in cases:
+            with self.subTest(status=status):
+                session = self._session()
+                session.perform_cas_login = Mock()
+                session.get = Mock(return_value=_response(
+                    FITNESS_LOGIN_URL, ok=False, status_code=status, text="<html>error</html>",
+                ))
+                session.post = Mock()
+
+                with self.assertRaises(ServerError) as caught:
+                    session._login("user", "password")
+
+                self.assertIn(f"HTTP {status}", caught.exception.message)
+                self.assertIn(expected, caught.exception.message)
+                self.assertFalse(session.has_login)
+                self.assertEqual(session._fitness_session, {})
+                session.post.assert_not_called()
+
+    def test_user_info_server_error_is_reported_clearly(self):
+        session = self._session()
+        session.perform_cas_login = Mock()
+        session.get = Mock(return_value=_response(_callback()))
+        session.post = Mock(return_value=_response(ok=False, status_code=502))
+
+        with self.assertRaises(ServerError) as caught:
+            session._login("user", "password")
+
+        self.assertIn("HTTP 502", caught.exception.message)
+        self.assertFalse(session.has_login)
+        self.assertEqual(session._fitness_session, {})
+        self.assertNotIn("X-Fitness-Referer", session.headers)
+
     def test_wrong_suffix_spoofed_and_query_only_hosts_are_rejected(self):
         for url in (
             "https://evil.example/callback?next=tyxylp.xjtu.edu.cn",
@@ -313,6 +349,12 @@ class FitnessValidationTest(unittest.TestCase):
         with patch.object(session, "is_auth_failure_response", return_value=True) as is_auth_failure:
             self.assertFalse(session.validate_login())
         is_auth_failure.assert_called_once_with(auth_failed)
+
+    def test_validate_login_returns_false_on_server_error(self):
+        session = FitnessSession()
+        session._fitness_session = {"uid": "user-id", "token": "session-token"}
+        session.post = Mock(return_value=_response(ok=False, status_code=503))
+        self.assertFalse(session.validate_login())
 
     def test_snapshot_round_trip_restores_referer_and_clear_resets_it(self):
         source = FitnessSession()

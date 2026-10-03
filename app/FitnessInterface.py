@@ -45,6 +45,13 @@ class FitnessInterface(CampusPage):
             self._auto_loaded = False
             return
         self.start_job("fitness", self.tr("正在登录体测系统..."), lambda session: Fitness(session).get_years(), self._on_years)
+        thread = self.thread
+        thread.canceled.connect(lambda: self._on_years_failed(thread))
+
+    def _on_years_failed(self, thread):
+        """学年加载失败后，下次进入页面时允许自动重试。"""
+        if thread is self.thread:
+            self._auto_loaded = False
 
     def _on_years(self, years):
         self.years = years

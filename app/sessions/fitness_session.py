@@ -145,6 +145,8 @@ class FitnessSession(CommonLoginSession):
             timeout=timeout,
             _skip_auth_check=True,
         )
+        if response.status_code >= 500:
+            raise ServerError(1, f"体测服务器暂时不可用（HTTP {response.status_code}），请稍后重试")
         if not response.ok or self.is_auth_failure_response(response):
             return None
         try:
@@ -172,6 +174,11 @@ class FitnessSession(CommonLoginSession):
             allow_qrcode_login=False,
         )
         response = self.get(FITNESS_LOGIN_URL, allow_redirects=True, timeout=20, _skip_auth_check=True)
+        # 服务器错误页没有回调参数，先按 HTTP 状态给出明确错误，避免误报为“回调缺少会话参数”
+        if response.status_code >= 500:
+            raise ServerError(1, f"体测服务器暂时不可用（HTTP {response.status_code}），请稍后重试")
+        if not response.ok:
+            raise ServerError(1, f"体测登录入口响应异常（HTTP {response.status_code}）")
         self._fitness_session, self.referer_url = self._extract_launch_session(response.url)
         self.headers["X-Fitness-Referer"] = self.referer_url
         try:
@@ -190,5 +197,5 @@ class FitnessSession(CommonLoginSession):
     def validate_login(self) -> bool:
         try:
             return self._request_user_info(timeout=10) is not None
-        except requests.RequestException:
+        except (requests.RequestException, ServerError):
             return False

@@ -133,6 +133,22 @@ class CampusPageLifecycleTest(unittest.TestCase):
             ]))
             self.assertEqual(page.table.item(0, 1).text(), "88")
 
+    def test_fitness_year_failure_allows_auto_reload_on_next_show(self):
+        """体测学年加载失败后，下次进入页面应当再次自动加载。"""
+        page = FitnessInterface()
+        self._track(page)
+        account_state = SimpleNamespace(current=SimpleNamespace(uuid="account"))
+        with patch("app.FitnessInterface.accounts", account_state), \
+             patch("app.components.CampusPage.accounts", account_state), \
+             patch("app.components.CampusPage.CampusFeatureThread", _PageThread), \
+             patch("app.components.CampusPage.ProcessWidget", _ProcessWidget):
+            page.showEvent(QShowEvent())
+            self.assertTrue(page._auto_loaded)
+            page.thread.canceled.emit()
+            self.assertFalse(page._auto_loaded)
+            page.showEvent(QShowEvent())
+            self.assertTrue(page._auto_loaded)
+
     def test_fitness_score_result_replaces_existing_cells(self):
         page = FitnessInterface()
         self._track(page)
