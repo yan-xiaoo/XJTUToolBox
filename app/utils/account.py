@@ -114,6 +114,15 @@ class Account(QObject):
         return f"Account(username={self.username}, password={self.password}, nickname={self.nickname})"
 
 
+def request_mfa(account: Account | None) -> None:
+    """通知发起任务的账户进行两步验证
+
+    账户可能在任务执行期间被移除，此时静默跳过。
+    """
+    if account is not None:
+        account.MFASignal.emit(True)
+
+
 # 默认账户信息的存储位置
 DEFAULT_ACCOUNT_PATH = os.path.join(DATA_DIRECTORY, "accounts.json")
 # 钥匙串的服务名称

@@ -9,7 +9,7 @@ from gste.judge import GraduateAutoJudge, GraduateQuestionnaire, GraduateQuestio
 from .ProcessWidget import ProcessThread
 from ..sessions.gmis_session import GMISSession
 from ..sessions.gste_session import GSTESession
-from ..utils import Account, logger, accounts
+from ..utils import Account, logger, request_mfa
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
 from ..utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 
@@ -287,7 +287,7 @@ class GraduateJudgeThread(ProcessThread):
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:
                 self.error.emit(self.tr("登录问题"), self.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"))
-                accounts.current.MFASignal.emit(True)
+                request_mfa(self.account)
             else:
                 self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()
