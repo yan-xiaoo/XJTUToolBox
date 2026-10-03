@@ -1,11 +1,12 @@
 import platform
+import threading
 from collections.abc import Callable
 from traceback import format_exception
 from types import TracebackType
 from typing import Type, Any, Dict
 import sys
 
-from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize, QTimer, QObject, QEvent
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QUrl, Qt, QSize, QTimer, QObject, QEvent
 from PyQt5.QtGui import QIcon, QDesktopServices
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox, InfoBadgePosition, \
@@ -77,6 +78,17 @@ def registerSession():
     SessionManager.global_register(HelloSession, "hello")
     SessionManager.global_register(FitnessSession, "fitness")
 
+def _log_uncaught_thread_exception(args) -> None:
+    """记录原生 threading.Thread 中未被捕获的异常（同样运行在出错线程，不触碰 Qt）。"""
+    if args.exc_type is SystemExit:
+        # 与 CPython 默认行为保持一致：线程内的 SystemExit 静默忽略
+        return
+    logger.error(
+        "子线程 %s 发生未经处理的异常",
+        getattr(args.thread, "name", "unknown"),
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+    )
+
 
 class MacReopenFilter(QObject):
     """
@@ -97,6 +109,8 @@ class MacReopenFilter(QObject):
 
 
 class MainWindow(MSFluentWindow):
+    # QThread 等子线程里触发的未处理异常，经此信号排队回主线程后再弹窗
+    unhandledException = pyqtSignal(str)
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -144,7 +158,9 @@ class MainWindow(MSFluentWindow):
 
         cfg.themeChanged.connect(self.on_theme_changed)
 
+        self.unhandledException.connect(self._showUnhandledExceptionDialog)
         sys.excepthook = self.catchExceptions
+        threading.excepthook = _log_uncaught_thread_exception
         self.setting_badge = None
 
         if migrate_all():
@@ -416,21 +432,26 @@ class MainWindow(MSFluentWindow):
         """
         logger.error("未经处理的异常", exc_info=(ty, value, _traceback))
         tracebackString = "".join(format_exception(ty, value, _traceback))
+        if threading.current_thread() is threading.main_thread():
+            self._showUnhandledExceptionDialog(tracebackString)
+        else:
+            # PyQt5 会在异常发生的线程调用 sys.excepthook，子线程创建 QWidget 不安全
+            self.unhandledException.emit(tracebackString)
+        return sys.__excepthook__(ty, value, _traceback)
+
+    @pyqtSlot(str)
+    def _showUnhandledExceptionDialog(self, tracebackString: str):
         box = MessageBox(
             self.tr("程序发生未经处理的异常"),
             content=tracebackString,
             parent=self,
         )
-        # 允许错误内容被复制
         box.contentLabel.setTextInteractionFlags(box.contentLabel.textInteractionFlags() | Qt.TextSelectableByMouse)
         box.yesButton.setText(self.tr("复制到剪切板"))
         box.cancelButton.setText(self.tr("关闭"))
-        box.yesSignal.connect(
-            lambda: QApplication.clipboard().setText(tracebackString)
-        )
+        box.yesSignal.connect(lambda: QApplication.clipboard().setText(tracebackString))
         box.setClosableOnMaskClicked(True)
         box.exec()
-        return sys.__excepthook__(ty, value, _traceback)
 
     def closeEvent(self, a0):
         """
