@@ -38,6 +38,8 @@ class ProcessWidget(QFrame):
         self.hBoxLayout.addWidget(self.stopButton)
         # 是否已经要求子线程退出
         self.stopped = False
+        # 是否已经观察到线程的结束信号
+        self._saw_end = False
         # 是否为确定进度条
         self.isIndeterminate = True
         if not stoppable:
@@ -69,6 +71,7 @@ class ProcessWidget(QFrame):
 
         self.thread_.hasFinished.connect(self.onFinished)
         self.thread_.canceled.connect(self.onStopped)
+        self.thread_.finished.connect(self.onThreadExited) # QThread.finished
         self.thread_.started.connect(self.onThreadStart)
         self.thread_.setIndeterminate.connect(self.onSetIndeterminate)
         self.thread_.deadTime.connect(self.onSetDeadTime)
@@ -111,6 +114,7 @@ class ProcessWidget(QFrame):
 
     @pyqtSlot()
     def onFinished(self):
+        self._saw_end = True
         if self.hide_on_end:
             self.onHide()
         self.finished.emit()
@@ -118,10 +122,20 @@ class ProcessWidget(QFrame):
     @pyqtSlot()
     def onThreadStart(self):
         self.stopped = False
+        self._saw_end = False # 每次启动重置
         self.timer.start()
 
     @pyqtSlot()
+    def onThreadExited(self):
+        self.timer.stop()
+        if self._saw_end:
+            return
+        logger.warning("%s 线程未发送结束信号即退出", type(self.thread_).__name__)
+        self.onStopped()
+
+    @pyqtSlot()
     def onStopped(self):
+        self._saw_end = True
         if self.hide_on_end:
             self.onHide()
         if self.stoppable:
@@ -148,10 +162,9 @@ class ProcessWidget(QFrame):
     @pyqtSlot()
     def checkProcess(self):
         if not self.thread_.isRunning():
-            # 如果线程是被要求退出的，发送退出信号
-            if self.stopped:
-                self.onStopped()
+            # 结束判定统一由 onThreadExited（QThread.finished）负责
             self.timer.stop()
+            return
         # 如果已经发送了停止请求，且超过了设定的时间线程仍然没有退出，强制终止线程
         if self.stopped:
             if self.thread_.isRunning() and time.time() - self.dead_time_start > self.thread_dead_time:

@@ -8,7 +8,7 @@ TEST_DOMAIN = "qt-ui"
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QCoreApplication, QEvent, QThread, Qt
 from PyQt5.QtGui import QColor, QShowEvent
 from PyQt5.QtWidgets import QApplication, QWidget
 
@@ -65,10 +65,43 @@ def _image(year="2026-2027", url="https://dean.xjtu.edu.cn/2026-2027.jpg"):
 
 class CampusPageLifecycleTest(unittest.TestCase):
     def tearDown(self):
+        """关闭并真正销毁用例创建的页面。
+
+        这些页面把后台线程（CampusFeatureThread）建成了自己的 Qt 子对象，而
+        QThread 被销毁时如果仍在执行，Qt 会 qFatal（SIGABRT，退出码 134）。
+        所以必须在销毁页面前先停止并等待线程。另外 processEvents() 不会处理
+        DeferredDelete，需要显式发送，否则页面会带着线程残留到后面的用例。
+        """
         for widget in getattr(self, "widgets", []):
+            self._stop_page_thread(widget)
             widget.close()
             widget.deleteLater()
         APP.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    @staticmethod
+    def _stop_page_thread(widget, grace_ms=2000, wait_ms=5000):
+        """停止并等待页面辖下的全部后台线程；没有（或已是测试替身）时跳过。
+
+        页面每启动一次任务都会新建一个 CampusFeatureThread 子对象，旧线程可能
+        在新任务开始后仍在运行，所以必须遍历全部子线程，而不只是
+        ``widget.thread`` 指向的那一个。
+        """
+        try:
+            candidates = list(widget.findChildren(QThread))
+            current = getattr(widget, "thread", None)
+        except RuntimeError:  # 包装对象已销毁
+            return
+        if isinstance(current, QThread):  # _PageThread 替身不在此列
+            candidates.append(current)
+        for thread in dict.fromkeys(candidates):
+            try:
+                thread.can_run = False
+                if not thread.wait(grace_ms):
+                    thread.terminate()  # 卡在登录/网络请求时只能强制结束
+                    thread.wait(wait_ms)
+            except RuntimeError:  # C++ 对象已销毁
+                pass
 
     def _track(self, *widgets):
         self.widgets = list(widgets)
@@ -95,8 +128,11 @@ class CampusPageLifecycleTest(unittest.TestCase):
                 page.on_account_changed()
                 self.assertFalse(page._auto_loaded)
                 accounts.current = None
-                page.showEvent(QShowEvent())
-                loader.assert_called_once()
+                # 没有账号时再次显示不应发起请求；替换掉加载函数以免用例真的
+                # 发起后台网络请求
+                with patch.object(page, method) as reload_loader:
+                    page.showEvent(QShowEvent())
+                reload_loader.assert_not_called()
 
     def test_calendar_auto_loads_once_without_any_account(self):
         """校历读取的是公开的教务处页面，没有账号也应当自动加载，且不需要登录。"""
@@ -110,8 +146,11 @@ class CampusPageLifecycleTest(unittest.TestCase):
 
         page.on_account_changed()
         self.assertFalse(page._auto_loaded)
-        page.showEvent(QShowEvent())
-        loader.assert_called_once()
+        # 账号变化后再次显示应重新自动加载；替换掉加载函数，
+        # 避免用例真的发起后台网络请求
+        with patch.object(page, "load_calendar") as reload_loader:
+            page.showEvent(QShowEvent())
+        reload_loader.assert_called_once()
 
     def test_fitness_checked_year_auto_queries_and_switch_queries_again(self):
         page = FitnessInterface()
