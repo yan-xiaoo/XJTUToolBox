@@ -10,6 +10,7 @@ import os
 import tempfile
 import urllib.error
 import urllib.request
+from http.client import HTTPResponse
 from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import quote, urlparse
@@ -18,6 +19,25 @@ from scripts.sparkle_common import (
     ARCHITECTURES, UpdateArchive, cdn_url, checked_component, feed_key, feed_prefix,
     file_sha256, may_replace_feed, render_appcast, validate_public_key,
 )
+
+CDN_USER_AGENT = "XJTUToolbox-Sparkle-Publisher/1.0"
+
+
+def open_cdn(request: urllib.request.Request) -> HTTPResponse:
+    """明确标识发布器，并在下载被拒绝时输出可定位的公开请求信息。"""
+    request.add_header("User-Agent", CDN_USER_AGENT)
+    try:
+        return cast(HTTPResponse, urllib.request.urlopen(request, timeout=60))
+    except urllib.error.HTTPError as error:
+        if error.code in (405, 501):
+            raise
+        ray = error.headers.get("CF-Ray", "unavailable") if error.headers else "unavailable"
+        raise RuntimeError(
+            f"CDN {request.get_method()} failed: HTTP {error.code}; "
+            f"URL={request.full_url}; CF-Ray={ray}. "
+            "For HTTP 403, check Worker path rules and Cloudflare security events "
+            "(including Browser Integrity Check). This request does not use R2 Secrets."
+        ) from error
 
 
 class ObjectStore(Protocol):
@@ -150,7 +170,7 @@ def verify_cdn(key: str, archive: UpdateArchive) -> None:
     """从用户使用的 URL 检查文件大小和可达性，然后才发布 feed。"""
     request = urllib.request.Request(cdn_url(key), method="HEAD", headers={"Cache-Control": "no-cache"})
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with open_cdn(request) as response:
             size = response.headers.get("Content-Length")
             if size is not None:
                 if int(size) != archive.length:
@@ -161,7 +181,7 @@ def verify_cdn(key: str, archive: UpdateArchive) -> None:
             raise
     # 优先请求一字节；未实现 Range/长度响应头的 Worker 则流式验证完整包。
     request = urllib.request.Request(cdn_url(key), headers={"Range": "bytes=0-0", "Cache-Control": "no-cache"})
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with open_cdn(request) as response:
         if response.status == 206:
             size = response.headers.get("Content-Range", "").rsplit("/", 1)[-1]
         elif response.status == 200:

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import urllib.error
 from dataclasses import replace
+from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from xml.etree import ElementTree as ET
@@ -20,7 +21,7 @@ from scripts.sparkle_common import (
     ARCHITECTURES, SPARKLE_NS, UpdateArchive, cdn_url, checked_component,
     feed_key, file_sha256, may_replace_feed, render_appcast,
 )
-from scripts.sparkle_publish import publish, require_stable, verify_archive, verify_cdn
+from scripts.sparkle_publish import CDN_USER_AGENT, publish, require_stable, verify_archive, verify_cdn
 
 TEST_DOMAIN = "qt-ui"
 TEST_REGRESSION = True
@@ -150,12 +151,36 @@ class SparklePublishTests(unittest.TestCase):
         with patch("scripts.sparkle_publish.urllib.request.urlopen", side_effect=[head_error, response]) as open_url:
             verify_cdn("packages/app.dmg", archive)
         request = open_url.call_args_list[1].args[0]
+        for call in open_url.call_args_list:
+            self.assertEqual(call.args[0].get_header("User-agent"), CDN_USER_AGENT)
         self.assertEqual(request.get_method(), "GET")
         self.assertEqual(request.get_header("Range"), "bytes=0-0")
         response.headers = {"Content-Range": "bytes 0-0/99999"}
         with patch("scripts.sparkle_publish.urllib.request.urlopen", side_effect=[head_error, response]):
             with self.assertRaises(ValueError):
                 verify_cdn("packages/app.dmg", archive)
+
+    def test_head_identifies_publisher_and_reports_cloudflare_block(self) -> None:
+        """常规 HEAD 明确标识发布器，403 提供地址与 Ray ID 且不跳过检查。"""
+        archive = self.make_archives()[0]
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.headers = {"Content-Length": str(archive.length)}
+        with patch("scripts.sparkle_publish.urllib.request.urlopen", return_value=response) as open_url:
+            verify_cdn("releases/package.dmg", archive)
+        self.assertEqual(open_url.call_count, 1)
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.get_method(), "HEAD")
+        self.assertEqual(request.get_header("User-agent"), CDN_USER_AGENT)
+        headers = Message()
+        headers["CF-Ray"] = "example-ray"
+        error = urllib.error.HTTPError(request.full_url, 403, "Forbidden", headers, None)
+        with patch("scripts.sparkle_publish.urllib.request.urlopen", side_effect=error) as open_url:
+            with self.assertRaises(RuntimeError) as raised:
+                verify_cdn("releases/package.dmg", archive)
+        self.assertEqual(open_url.call_count, 1)
+        self.assertIn(request.full_url, str(raised.exception))
+        self.assertIn("CF-Ray=example-ray", str(raised.exception))
 
     def test_test_publication_cannot_write_production_paths(self) -> None:
         """测试产物与正式 feed 在存储路径和客户端地址上双重隔离。"""

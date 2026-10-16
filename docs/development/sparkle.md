@@ -73,6 +73,10 @@ headers.set("Cache-Control", isAppcast ? "no-store, max-age=0" : "public, max-ag
 
 也可在构造响应头时加上 `headers.set("Content-Length", String(object.size));`，
 这样发布检查通常只需 HEAD，无需额外下载完整 DMG。不要为更新地址设置交互式访问挑战。
+发布器的 HEAD 和 GET 均使用 `XJTUToolbox-Sparkle-Publisher/1.0` User-Agent；
+默认 `Python-urllib/3.12` 曾被本站 Cloudflare 拒绝并返回 403 / 1010。
+如果仍遇到 403，请按日志中的 URL 和 CF-Ray 检查 Cloudflare 安全事件，特别是 Browser Integrity Check；
+更改 GitHub Secrets 无法解决公开下载请求被拦截的问题。仅用 curl 默认 User-Agent 成功不能证明发布器也可访问。
 macOS 打包版自动更新只读取正式 feed，不再调用旧 GitHub 预发布检查器。
 源码模式与 Windows/Linux 的旧检查行为不受影响。
 
