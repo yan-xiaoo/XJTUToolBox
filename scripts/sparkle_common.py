@@ -30,7 +30,7 @@ def checked_component(value: str) -> str:
 
 def feed_prefix(test_batch: str | None = None) -> str:
     """返回相互隔离的正式或测试更新目录。"""
-    return "sparkle" if test_batch is None else f"sparkle-test/{checked_component(test_batch)}"
+    return "releases/sparkle" if test_batch is None else f"releases/sparkle-test/{checked_component(test_batch)}"
 
 
 def feed_key(architecture: str, test_batch: str | None = None) -> str:

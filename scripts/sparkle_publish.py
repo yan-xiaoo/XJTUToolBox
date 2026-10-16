@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import tempfile
@@ -14,7 +15,7 @@ from typing import Protocol, cast
 from urllib.parse import quote, urlparse
 
 from scripts.sparkle_common import (
-    ARCHITECTURES, UpdateArchive, cdn_url, checked_component, feed_key,
+    ARCHITECTURES, UpdateArchive, cdn_url, checked_component, feed_key, feed_prefix,
     file_sha256, may_replace_feed, render_appcast, validate_public_key,
 )
 
@@ -158,13 +159,26 @@ def verify_cdn(key: str, archive: UpdateArchive) -> None:
     except urllib.error.HTTPError as error:
         if error.code not in (405, 501):
             raise
-    # 部分 Worker 只实现 GET；请求一字节，避免下载整个安装包。
+    # 优先请求一字节；未实现 Range/长度响应头的 Worker 则流式验证完整包。
     request = urllib.request.Request(cdn_url(key), headers={"Range": "bytes=0-0", "Cache-Control": "no-cache"})
     with urllib.request.urlopen(request, timeout=60) as response:
         if response.status == 206:
             size = response.headers.get("Content-Range", "").rsplit("/", 1)[-1]
+        elif response.status == 200:
+            size = response.headers.get("Content-Length")
+            if size is None:
+                digest = hashlib.sha256()
+                received = 0
+                while block := response.read(1024 * 1024):
+                    received += len(block)
+                    if received > archive.length:
+                        raise ValueError(f"CDN returned unexpected archive size: {key}")
+                    digest.update(block)
+                if received != archive.length or digest.hexdigest() != archive.sha256:
+                    raise ValueError(f"CDN returned unexpected archive size/hash: {key}")
+                return
         else:
-            size = response.headers.get("Content-Length", "-1")
+            raise ValueError(f"CDN returned unexpected HTTP status {response.status}: {key}")
         if not size.isdecimal() or int(size) != archive.length:
             raise ValueError(f"CDN returned unexpected archive size: {key}")
 
@@ -175,7 +189,7 @@ def publish(
 ) -> None:
     """先验证全部产物，再上传包，最后发布各架构 feed；旧任务不能覆盖新 feed。"""
     import markdown
-    prefix = f"releases/{checked_component(tag)}" if test_batch is None else f"sparkle-test/{checked_component(test_batch)}/packages"
+    prefix = f"releases/{checked_component(tag)}" if test_batch is None else f"{feed_prefix(test_batch)}/packages"
     archives = [UpdateArchive.read(path) for path in sorted(directory.glob("*.sparkle.json"))]
     if archives:
         if sorted(archive.architecture for archive in archives) != sorted(ARCHITECTURES):

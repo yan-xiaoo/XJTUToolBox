@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import tempfile
 import unittest
 import urllib.error
@@ -101,6 +102,8 @@ class SparklePublishTests(unittest.TestCase):
         enclosure = item.find("enclosure")
         assert enclosure is not None
         self.assertEqual(enclosure.get("url"), cdn_url("releases/v1.4.0/XJTUToolbox-macOS-arm64.dmg"))
+        self.assertEqual(feed_key("arm64"), "releases/sparkle/appcast-macos-arm64.xml")
+        self.assertTrue(all(key.startswith("releases/") for key in self.store.objects))
         self.assertIsNone(item.find(f"{{{SPARKLE_NS}}}deltas"))
 
     def test_corrupted_dmg_or_signature_blocks_all_uploads(self) -> None:
@@ -161,7 +164,28 @@ class SparklePublishTests(unittest.TestCase):
             self.publish()
         self.assertEqual(self.store.operations, [])
         self.publish("batch-12")
-        self.assertTrue(all(key.startswith("sparkle-test/batch-12/") for key in self.store.objects))
+        self.assertTrue(all(key.startswith("releases/sparkle-test/batch-12/") for key in self.store.objects))
+        item = ET.fromstring(self.store.objects[feed_key("arm64", "batch-12")]).find("./channel/item/enclosure")
+        assert item is not None
+        self.assertEqual(item.get("url"), cdn_url("releases/sparkle-test/batch-12/packages/XJTUToolbox-macOS-arm64.dmg"))
+
+    def test_worker_without_length_or_range_streams_and_verifies_full_body(self) -> None:
+        """模拟现有 Worker 缺少长度且忽略 Range，仍严格检查完整下载内容。"""
+        archive = self.make_archives()[0]
+        valid = (self.directory / archive.filename).read_bytes()
+        for body in (valid, valid[:-1], b"x" * len(valid), valid + b"extra"):
+            with self.subTest(body=body):
+                response = MagicMock()
+                response.__enter__.return_value = response
+                response.status = 200
+                response.headers = {}
+                response.read.side_effect = io.BytesIO(body).read
+                with patch("scripts.sparkle_publish.urllib.request.urlopen", return_value=response):
+                    if body == valid:
+                        verify_cdn("releases/package.dmg", archive)
+                    else:
+                        with self.assertRaises(ValueError):
+                            verify_cdn("releases/package.dmg", archive)
 
     def test_notes_edit_keeps_package_signature(self) -> None:
         """只修改 Release 正文时，可以直接刷新说明而无需重新签包。"""

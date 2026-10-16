@@ -54,14 +54,25 @@ build/Sparkle-2.10.0/bin/generate_keys --account xjtutoolbox -x /安全位置/sp
 正式源站对象：
 
 ```text
-sparkle/appcast-macos-arm64.xml
-sparkle/appcast-macos-x86_64.xml
+releases/sparkle/appcast-macos-arm64.xml
+releases/sparkle/appcast-macos-x86_64.xml
 releases/{tag}/XJTUToolbox-macOS-{arch}.dmg
 ```
 
 客户端使用 `https://gh-release.xjtutoolbox.com/?file=对象路径`。
-Worker 应允许这些路径、保留正确 Content-Length，并将 appcast 的 `Cache-Control: no-store`
-传递给客户端；不要为 appcast 强制设置长缓存或交互式访问挑战。
+所有更新对象均位于现有 Worker 已允许的 `releases/` 下，无需扩大路径白名单。
+发布检查优先读取长度或使用 Range；若 Worker 不提供长度且忽略 Range，则下载完整包校验大小和 SHA-256。
+
+现有 Worker 若固定写入 `public, max-age=1800`，会覆盖 R2 中 appcast 的禁用缓存设置，
+客户端可能在缓存有效期内继续看到旧版本。建议将原来设置 Cache-Control 的一行替换为：
+
+```javascript
+const isAppcast = /^releases\/(sparkle|sparkle-test\/[^/]+)\/appcast-macos-(arm64|x86_64)\.xml$/.test(file);
+headers.set("Cache-Control", isAppcast ? "no-store, max-age=0" : "public, max-age=1800");
+```
+
+也可在构造响应头时加上 `headers.set("Content-Length", String(object.size));`，
+这样发布检查通常只需 HEAD，无需额外下载完整 DMG。不要为更新地址设置交互式访问挑战。
 macOS 打包版自动更新只读取正式 feed，不再调用旧 GitHub 预发布检查器。
 源码模式与 Windows/Linux 的旧检查行为不受影响。
 
@@ -69,7 +80,7 @@ macOS 打包版自动更新只读取正式 feed，不再调用旧 GitHub 预发�
 
 1. 新工作流合入默认分支并配置上述 Secrets 后，手动运行 **Test Sparkle A to B**。可选择待测试分支，也可填写已有 Release tag 来使用真实正文。
 2. Action 为两种架构各构建 A（`0.0.0.post1`，构建号 1）和 B（`0.0.0.post2`，构建号 2）。
-3. B 和 feed 自动上传到 `sparkle-test/{run_id}-{run_attempt}/`；不创建 Release，不写正式目录。
+3. B 和 feed 自动上传到 `releases/sparkle-test/{run_id}-{run_attempt}/`；不创建 Release，不写正式更新目录。
 4. 等整个 workflow 成功，下载对应架构的 `Install-A-*` Artifact，打开 DMG，把 A 安装到应用目录。
 5. 退出源码实例和旧应用（共用单实例标识），打开 A，点击检查更新，验证更新说明、下载、安装并重启。
 6. 设置页显示 `0.0.0.post2` 后再次检查，应已是最新。检查原有配置和登录状态是否保留。
@@ -77,7 +88,9 @@ macOS 打包版自动更新只读取正式 feed，不再调用旧 GitHub 预发�
 A/B 使用同一正式 Bundle ID、应用名称、数据目录及签名公钥，只有版本不同，均指向独立测试 feed。
 测试完手动安装正常发行版才能切回正式 feed；测试版不会自动跳转正式源。
 每次完整重跑创建新的测试批次，应重新安装对应 A；不要混用不同批次。
-可在 R2 对 `sparkle-test/` 配置过期清理；未完成测试前不要删除该批次。
+可在 R2 对 `releases/sparkle-test/` 配置过期清理；未完成测试前不要删除该批次。
+从旧的顶层 `sparkle-test/` 路径迁移后必须重新运行完整工作流并重新安装 A，
+因为 feed URL 已写入应用并参与签名，移动 R2 对象不能改变旧应用的地址。
 
 自动化测试验证发布门槛、真实 Ed25519 验签、架构齐备、说明更新、发布顺序和隔离。
 实际权限弹窗、Gatekeeper、Qt 退出和安装重启仍须在两个架构上完成上述端到端测试。
