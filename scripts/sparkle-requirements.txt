@@ -1,0 +1,5 @@
+# Linux 发布器不需要桌面 UI 依赖或更新私钥。
+boto3>=1.35,<2
+Markdown>=3.7,<4
+cryptography>=44,<47
+packaging>=24.2,<27

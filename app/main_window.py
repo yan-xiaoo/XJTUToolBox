@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import platform
 import threading
 from collections.abc import Callable
@@ -173,7 +175,7 @@ class MainWindow(MSFluentWindow):
             box.exec()
 
         self.setting_interface.updateClicked.connect(self.on_setting_button_clicked)
-        if cfg.checkUpdateAtStartTime.value:
+        if cfg.checkUpdateAtStartTime.value and not (sys.platform == "darwin" and getattr(sys, "frozen", False)):
             self.update_thread = UpdateThread()
             self.update_thread.updateSignal.connect(self.on_update_check)
             self.update_thread.updateSignal.connect(self.setting_interface.onUpdateCheck)
@@ -457,6 +459,10 @@ class MainWindow(MSFluentWindow):
         """
         重写关闭事件
         """
+        if getattr(self, "sparkle_relaunching", False):
+            self.tray_interface.hide()
+            a0.accept()
+            return
         if cfg.traySetting.value == TraySetting.MINIMIZE:
             self.tray_interface.show()
             QApplication.setQuitOnLastWindowClosed(False)

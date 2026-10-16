@@ -3,13 +3,7 @@ name: Build & Release MacOS
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*.*.*"
-      - "v*.*.*-*"
-      - "v*.*.*.*"
-
-env:
-  PYTHONUTF8: 1
+    tags: ["v*.*.*", "v*.*.*-*", "v*.*.*.*"]
 
 permissions:
   contents: write
@@ -17,84 +11,49 @@ permissions:
 jobs:
   build-macos:
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          # 完全恢复你要求的 macos-15-intel
-          - os: 'macos-15-intel'
-          - os: 'macos-latest'
+        os: [macos-15-intel, macos-15]
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: '1'
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+      MACOS_BUILD_NUMBER: ${{ github.run_number }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          
-      - name: Install UV
-        uses: astral-sh/setup-uv@v5
-        
-      - name: Install create-dmg
-        run: brew install create-dmg
-
-      - name: Install dependencies
-        run: uv sync --locked --all-extras --dev
-        
-      - name: Build Application
-        run: uv run build.py
-        
-      # 1. 生成 ZIP 文件 (完全保留你原来的代码)
-      - name: Archive(macOS)
+      - uses: astral-sh/setup-uv@v5
+      - run: brew install create-dmg
+      - run: uv sync --locked --dev
+      - name: Build application
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
-          ls dist/
-          arch=`uname -m`
-          cd dist/ && zip XJTUToolbox-macOS-${arch}.zip -r XJTUToolbox.app/
-
-      # 2. 生成 DMG 文件 (新增，直接生成，不套 zip)
-      - name: Create DMG
-        run: |
-          cd dist/
-          arch=`uname -m`
-          DMG_NAME="XJTUToolbox-macOS-${arch}.dmg"
-          
-          if [ ! -d "XJTUToolbox.app" ]; then
-            echo "Error: XJTUToolbox.app not found!"
-            exit 1
+          if [ -n "$RELEASE_TAG" ]; then
+            export MACOS_VERSION="${RELEASE_TAG#v}"
           fi
-
-          create-dmg \
-          --volname "XJTUToolBox" \
-          --background "../assets/icons/dmg_background@2x.png" \
-          --window-size 600 430 \
-          --icon-size 128 \
-          --icon "XJTUToolbox.app" 147 250 \
-          --hide-extension "XJTUToolbox.app" \
-          --app-drop-link 436 252 \
-          "$DMG_NAME" \
-          "XJTUToolbox.app"
-      # 上传 Artifacts (同时包含 .zip 和 .dmg)
-      - name: Upload Artifacts(macOS)
-        uses: actions/upload-artifact@v4
+          uv run build.py
+      - name: Package and sign full DMG
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: uv run python -m scripts.sparkle_build package
+      - uses: actions/upload-artifact@v4
         with:
           name: XJTUToolbox-macOS-${{ runner.arch }}
           path: |
-            ./dist/XJTUToolbox-macOS-*.dmg
-
-      # 清理文件夹 (利用 extglob 同时保留 zip 和 dmg)
-      - name: Cleanup Folder(macOS)
-        run: |
-          shopt -s extglob
-          rm -rf ./dist/!(XJTUToolbox-macOS-*.zip|XJTUToolbox-macOS-*.dmg)
-
-      # 发布 Release （只挂载 dmg 文件）
-      - name: Prerelease app
-        uses: softprops/action-gh-release@v1
+            dist/XJTUToolbox-macOS-*.dmg
+            dist/XJTUToolbox-macOS-*.sparkle.json
+          if-no-files-found: error
+      # 不触发 R2 同步；人工转正式版后 upload.yml 才发布更新。
+      - name: Attach assets to prerelease
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: XJTUToolbox ${{ github.ref_name }}
           prerelease: true
           files: |
-            ./dist/XJTUToolbox-macOS-*.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            dist/XJTUToolbox-macOS-*.dmg
+            dist/XJTUToolbox-macOS-*.sparkle.json

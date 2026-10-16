@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 import os
 import sys
 import shlex
@@ -5,7 +8,7 @@ import threading
 
 import keyring
 import keyring.errors
-from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTimer
+from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTimer, QSignalBlocker
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
     setThemeColor, PrimaryPushSettingCard, PushSettingCard, InfoBar, MessageBox, InfoBadgePosition, \
     InfoBadge, LineEdit, SwitchButton, IndicatorPosition, BodyLabel, HyperlinkLabel
@@ -28,6 +31,9 @@ from .utils.style_sheet import StyleSheet
 from .cards.custom_color_setting_card import CustomColorSettingCard
 from .cards.scheduled_notice_card import ScheduledNoticeCard
 from .sub_interfaces.EncryptDialog import EncryptDialog, DecryptDialog
+
+if TYPE_CHECKING:
+    from .utils.macos_updater import MacOSUpdater
 
 
 class NoticeSearchCard(ScheduledNoticeCard):
@@ -407,6 +413,13 @@ class SettingInterface(ScrollArea):
             cfg.prereleaseEnable,
             self.aboutGroup
         )
+        self.mac_updater: MacOSUpdater | None = None
+        if sys.platform == "darwin" and getattr(sys, "frozen", False):
+            self.prereleaseCard.setSwitchEnabled(False)
+            self.prereleaseCard.setContent(self.tr("macOS 自动更新仅提供正式版本；预发布版本请从 GitHub 下载"))
+            self.updateCard.button.setEnabled(False)
+            self.updateOnStartCard.setTitle(self.tr("自动检查更新"))
+            self.updateOnStartCard.setContent(self.tr("启动时及运行期间检查正式版本更新"))
         self.feedbackCard = PrimaryPushSettingCard(
             self.tr("提供反馈"),
             FIF.FEEDBACK,
@@ -767,6 +780,10 @@ class SettingInterface(ScrollArea):
 
     @pyqtSlot()
     def onUpdateClicked(self):
+        if sys.platform == "darwin" and getattr(sys, "frozen", False):
+            if self.mac_updater is not None:
+                self.mac_updater.check_for_updates()
+            return
         if self.update_badge:
             self.update_badge.close()
             self.update_badge = None
@@ -775,3 +792,10 @@ class SettingInterface(ScrollArea):
         self.bar.show()
         self.updateClicked.emit()
         checkUpdate(self)
+
+    @pyqtSlot(bool, bool)
+    def onNativeUpdateState(self, can_check: bool, automatic: bool) -> None:
+        """将 Sparkle 持久化偏好与当前检查状态映射到设置卡片。"""
+        self.updateCard.button.setEnabled(can_check)
+        with QSignalBlocker(self.updateOnStartCard.switchButton):
+            self.updateOnStartCard.setValue(automatic)
