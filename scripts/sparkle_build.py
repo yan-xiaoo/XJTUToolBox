@@ -56,6 +56,10 @@ def configure_bundle() -> None:
         "CFBundleIdentifier": BUNDLE_ID,
         "CFBundleVersion": build,
         "CFBundleShortVersionString": version,
+        # 主程序目前仅支持简体中文，原生更新窗口使用相同语言。
+        "CFBundleLocalizations": ["zh-Hans"],
+        "CFBundleDevelopmentRegion": "zh-Hans",
+        "CFBundleAllowMixedLocalizations": False,
         "LSMinimumSystemVersion": MINIMUM_MACOS,
         "SUFeedURL": cdn_url(feed_key(platform.machine(), os.environ.get("SPARKLE_TEST_BATCH"))),
         "SUPublicEDKey": key,

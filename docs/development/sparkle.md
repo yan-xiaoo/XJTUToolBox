@@ -80,6 +80,20 @@ headers.set("Cache-Control", isAppcast ? "no-store, max-age=0" : "public, max-ag
 macOS 打包版自动更新只读取正式 feed，不再调用旧 GitHub 预发布检查器。
 源码模式与 Windows/Linux 的旧检查行为不受影响。
 
+## 界面语言与错误日志
+
+打包时将应用支持语言和默认语言设为 `zh-Hans`，并关闭混合本地化，
+使 Sparkle 标准窗口与主程序保持简体中文。保留官方 framework 的翻译资源；
+此配置在重新打包后生效。发布前应分别在中文和英文系统语言下检查原生更新窗口。
+系统提供的底层错误描述仍可能使用系统语言。
+
+Sparkle 中止回调复用程序的 `default` logger，以 `INFO` 级别写入
+`~/Library/Logs/XJTUToolbox/YYYY-MM-DD.log`，不提高控制台输出级别。
+搜索 `Sparkle update cycle stopped` 可查看错误域、错误码、描述、失败原因、
+恢复建议、`userInfo`（包含框架提供的失败 URL 等上下文），以及逐层展开的底层错误。
+错误链最多记录 8 层。没有新版本、取消安装等正常结束情况也可能进入该回调，
+因此不能仅凭出现这条日志就判断更新发生故障。
+
 ## A → B 测试
 
 1. 新工作流合入默认分支并配置上述 Secrets 后，手动运行 **Test Sparkle A to B**。可选择待测试分支，也可填写已有 Release tag 来使用真实正文。

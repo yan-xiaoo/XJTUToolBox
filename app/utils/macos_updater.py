@@ -2,17 +2,45 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, cast
 
 import objc
-from Foundation import NSBundle, NSObject, NSUserDefaults
+from Foundation import NSBundle, NSError, NSObject, NSUnderlyingErrorKey, NSUserDefaults
 from PyQt5.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt5.QtWidgets import QApplication
 
-logger = logging.getLogger(__name__)
+from .log import logger
+
+
+def _format_sparkle_error(error: NSError) -> str:
+    """展开 NSError 的诊断信息和底层错误链，并限制异常链的长度。"""
+    details = []
+    seen = set()
+    for depth in range(8):
+        if id(error) in seen:
+            details.append("underlying error chain contains a cycle")
+            break
+        seen.add(id(error))
+        user_info = dict(error.userInfo() or {})
+        underlying = user_info.pop(NSUnderlyingErrorKey, None)
+        details.append(
+            f"error[{depth}]: domain={error.domain()!r}, code={error.code()}, "
+            f"description={error.localizedDescription()!r}, "
+            f"failure_reason={error.localizedFailureReason()!r}, "
+            f"recovery_suggestion={error.localizedRecoverySuggestion()!r}, "
+            f"user_info={user_info!r}"
+        )
+        if underlying is None:
+            break
+        if not isinstance(underlying, NSError):
+            details.append(f"underlying error: {underlying!r}")
+            break
+        error = underlying
+    else:
+        details.append("underlying error chain truncated after 8 errors")
+    return "\n".join(details)
 
 
 class NativeUpdater(Protocol):
@@ -65,10 +93,15 @@ class XJTUSparkleDelegate(NSObject):
         self.owner.prepare_to_relaunch()
 
     @objc.signature(b"v@:@@")
-    def updater_didAbortWithError_(self, updater: object, error: object) -> None:
+    def updater_didAbortWithError_(self, updater: object, error: NSError) -> None:
         """记录 Sparkle 的错误；交互式错误窗口仍由 Sparkle 展示。"""
-        logger.info("Sparkle update cycle stopped: %s", error)
-        self.owner.cancel_relaunch()
+        try:
+            logger.info("Sparkle update cycle stopped:\n%s", _format_sparkle_error(error))
+        except Exception:
+            # 原生回调中的诊断失败不能阻止应用恢复正常关闭行为。
+            logger.info("Sparkle update cycle stopped: %s (error details unavailable)", error, exc_info=True)
+        finally:
+            self.owner.cancel_relaunch()
 
 
 class MacOSUpdater(QObject):
