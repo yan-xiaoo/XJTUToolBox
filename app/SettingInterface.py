@@ -377,6 +377,13 @@ class SettingInterface(ScrollArea):
 
         # 关于组
         self.aboutGroup = SettingCardGroup(self.tr("关于"), self.view)
+        self.githubCard = PushSettingCard(
+            self.tr("打开仓库"), FIF.GITHUB, self.tr("GitHub 仓库"),
+            self.tr("查看源代码、发行版本和项目说明"), self.aboutGroup,
+        )
+        self.githubCard.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://github.com/yan-xiaoo/XJTUToolbox"))
+        )
 
         self.minimizeToTrayCard = ComboBoxSettingCard(
             cfg.traySetting,
@@ -444,6 +451,7 @@ class SettingInterface(ScrollArea):
 
         self.aboutGroup.addSettingCard(self.minimizeToTrayCard)
         self.aboutGroup.addSettingCard(self.feedbackCard)
+        self.aboutGroup.addSettingCard(self.githubCard)
         self.aboutGroup.addSettingCard(self.logCard)
         self.aboutGroup.addSettingCard(self.autoStartCard)
         self.aboutGroup.addSettingCard(self.updateOnStartCard)

@@ -355,6 +355,11 @@ class Config(QConfig):
     showAvatarOnSideBar = OptionsConfigItem("Settings", "show_avatar_on_sidebar",
                                     True, OptionsValidator([True, False]), BooleanSerializer())
     cardLayout = ConfigItem("Settings", "card_layout", [], CardValidator(), CardSerializer())
+    # 缺少新配置的旧用户也使用精简布局；空列表表示用户主动取消全部固定。
+    sidebarPinnedFeatures = ConfigItem(
+        "Settings", "sidebar_pinned_features",
+        ["schedule", "attendance", "score", "lms"], StrListValidator(), StrListSerializer()
+    )
     useKeyring = OptionsConfigItem("Settings", "use_keyring", True, OptionsValidator([True, False]),
                                    BooleanSerializer())
     keepSessionOnExit = OptionsConfigItem("Settings", "keep_session_on_exit", True,
