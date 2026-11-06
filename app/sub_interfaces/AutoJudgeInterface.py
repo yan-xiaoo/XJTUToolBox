@@ -1,6 +1,6 @@
 from typing import Union, Dict
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSlot, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFrame
 from qfluentwidgets import CardWidget, BodyLabel, CaptionLabel, ScrollArea, PrimaryPushButton, \
@@ -109,15 +109,17 @@ class AutoJudgeInterface(ScrollArea):
         self.vBoxLayout.addWidget(self.commandBar, 1, alignment=Qt.AlignTop | Qt.AlignHCenter)
 
         self.thread_ = JudgeThread(accounts.current, choice=JudgeChoice.GET_COURSES)
+        self._refresh_after_finished = False
         self.thread_.questionnaires.connect(self.onGetQuestionnaireFinish)
         self.thread_.error.connect(self.onThreadError)
         self.thread_.submitSuccess.connect(self.onSubmitSuccess)
         self.thread_.editSuccess.connect(self.onEditSuccess)
-        self.thread_.finished.connect(self.unlockAllCards)
 
         self.processWidget = ProcessWidget(
             self.thread_, self.view, stoppable=True, hide_on_end=True
         )
+        # Let the progress widget finish the old run before starting a refresh.
+        self.thread_.finished.connect(self.onThreadFinished)
         self.processWidget.setVisible(False)
         self.vBoxLayout.addWidget(self.processWidget, alignment=Qt.AlignHCenter)
 
@@ -246,6 +248,7 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot()
     def onCurrentAccountChanged(self):
+        self._refresh_after_finished = False
         self.thread_.account = accounts.current
         self.clearWidgets()
         self.switchTo(self.startFrame)
@@ -259,13 +262,22 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot()
     def onStartButtonClicked(self):
-        self.clearWidgets()
+        if self.thread_.isRunning():
+            return
         if accounts.current is None:
             self.onThreadError(self.tr("未登录"), self.tr("请先添加一个账号"))
             return
         self.thread_.choice = JudgeChoice.GET_COURSES
+        self.lockAllCards()
         self.processWidget.setVisible(True)
         self.thread_.start()
+
+    @pyqtSlot()
+    def onThreadFinished(self):
+        self.unlockAllCards()
+        if self._refresh_after_finished:
+            self._refresh_after_finished = False
+            self.onStartButtonClicked()
 
     @pyqtSlot(bool)
     def onShowFinishedQuestionnairesTriggered(self, isChecked):
@@ -309,6 +321,7 @@ class AutoJudgeInterface(ScrollArea):
 
     @pyqtSlot(list, list)
     def onGetQuestionnaireFinish(self, questionnaires: list, finished_questionnaires: list):
+        self.clearWidgets()
         if len(questionnaires) == 0:
             self.noQuestionnaireLabel.setVisible(True)
         else:
@@ -319,6 +332,8 @@ class AutoJudgeInterface(ScrollArea):
         self.questionnaireFrameLayout.addSpacing(20)
         for questionnaire in finished_questionnaires:
             self.addQuestionnaire(questionnaire, True)
+        if self.thread_.isRunning():
+            self.lockAllCards()
         self.switchTo(self.questionnaireFrame)
 
     @pyqtSlot()
@@ -339,8 +354,7 @@ class AutoJudgeInterface(ScrollArea):
                     break
         # 处理所有课程评价完成的情况
         elif self.thread_.choice == JudgeChoice.JUDGE_ALL:
-            # 等当前线程完全结束后再刷新，避免在 QThread 内部重新 start 同一个线程
-            QTimer.singleShot(0, self.onStartButtonClicked)
+            self._refresh_after_finished = True
             if self.window().isActiveWindow():
                 InfoBar.success(self.tr("自动评价完成"), self.tr("所有课程评教已完成"),
                                 duration=3000, isClosable=True, position=InfoBarPosition.TOP_RIGHT, parent=self)

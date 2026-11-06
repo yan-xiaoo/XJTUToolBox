@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import Mock
 
+TEST_DOMAIN = "auth-session"
+
 from qms.judge import QMSAutoJudge, QMSQuestionnaire
 
 
