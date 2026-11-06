@@ -33,6 +33,7 @@ from .sessions.jwxt_session import JWXTSession
 from .sessions.js_session import JsSession
 from .sessions.gmis_session import GMISSession
 from .sessions.gste_session import GSTESession
+from .sessions.qms_session import QMSSession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
@@ -74,6 +75,7 @@ def registerSession():
     SessionManager.global_register(JwappSession, "jwapp")
     SessionManager.global_register(GMISSession, "gmis")
     SessionManager.global_register(GSTESession, "gste")
+    SessionManager.global_register(QMSSession, "qms")
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
     SessionManager.global_register(CampusCardSession, "campus_card")

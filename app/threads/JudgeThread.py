@@ -1,32 +1,27 @@
+from enum import Enum
 from typing import Optional
 
 import requests
 from PyQt5.QtCore import pyqtSignal
 
 from .ProcessWidget import ProcessThread
-from ..sessions.jwxt_session import JWXTSession
+from ..sessions.qms_session import QMSSession
 from ..utils import Account, logger, request_mfa
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
 from ..utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
-
-from jwxt import AutoJudge, QuestionnaireTemplate
 from auth import ServerError
-from enum import Enum
+from jwxt import QuestionnaireTemplate
+from qms import QMSAutoJudge, QMSError, QMSQuestionnaire
 
 
 class JudgeChoice(Enum):
-    # 获得所有待评教的课程
     GET_COURSES = 0
-    # 评教
     JUDGE = 1
-    # 编辑并重新提交问卷
     EDIT = 2
-    # 自动评价所有课程
     JUDGE_ALL = 3
 
 
 class JudgeThread(ProcessThread):
-    # 未完成问卷与已完成问卷
     questionnaires = pyqtSignal(list, list)
     submitSuccess = pyqtSignal()
     editSuccess = pyqtSignal()
@@ -35,174 +30,123 @@ class JudgeThread(ProcessThread):
         super().__init__(parent)
         self.account = account
         self.choice = choice
-        self.judge_ = None
-        self.questionnaire = None
-        self.template = None
+        self.judge_: Optional[QMSAutoJudge] = None
+        self.questionnaire: Optional[QMSQuestionnaire] = None
         self.score: int = 100
-        self.msgAll: str = ""    # 自定义评语
-        self.scoreAll: Optional[QuestionnaireTemplate.Score] = None
+        self.msgAll: str = ""
+        self.scoreAll = None
 
     @property
-    def session(self) -> JWXTSession:
-        """
-        获取当前账户用于访问教务系统的 session
-        """
-        return self.account.session_manager.get_session("jwxt")
+    def session(self) -> QMSSession:
+        return self.account.session_manager.get_session("qms")
 
     def login(self) -> bool:
         self.setIndeterminate.emit(True)
-        self.messageChanged.emit(self.tr("正在登录教务系统..."))
+        self.messageChanged.emit(self.tr("正在登录学生评教系统..."))
         self.session.ensure_login(
             self.account.username,
             self.account.password,
             account=self.account,
             mfa_provider=self.account.session_manager.mfa_provider,
         )
-
-        # 进入评教区域
-        self.messageChanged.emit(self.tr("正在进入评教系统..."))
-        self.judge_ = AutoJudge(self.session)
+        self.messageChanged.emit(self.tr("正在进入学生评教系统..."))
+        self.judge_ = QMSAutoJudge(self.session)
         self.setIndeterminate.emit(False)
+        return True
 
+    @staticmethod
+    def _score_percent(score) -> int:
+        if score is None:
+            return 100
+        if isinstance(score, QuestionnaireTemplate.Score):
+            return QuestionnaireTemplate.score_to_int(score)
+        if isinstance(score, int) and 0 <= score <= 3:
+            return {3: 100, 2: 80, 1: 60, 0: 40}[score]
+        try:
+            return max(0, min(100, int(score)))
+        except (TypeError, ValueError):
+            return 100
+
+    def _submit_questionnaire(self, questionnaire: QMSQuestionnaire, submit: bool = True) -> bool:
+        self.setIndeterminate.emit(False)
+        self.messageChanged.emit(self.tr("正在提交评教...") if submit else self.tr("正在保存评教..."))
+        self.progressChanged.emit(30)
+        result, msg = self.judge_.save_answers(
+            questionnaire,
+            self._score_percent(self.score),
+            self.msgAll,
+            submit=submit,
+        )
+        self.progressChanged.emit(100)
+        if not result:
+            self.error.emit(self.tr("提交失败") if submit else self.tr("保存失败"), msg)
+            return False
         return True
 
     def judge(self) -> bool:
-        self.setIndeterminate.emit(False)
-        self.messageChanged.emit(self.tr("正在评教..."))
-        self.progressChanged.emit(20)
-        data = self.judge_.questionnaireData(self.questionnaire, self.account.username)
-        self.progressChanged.emit(40)
-        if not self.can_run:
-            return False
-        options = self.judge_.questionnaireOptions(self.questionnaire, self.account.username)
-        self.progressChanged.emit(60)
-        if not self.can_run:
-            return False
-        for one_data in data:
-            self.template.complete(one_data, options, True, default_score=self.score, default_subjective=self.msgAll)
-        if not self.can_run:
-            return False
-        self.progressChanged.emit(80)
-        result, msg = self.judge_.submitQuestionnaire(self.questionnaire, data)
-        self.progressChanged.emit(100)
-        if not result:
-            self.error.emit("提交失败", msg)
-            return False
-        return True
+        return self._submit_questionnaire(self.questionnaire, True)
 
     def edit(self) -> bool:
-        self.setIndeterminate.emit(False)
-        self.messageChanged.emit(self.tr("正在重新评教..."))
-        self.progressChanged.emit(5)
-        result, msg = self.judge_.editQuestionnaire(self.questionnaire, self.account.username)
-        if not result:
-            self.error.emit("编辑失败", msg)
+        if self.questionnaire is None:
+            self.error.emit(self.tr("无法编辑"), self.tr("未找到待编辑的问卷"))
             return False
-        self.progressChanged.emit(20)
-        data = self.judge_.questionnaireData(self.questionnaire, self.account.username)
-        self.progressChanged.emit(40)
-        if not self.can_run:
-            return False
-        options = self.judge_.questionnaireOptions(self.questionnaire, self.account.username)
-        self.progressChanged.emit(60)
-        if not self.can_run:
-            return False
-        for one_data in data:
-            self.template.complete(one_data, options, True, default_score=self.score, default_subjective=self.msgAll)
-        if not self.can_run:
-            return False
-        self.progressChanged.emit(80)
-        result, msg = self.judge_.submitQuestionnaire(self.questionnaire, data)
-        self.progressChanged.emit(100)
-        if not result:
-            self.error.emit("提交失败", msg)
-            return False
-        return True
+        if self.questionnaire.finished:
+            self.messageChanged.emit(self.tr("正在撤回已提交的评教..."))
+            ok, msg = self.judge_.recall(self.questionnaire)
+            if not ok:
+                self.error.emit(self.tr("撤回失败"), msg)
+                return False
+            unfinished, _ = self.judge_.get_questionnaires()
+            for item in unfinished:
+                if item.course_id == self.questionnaire.course_id and item.BPJS == self.questionnaire.BPJS:
+                    self.questionnaire = item
+                    break
+        return self._submit_questionnaire(self.questionnaire, True)
 
     def judge_all(self) -> bool:
         self.setIndeterminate.emit(False)
         self.messageChanged.emit(self.tr("正在获取所有待评教课程..."))
         self.progressChanged.emit(10)
-        questionnaires = self.judge_.unfinishedQuestionnaires()
-        
+        questionnaires, _ = self.judge_.get_questionnaires()
         if not questionnaires:
-            self.error.emit("没有待评教课程", "所有课程已经完成评教")
+            self.error.emit(self.tr("没有待评教课程"), self.tr("所有课程已经完成评教"))
             return False
-        
-        total_count = len(questionnaires)
-        success_count = 0
-        
-        for i, questionnaire in enumerate(questionnaires):
+        total = len(questionnaires)
+        success = 0
+        failures: list[str] = []
+        for index, questionnaire in enumerate(questionnaires):
             if not self.can_run:
                 return False
-                
-            progress_base = 10 + (i * 90 // total_count)
-            
+            self.messageChanged.emit(self.tr(f"正在评教第{index + 1}/{total}门：{questionnaire.course_name}"))
+            self.progressChanged.emit(10 + int(80 * index / total))
             try:
-                self.messageChanged.emit(self.tr(f"正在评教第{i+1}/{total_count}门: {questionnaire.KCM}"))
-                self.progressChanged.emit(progress_base + 5)
-                data = self.judge_.questionnaireData(questionnaire, self.account.username)
-                self.progressChanged.emit(progress_base + 20)
-                
-                options = self.judge_.questionnaireOptions(questionnaire, self.account.username)
-                self.progressChanged.emit(progress_base + 40)
-                
-                # 获取模版
-                type_dict = {
-                    QuestionnaireTemplate.Type.THEORY: "理论课",
-                    QuestionnaireTemplate.Type.IDEOLOGY: "思政课",
-                    QuestionnaireTemplate.Type.GENERAL: "通识课",
-                    QuestionnaireTemplate.Type.EXPERIMENT: "实验课",
-                    QuestionnaireTemplate.Type.PROJECT: "项目设计课",
-                    QuestionnaireTemplate.Type.PHYSICAL: "体育课"
-                }
-
-                questionnaire_type = None
-                for item in type_dict:
-                    if type_dict[item] in questionnaire.WJMC:
-                        questionnaire_type = item
-                        break
-                if questionnaire_type is None:
-                    # 默认理论课
-                    questionnaire_type = QuestionnaireTemplate.Type.THEORY
-
-                template = QuestionnaireTemplate.from_file(
-                    questionnaire_type,
-                    self.scoreAll
+                result, msg = self.judge_.save_answers(
+                    questionnaire,
+                    self._score_percent(self.scoreAll),
+                    self.msgAll,
+                    submit=True,
                 )
-
-                for one_data in template.data:
-                    if one_data.TXDM != '01':
-                        one_data.ZGDA = self.msgAll if self.msgAll else self.tr("无")
-
-                for one_data in data:
-                    template.complete(one_data, options, True, default_score=QuestionnaireTemplate.score_to_int(self.scoreAll), default_subjective=self.msgAll)
-                self.progressChanged.emit(progress_base + 60)
-                
-                result, msg = self.judge_.submitQuestionnaire(questionnaire, data)
-                self.progressChanged.emit(progress_base + 80)
-                
-                if result:
-                    success_count += 1
-                    self.messageChanged.emit(self.tr(f"第{i+1}/{total_count}门课程评教成功: {questionnaire.KCM}"))
-                else:
-                    self.messageChanged.emit(self.tr(f"第{i+1}/{total_count}门课程评教失败: {questionnaire.KCM}"))
-                    logger.warning(f"评教失败: {msg}")
-                
-            except Exception as e:
-                self.messageChanged.emit(self.tr(f"第{i+1}/{total_count}门课程评教异常: {questionnaire.KCM}"))
-                logger.error(f"评教异常: {questionnaire.KCM} {str(e)}")
-                
-            self.progressChanged.emit(progress_base + 90)
-
-        if success_count != total_count:
-            self.error.emit("", self.tr(f"所有评教完成，成功{success_count}/{total_count}门"))
-
+            except Exception as exc:
+                result, msg = False, str(exc)
+            if result:
+                success += 1
+            else:
+                failures.append(f"{questionnaire.course_name}（{questionnaire.BPJS}）：{msg}")
+                logger.warning("QMS 评教失败：%s %s", questionnaire.course_name, msg)
         self.progressChanged.emit(100)
-        return success_count > 0
+        if failures:
+            details = "\n".join(failures[:10])
+            if len(failures) > 10:
+                details += f"\n……另有 {len(failures) - 10} 门失败"
+            self.error.emit(
+                self.tr("部分课程评教失败"),
+                self.tr(f"成功 {success}/{total} 门\n{details}"),
+            )
+            return False
+        self.messageChanged.emit(self.tr(f"全部评教完成，共 {success} 门课程"))
+        return True
 
     def run(self):
-        # 强制重置可运行状态，避免上次取消后本次直接退出
         self.can_run = True
         if self.account is None:
             self.error.emit(self.tr("未登录"), self.tr("请您先添加一个账户"))
@@ -210,41 +154,28 @@ class JudgeThread(ProcessThread):
             return
         self.progressChanged.emit(0)
         try:
-            result = self.login()
-            if not result:
-                self.canceled.emit()
-                return
-
+            self.login()
             if self.choice == JudgeChoice.GET_COURSES:
-                self.messageChanged.emit(self.tr("正在获取未完成问卷信息..."))
-                self.progressChanged.emit(66)
-                if not self.can_run:
-                    self.canceled.emit()
-                    return
-                questionnaires = self.judge_.unfinishedQuestionnaires()
-                self.progressChanged.emit(88)
-                self.messageChanged.emit(self.tr("正在获取已完成问卷信息..."))
-                questionnaires_finished = self.judge_.finishedQuestionnaires()
+                self.messageChanged.emit(self.tr("正在获取评教任务..."))
+                self.progressChanged.emit(50)
+                unfinished, finished = self.judge_.get_questionnaires()
                 self.progressChanged.emit(100)
-                self.questionnaires.emit(questionnaires, questionnaires_finished)
+                self.questionnaires.emit(unfinished, finished)
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.JUDGE:
-                result = self.judge()
-                if not result:
+                if not self.judge():
                     self.canceled.emit()
                     return
                 self.submitSuccess.emit()
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.EDIT:
-                result = self.edit()
-                if not result:
+                if not self.edit():
                     self.canceled.emit()
                     return
                 self.editSuccess.emit()
                 self.hasFinished.emit()
             elif self.choice == JudgeChoice.JUDGE_ALL:
-                result = self.judge_all()
-                if not result:
+                if not self.judge_all():
                     self.canceled.emit()
                     return
                 self.submitSuccess.emit()
@@ -260,7 +191,7 @@ class JudgeThread(ProcessThread):
             self.error.emit(self.tr("登录问题"), str(e))
             self.canceled.emit()
         except MFACancelledError as e:
-            logger.info("MFA 验证已取消：%s", e)
+            logger.info("安全验证已取消：%s", e)
             self.error.emit(self.tr("安全验证已取消"), self.tr("已取消安全验证，本次操作未完成。"))
             self.canceled.emit()
         except MFAUnavailableError as e:
@@ -274,6 +205,10 @@ class JudgeThread(ProcessThread):
                 request_mfa(self.account)
             else:
                 self.error.emit(self.tr("服务器错误"), e.message)
+            self.canceled.emit()
+        except QMSError as e:
+            logger.error("QMS 接口错误", exc_info=True)
+            self.error.emit(self.tr("评教系统错误"), str(e))
             self.canceled.emit()
         except requests.ConnectionError:
             logger.error("网络错误", exc_info=True)

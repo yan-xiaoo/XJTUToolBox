@@ -73,7 +73,7 @@ class JudgeAllOptionInterface(ScrollArea):
         self.submitButtonClicked.emit()
 
     def getText(self):
-        return self.textArea.toPlainText() or "无"
+        return self.textArea.toPlainText().strip() or "该课程整体教学情况良好，暂无进一步建议。"
 
     def getScore(self):
         return self.scoreBox.currentData()
