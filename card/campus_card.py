@@ -157,7 +157,12 @@ class CampusCard:
             merchant = str(item.get("toMerchant") or resume.split("-", 1)[0])
             records.append(CardTransaction(
                 time=str(item.get("jndatetimeStr") or ""),
-                amount_cents=_signed_amount_cents(amount_cents, type_name, icon),
+                amount_cents=_signed_amount_cents(
+                    amount_cents, type_name, icon,
+                    type_from=_optional_str(item.get("typeFrom")),
+                    to_account=_optional_int(item.get("toAccount")),
+                    from_account=_optional_int(item.get("fromAccount")),
+                ),
                 merchant=merchant,
                 balance_cents=_integer(item.get("cardBalance"), "流水余额", operation),
                 type_name=type_name,
@@ -217,19 +222,61 @@ class CampusCard:
 
 
 _INCOME_MARKERS = ("充值", "圈存", "退款", "补助", "recharge", "transfer-in", "refund", "subsidy")
-_EXPENSE_MARKERS = ("消费", "支出", "扣款", "consume", "expense", "transfer-out")
+_EXPENSE_MARKERS = (
+    "消费", "支出", "扣款", "consume", "expense", "transfer-out",
+    # 食堂窗口扫码支付走独立通道：icon=qrCode-payment / turnoverType=二维码支付，
+    # 不在上面的词里，会落到默认分支被当成正数收入。
+    "二维码支付", "qrcode-payment",
+)
 
 
-def _signed_amount_cents(raw_amount: int, type_name: str, icon: str) -> int:
-    """按服务端符号和已知流水类型确定金额方向。"""
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _signed_amount_cents(
+    raw_amount: int,
+    type_name: str,
+    icon: str,
+    type_from: str | None = None,
+    to_account: int | None = None,
+    from_account: int | None = None,
+) -> int:
+    """确定流水金额方向。
+
+    优先用 ``typeFrom``：官方 ncard 账单页前端按 ``"1" === typeFrom`` 显示 +，
+    其余一律显示 -，这是权威规则。缺失时才退回类型文案关键词；关键词也对不上时，
+    看钱最终落到哪个账号——充值 ``toAccount=0``（钱没转出去），消费/扫码支付
+    ``toAccount=商户终端账号``（转出去了）。
+    """
     if raw_amount < 0:
         return raw_amount
+    if type_from:
+        return abs(raw_amount) if type_from == "1" else -abs(raw_amount)
     normalized = f"{type_name} {icon}".casefold()
     # 收入必须先判断：例如“消费退款”同时包含支出和收入标记，退款应取正。
     if any(marker.casefold() in normalized for marker in _INCOME_MARKERS):
         return abs(raw_amount)
     if any(marker.casefold() in normalized for marker in _EXPENSE_MARKERS):
         return -abs(raw_amount)
+    # 学校新增了没见过的支付渠道文案：与其盲目当收入，不如看钱实际去哪了。
+    if to_account is not None:
+        stays_on_card = to_account == 0 or (from_account is not None and to_account == from_account)
+        return abs(raw_amount) if stays_on_card else -abs(raw_amount)
     return raw_amount
 
 
