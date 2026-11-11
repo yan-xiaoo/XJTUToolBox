@@ -2,13 +2,20 @@ name: Update AUR Packages
 
 on:
   release:
-    types: [released, published, edited]
+    # `published` 和 `released` 会在同一次正式发布时各触发一次。两次同时推 AUR
+    # 会把 HEAD 和 refs/heads/master 写成不同提交，下一次 clone 停在 detached HEAD。
+    types: [released, edited]
   workflow_dispatch:
     inputs:
       tag_name:
         description: '手动触发时，请输入要发布的版本号 (如: v1.2.3)'
         required: true
         type: string
+
+# edited 可能和 released 重叠。排队而不是并行，避免再次把 HEAD 和 master 拆开。
+concurrency:
+  group: update-aur
+  cancel-in-progress: false
 
 jobs:
   update-aur:
@@ -116,6 +123,8 @@ jobs:
           commit_email: "github-actions[bot]@users.noreply.github.com"
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
+          # clone 停在 detached HEAD 时，action 会提交到无名分支，再推 master 就失败。
+          post_process: 'bash "${GITHUB_WORKSPACE:-/github/workspace}/scripts/aur_attach_master.sh"'
 
       - name: Publish to AUR (xjtutoolbox-bin)
         if: steps.check-aur.outputs.available == 'true'
@@ -127,6 +136,7 @@ jobs:
           commit_email: "github-actions[bot]@users.noreply.github.com"
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
+          post_process: 'bash "${GITHUB_WORKSPACE:-/github/workspace}/scripts/aur_attach_master.sh"'
 
       - name: Publish to AUR (xjtutoolbox-git)
         if: steps.check-aur.outputs.available == 'true'
@@ -138,6 +148,7 @@ jobs:
           commit_email: "github-actions[bot]@users.noreply.github.com"
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "Auto-update to version ${{ env.TARGET_TAG }}"
+          post_process: 'bash "${GITHUB_WORKSPACE:-/github/workspace}/scripts/aur_attach_master.sh"'
 
       - name: Notice skipped AUR publish
         if: steps.check-aur.outputs.available != 'true'
