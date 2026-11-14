@@ -18,6 +18,18 @@
     "esbuild": "0.25.12",
     "pdfjs": {
       "uuid": "11.1.1"
+    },
+    "vitepress": {
+      "vite": "6.4.6"
+    },
+    "mermaid": {
+      "katex": "0.18.2"
+    },
+    "multimatch": {
+      "minimatch": "11.0.1"
+    },
+    "html-export-pdf-cli": {
+      "puppeteer": "25.17.0"
     }
   },
   "dependencies": {
