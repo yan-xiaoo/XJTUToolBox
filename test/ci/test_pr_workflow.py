@@ -1431,5 +1431,9 @@ class TestWorkflowContract(unittest.TestCase):
             self.assertIn(phrase, template)
 
 
+# Loaded with this module so the existing contract command also runs it.
+from test.ci.test_update_aur_workflow import TestUpdateAurWorkflow  # noqa: E402,F401
+
+
 if __name__ == "__main__":
     unittest.main()
