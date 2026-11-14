@@ -143,6 +143,7 @@ jobs:
 
       - name: Run Linux ARM64 shard
         env:
+          PYTHONFAULTHANDLER: "1"
           XDG_STATE_HOME: ${{ runner.temp }}/xjtu-test-state
           XDG_CONFIG_HOME: ${{ runner.temp }}/xjtu-test-config
           XDG_DATA_HOME: ${{ runner.temp }}/xjtu-test-data
