@@ -1,7 +1,7 @@
 [project]
 name = "XJTUToolBox"
 version = "1.4.1"
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.11, <3.14"
 readme = "README.md"
 description = "A desktop application offering a variety of services for Xi'an Jiaotong University, including attendance check, schedule inquiry, and one-key teaching evaluation."
 dependencies = [
@@ -13,6 +13,8 @@ dependencies = [
     "pyqt5-frameless-window~=0.7.4; sys_platform == 'darwin' or sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
     # 【环境隔离】为 macOS, Linux x86_64 安装核心 PyQt5（跳过 Linux aarch64）
     "pyqt5>=5.15.11; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
+    # Linux ARM64 使用系统的 PyQt5，但需要与虚拟环境解释器匹配的 SIP。
+    "pyqt5-sip>=12.8,<13; sys_platform == 'linux' and platform_machine == 'aarch64'",
     # 在 Windows 下，强制使用 pyqt5>=5.15.11，配合软件包 pyqt5-qt5==5.15.2
     "pyqt5>=5.15.11; sys_platform == 'win32'",
     "pyqt5-qt5>=5.15,<=5.15.2; sys_platform == 'win32'",
@@ -34,7 +36,7 @@ dependencies = [
     "pyobjus>=1.2.4; sys_platform == 'darwin'",
     "pyobjc-framework-Cocoa>=11,<13; sys_platform == 'darwin'",
     "urllib3>=2.7.0",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "numpy>=2.2,<3",
     "typing-extensions>=4.0.0",
 ]
@@ -54,7 +56,6 @@ required-environments = [
 
 [dependency-groups]
 dev = [
-    "pillow>=12.0.0",
     "pyinstaller>=6.17.0",
     "pyqt5-stubs>=5.15",
     "cryptography>=44,<47",

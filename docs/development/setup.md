@@ -12,7 +12,7 @@
 
 ### 安装 Python
 
-本项目需要 **Python 3.10 或更高版本**。本项目的依赖管理工具 uv 会自动选择或安装一个合适的 Python 版本，您无需手动安装 Python。
+本项目支持 **Python 3.11–3.13**。本项目的依赖管理工具 uv 会自动选择或安装一个合适的 Python 版本，您无需手动安装 Python。
 
 ### 克隆仓库
 
@@ -60,7 +60,7 @@ python app.py
 
 1.  安装开发依赖
 
-    PyInstaller 和 Pillow 已设置为项目的开发依赖,通过以下命令安装：
+    PyInstaller 是开发依赖，Pillow 是运行时依赖。通过以下命令安装：
 
     ```bash
     uv sync --dev

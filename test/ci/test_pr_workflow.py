@@ -63,7 +63,7 @@ XDG_RUNNER_TEMP_ENV = (
 
 
 HOSTED_PLATFORMS = (
-    ("linux-x64-py310", "ubuntu-22.04", "3.10", "x86_64"),
+    ("linux-x64-py311", "ubuntu-22.04", "3.11", "x86_64"),
     ("linux-x64-py313", "ubuntu-22.04", "3.13", "x86_64"),
     ("windows-x64-py312", "windows-latest", "3.12", "x86_64"),
     ("macos-arm64-py312", "macos-latest", "3.12", "arm64"),
@@ -76,6 +76,7 @@ EXPECTED_DOMAINS = tuple(
 
 ARM_IMPORTS = (
     "PyQt5",
+    "PyQt5.sip",
     "PyQt5.QtMultimedia",
     "PyQt5.QtMultimediaWidgets",
     "PyQt5.QtSvg",
@@ -239,6 +240,7 @@ def xdg_context_contract_errors(workflow: str) -> list[str]:
 
     targets = (
         ("test-shards", "Run ${{ matrix.domain.name }} tests"),
+        ("linux-arm-shards", "Run Linux ARM64 shard"),
         ("existing-bug-regressions", "Run historical bug regressions"),
     )
     for job_id, step_name in targets:
@@ -322,7 +324,7 @@ def matrix_contract_errors(workflow: str) -> list[str]:
             f"unexpected hosted domain matrix: {hosted_domain_expression!r}"
         )
     if arm_domain_expression != DOMAIN_MATRIX_EXPRESSION:
-        errors.append(f"unexpected QEMU domain matrix: {arm_domain_expression!r}")
+        errors.append(f"unexpected ARM64 domain matrix: {arm_domain_expression!r}")
     contract = job_section(workflow, "test-contract")
     if "domains: ${{ steps.domains.outputs.domains }}" not in contract:
         errors.append("test-contract does not expose the domain matrix output")
@@ -335,12 +337,12 @@ def matrix_contract_errors(workflow: str) -> list[str]:
     )
     arm_name = (
         "    name: ${{ matrix.domain.name }} "
-        "(linux-arm64-qemu-py310, Python 3.10)"
+        "(linux-arm64-py312, Python 3.12)"
     )
     if hosted_name not in job_section(workflow, "test-shards"):
         errors.append("unexpected hosted job name")
     if arm_name not in job_section(workflow, "linux-arm-shards"):
-        errors.append("unexpected QEMU job name")
+        errors.append("unexpected ARM64 job name")
     return errors
 
 
@@ -350,25 +352,6 @@ def gate_script(workflow: str) -> str:
         r"(?ms)^        run: \|\n((?:          .*\n?)*)", section
     )
     return textwrap.dedent(match.group(1)) if match else ""
-
-
-def arm_hard_exit_contract_errors(workflow: str) -> list[str]:
-    """Return drift from the QEMU-only Qt UI teardown workaround."""
-
-    errors: list[str] = []
-    arm = job_section(workflow, "linux-arm-shards")
-    hosted = job_section(workflow, "test-shards")
-    if workflow.count("--hard-exit-on-success") != 1:
-        errors.append("unexpected hard-exit option count")
-    if "--hard-exit-on-success" in hosted:
-        errors.append("hosted job enables hard exit")
-    if 'if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then' not in arm:
-        errors.append("Qt UI condition is missing")
-    if 'hard_exit_arg="--hard-exit-on-success"' not in arm:
-        errors.append("hard-exit assignment is missing")
-    if "$hard_exit_arg" not in arm:
-        errors.append("runner does not consume hard-exit argument")
-    return errors
 
 
 class TestInventoryContract(unittest.TestCase):
@@ -1223,26 +1206,23 @@ class TestWorkflowContract(unittest.TestCase):
             xdg_context_contract_errors(job_level_runner),
         )
 
-        for job_id, occurrence in (
-            ("test-shards", 1),
-            ("existing-bug-regressions", 2),
+        for job_id, step_name in (
+            ("test-shards", "Run ${{ matrix.domain.name }} tests"),
+            ("linux-arm-shards", "Run Linux ARM64 shard"),
+            ("existing-bug-regressions", "Run historical bug regressions"),
         ):
             with self.subTest(job=job_id):
-                before, separator, after = workflow.partition(
-                    "          XDG_CACHE_HOME: "
-                    "${{ runner.temp }}/xjtu-test-cache\n"
+                step = named_step_section(workflow, job_id, step_name)
+                original_step = f"      - name: {step_name}{step}"
+                missing_step_xdg = workflow.replace(
+                    original_step,
+                    original_step.replace(
+                        "          XDG_CACHE_HOME: "
+                        "${{ runner.temp }}/xjtu-test-cache\n",
+                        "",
+                    ),
+                    1,
                 )
-                if occurrence == 2:
-                    second_before, separator, after = after.partition(
-                        "          XDG_CACHE_HOME: "
-                        "${{ runner.temp }}/xjtu-test-cache\n"
-                    )
-                    before += (
-                        "          XDG_CACHE_HOME: "
-                        "${{ runner.temp }}/xjtu-test-cache\n" + second_before
-                    )
-                self.assertTrue(separator)
-                missing_step_xdg = before + after
                 self.assertIn(
                     f"{job_id} test step has unexpected "
                     "XDG_CACHE_HOME: ${{ runner.temp }}/xjtu-test-cache",
@@ -1320,57 +1300,26 @@ class TestWorkflowContract(unittest.TestCase):
     def test_arm_matrix_has_dynamic_domains_and_complete_qt_runtime(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         section = job_section(workflow, "linux-arm-shards")
+        setup = (REPOSITORY_ROOT / "scripts" / "setup_linux_arm64_ci.sh").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("needs: test-contract", section)
-        self.assertIn("arch: aarch64", section)
-        self.assertIn("distro: ubuntu22.04", section)
-        self.assertIn('test "$(uname -m)" = "aarch64"', section)
-        self.assertIn("XDG_STATE_HOME: /tmp/xjtu-test-state", section)
-        self.assertIn("XDG_CONFIG_HOME: /tmp/xjtu-test-config", section)
-        self.assertIn("XDG_DATA_HOME: /tmp/xjtu-test-data", section)
-        self.assertIn("XDG_CACHE_HOME: /tmp/xjtu-test-cache", section)
-        self.assertIn("--system-site-packages", section)
-        self.assertIn("uv sync --frozen --group dev", section)
-        self.assertNotIn("rm -f uv.lock", section)
+        self.assertIn("runs-on: ubuntu-22.04-arm", section)
+        self.assertIn('python-version: "3.12"', section)
+        self.assertIn("bash scripts/setup_linux_arm64_ci.sh", section)
+        self.assertIn('test "$(uname -m)" = "aarch64"', setup)
+        self.assertIn("uv sync --locked --python 3.12 --group dev", setup)
+        self.assertIn("*.abi3.so", setup)
+        self.assertIn("--expected-machine aarch64", section)
         self.assertEqual(
             DOMAIN_MATRIX_EXPRESSION,
-            matrix_axis_expression(
-                WORKFLOW_PATH.read_text(encoding="utf-8"),
-                "linux-arm-shards",
-                "domain",
-            ),
+            matrix_axis_expression(workflow, "linux-arm-shards", "domain"),
         )
         for import_name in ARM_IMPORTS:
             self.assertIn(f"--require-import {import_name}", section)
         for pin in ARM_PINS:
-            self.assertIn(pin, section)
-        self.assertIn(
-            'if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then', section
-        )
-        self.assertIn('hard_exit_arg="--hard-exit-on-success"', section)
-        self.assertEqual(1, workflow.count("--hard-exit-on-success"))
-        self.assertNotIn(
-            "--hard-exit-on-success", job_section(workflow, "test-shards")
-        )
-        self.assertEqual([], arm_hard_exit_contract_errors(workflow))
-
-    def test_arm_hard_exit_scope_mutations_are_rejected(self) -> None:
-        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-        wrong_domain = workflow.replace(
-            'if [ "${{ matrix.domain.id }}" = "qt-ui" ]; then',
-            'if [ "${{ matrix.domain.id }}" = "ai" ]; then',
-        )
-        duplicate = workflow.replace(
-            "uv run --frozen python -m test.ci.run_test_shard",
-            "uv run --frozen python -m test.ci.run_test_shard --hard-exit-on-success",
-            1,
-        )
-        self.assertIn(
-            "Qt UI condition is missing", arm_hard_exit_contract_errors(wrong_domain)
-        )
-        self.assertIn(
-            "unexpected hard-exit option count",
-            arm_hard_exit_contract_errors(duplicate),
-        )
+            self.assertIn(pin, setup)
+        self.assertNotIn("--hard-exit-on-success", workflow)
 
     def test_regression_job_uses_the_dynamic_runner(self) -> None:
         section = job_section(
@@ -1453,11 +1402,10 @@ class TestWorkflowContract(unittest.TestCase):
             "每个产品测试模块恰好属于一个主测试域",
             "有意重跑",
             "本地用例数和耗时不能代替",
-            "linux-arm64-qemu-py310",
+            "linux-arm64-py312",
             "<domain display name> (<platform id>, Python <version>)",
             "各平台 × 当前域定义的分片",
             "矩阵与 check 数会自动随之变化",
-            "QEMU 结果是兼容",
             "synchronize",
             "workflow_dispatch",
             "required status check",
