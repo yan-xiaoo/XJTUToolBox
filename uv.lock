@@ -3,10 +3,10 @@ revision = 5
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "(python_full_version >= '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform == 'darwin')",
-    "(python_full_version < '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'darwin')",
     "python_full_version >= '3.12' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'win32'",
     "(python_full_version >= '3.12' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
+    "(python_full_version < '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform == 'darwin')",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
     "(python_full_version < '3.12' and platform_machine != 'x86_64' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'linux' and sys_platform != 'win32')",
 ]
 required-markers = [
@@ -3667,7 +3667,7 @@ requires-dist = [
     { name = "pyqt5", marker = "sys_platform == 'win32'", specifier = ">=5.15.11" },
     { name = "pyqt5-frameless-window", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or sys_platform == 'win32'", specifier = "~=0.7.4" },
     { name = "pyqt5-qt5", marker = "sys_platform == 'win32'", specifier = ">=5.15,<=5.15.2" },
-    { name = "pyqt5-sip", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=12.8,<13" },
+    { name = "pyqt5-sip", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=12.15,<13" },
     { name = "pytz", specifier = "~=2025.2" },
     { name = "requests", specifier = ">=2.33.0" },
     { name = "tqdm", specifier = "~=4.67.1" },

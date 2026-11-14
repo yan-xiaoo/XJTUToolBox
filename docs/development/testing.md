@@ -125,8 +125,8 @@ check 名称定位。
 
 hosted 分片使用 uv 0.12.3、`uv sync --frozen --group dev`、架构断言和 Qt 离屏环境。
 ARM64 测试和发布共用 `scripts/setup_linux_arm64_ci.sh`。脚本用 `uv sync --locked` 安装
-Python 3.12 环境，从 Ubuntu 22.04 系统包复制使用稳定 ABI 的 PyQt5 模块，并使用锁文件中的
-`pyqt5-sip` 为 Python 3.12 构建对应的 SIP 扩展。脚本还补齐 `pyqt-fluent-widgets==1.8.7`、
+Python 3.12 环境，使用 Ubuntu 22.04 的 Qt 开发包编译 PyQt5 5.15.11，并使用锁文件中的
+`pyqt5-sip` 构建对应的 SIP 扩展。脚本还补齐 `pyqt-fluent-widgets==1.8.7`、
 `pyqt5-frameless-window==0.7.5`、`darkdetect==0.8.0` 和 `xcffib==1.12.0`。
 Linux 发布工作流会在 Ubuntu 22.04 ARM64 上离屏启动 PyInstaller 产物，再制作各格式的安装包。
 

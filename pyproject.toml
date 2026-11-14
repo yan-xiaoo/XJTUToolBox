@@ -13,8 +13,8 @@ dependencies = [
     "pyqt5-frameless-window~=0.7.4; sys_platform == 'darwin' or sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
     # 【环境隔离】为 macOS, Linux x86_64 安装核心 PyQt5（跳过 Linux aarch64）
     "pyqt5>=5.15.11; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
-    # Linux ARM64 使用系统的 PyQt5，但需要与虚拟环境解释器匹配的 SIP。
-    "pyqt5-sip>=12.8,<13; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    # Linux ARM64 使用系统 Qt 和单独安装的 PyQt5 绑定。
+    "pyqt5-sip>=12.15,<13; sys_platform == 'linux' and platform_machine == 'aarch64'",
     # 在 Windows 下，强制使用 pyqt5>=5.15.11，配合软件包 pyqt5-qt5==5.15.2
     "pyqt5>=5.15.11; sys_platform == 'win32'",
     "pyqt5-qt5>=5.15,<=5.15.2; sys_platform == 'win32'",

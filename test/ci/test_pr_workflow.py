@@ -1309,7 +1309,7 @@ class TestWorkflowContract(unittest.TestCase):
         self.assertIn("bash scripts/setup_linux_arm64_ci.sh", section)
         self.assertIn('test "$(uname -m)" = "aarch64"', setup)
         self.assertIn("uv sync --locked --python 3.12 --group dev", setup)
-        self.assertIn("*.abi3.so", setup)
+        self.assertIn("'pyqt5==5.15.11'", setup)
         self.assertIn("--expected-machine aarch64", section)
         self.assertEqual(
             DOMAIN_MATRIX_EXPRESSION,
