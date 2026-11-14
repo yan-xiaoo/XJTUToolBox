@@ -35,7 +35,7 @@ dependencies = [
     "Cython~=3.2.1; sys_platform == 'darwin'",
     "pyobjus>=1.2.4; sys_platform == 'darwin'",
     "pyobjc-framework-Cocoa>=11,<13; sys_platform == 'darwin'",
-    "urllib3>=2.7.0",
+    "urllib3>=2.8.0",
     "pillow>=13.0.0",
     "numpy>=2.2,<3",
     "typing-extensions>=4.0.0",
@@ -43,6 +43,7 @@ dependencies = [
 
 [tool.uv]
 package = false
+constraint-dependencies = ["certifi>=2026.10.18", "setuptools>=84.1.0"]
 # 支持平台：x86/x86_64 Windows, x86_64/arm64 macOS, x86_64/aarch64 linux
 required-environments = [
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
@@ -58,5 +59,7 @@ required-environments = [
 dev = [
     "pyinstaller>=6.17.0",
     "pyqt5-stubs>=5.15",
-    "cryptography>=44,<47",
+    # cryptography 49 起停止支持 32 位 Windows。
+    "cryptography>=50,<51; sys_platform != 'win32' or platform_machine != 'x86'",
+    "cryptography>=48.0.1,<49; sys_platform == 'win32' and platform_machine == 'x86'",
 ]
