@@ -13,7 +13,7 @@ conflicts=("${_pkgname}" "${_pkgname}-bin")
 
 # 1. 官方仓库与 AUR 依赖 (混合依赖)
 depends=(
-    'python>=3.10'
+    'python>=3.11'
     'python-pyqt5'
     'python-requests'
     'python-urllib3'
@@ -25,7 +25,7 @@ depends=(
     'python-pyjwt'
     'python-beautifulsoup4'
     'python-lxml'
-    'python-pillow'
+    'python-pillow>=13.0.0'
     'python-keyring'
     'python-numpy'
     'python-icalendar'

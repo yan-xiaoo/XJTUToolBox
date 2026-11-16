@@ -347,10 +347,7 @@ class FeatureNavigationTest(unittest.TestCase):
 
     def test_hover_delay_pointer_bridge_and_keyboard(self) -> None:
         """悬停延迟打开，进入浮层停止关闭，键盘也能访问更多。"""
-        APP.sendEvent(self.nav.moreButton, QEvent(QEvent.Enter))
-        self.assertFalse(self.nav.popup.isVisible())
-        QTest.qWait(300)
-        self.assertTrue(self.nav.popup.isVisible())
+        self._open_more_by_hover()
         APP.sendEvent(self.nav.moreButton, QEvent(QEvent.Leave))
         self.assertTrue(self.nav._leaveTimer.isActive())
         APP.sendEvent(self.nav.popup, QEvent(QEvent.Enter))
@@ -368,9 +365,7 @@ class FeatureNavigationTest(unittest.TestCase):
 
     def test_hover_popup_click_becomes_persistent_then_closes(self) -> None:
         """浮层不抓取输入，真实按钮首次点击保持展开，第二次点击关闭。"""
-        APP.sendEvent(self.nav.moreButton, QEvent(QEvent.Enter))
-        QTest.qWait(300)
-        self.assertTrue(self.nav.popup.isVisible())
+        self._open_more_by_hover()
         self.assertIsNone(APP.activePopupWidget(), "浮层不能接管侧栏的鼠标事件")
         point = self.nav.moreButton.mapTo(self.window, self.nav.moreButton.rect().center())
         for expected in (True, False):
@@ -379,12 +374,21 @@ class FeatureNavigationTest(unittest.TestCase):
             with patch("app.components.feature_navigation.QCursor.pos", return_value=QPoint(-10000, -10000)):
                 QTest.qWait(350)
             self.assertEqual(self.nav.popup.isVisible(), expected)
-        APP.sendEvent(self.nav.moreButton, QEvent(QEvent.Enter))
-        QTest.qWait(300)
-        self.assertTrue(self.nav.popup.isVisible())
+        self._open_more_by_hover()
         with patch("app.components.feature_navigation.QCursor.pos", return_value=QPoint(-10000, -10000)):
             self.nav._closeIfOutside()
         self.assertFalse(self.nav.popup.isVisible())
+
+    def _open_more_by_hover(self) -> None:
+        """固定离屏鼠标位置，等待悬停定时器实际触发。"""
+        button = self.nav.moreButton
+        point = button.mapToGlobal(button.rect().center())
+        timeout = QSignalSpy(self.nav._hoverTimer.timeout)
+        with patch("app.components.feature_navigation.QCursor.pos", return_value=point):
+            APP.sendEvent(button, QEvent(QEvent.Enter))
+            self.assertFalse(self.nav.popup.isVisible())
+            self.assertTrue(timeout.wait(1000))
+            self.assertTrue(self.nav.popup.isVisible())
 
     def test_hover_closes_in_every_direction_without_leave_event(self) -> None:
         """即使没有 Leave 事件，沿侧栏上下左右移出按钮也会自动收起。"""

@@ -1,7 +1,7 @@
 # 测试与 Pull Request 门禁
 
 每个 Pull Request 会先执行 `Test contract`，再把当前定义的测试域分发到各 hosted 平台和
-Linux ARM64 QEMU，另外运行独立的 `Existing bug regressions`，最后汇总为
+原生 Linux ARM64 runner，另外运行独立的 `Existing bug regressions`，最后汇总为
 `PR Tests / CI Gate`。合同、分片、回归或 Gate 处于等待、失败、取消或跳过状态时不得合并。
 
 PR 的 `opened` 和新提交的 `synchronize` 会自动触发测试；workflow 不提供
@@ -35,7 +35,7 @@ uv run --frozen python -m test.ci.run_test_shard --domain <domain-id>
 ```
 
 `test/ci/shards.py` 只保存一份稳定的域 ID、Actions 显示名和矩阵顺序；合同通过后会把这份定义输出为
-JSON，hosted 与 ARM64 QEMU 矩阵都自动读取它。主域和历史回归目标则由产品测试文件自己的 marker 发现，
+JSON，各平台的测试矩阵都自动读取它。主域和历史回归目标则由产品测试文件自己的 marker 发现，
 不维护共享模块列表。每个产品测试文件在顶层声明自己的归属，例如：
 
 ```python
@@ -111,28 +111,24 @@ marker 必须是单一、直接的布尔字面量赋值，不能使用变量、�
 
 | 平台 ID | runner/执行方式 | Python | 架构与目的 |
 |---|---|---:|---|
-| `linux-x64-py310` | Ubuntu 22.04 hosted | 3.10 | x86_64，最低支持版本 |
+| `linux-x64-py311` | Ubuntu 22.04 hosted | 3.11 | x86_64，最低支持版本 |
 | `linux-x64-py313` | Ubuntu 22.04 hosted | 3.13 | x86_64，当前 3.13 补丁线 |
 | `windows-x64-py312` | Windows latest hosted | 3.12 | AMD64，Windows 路径 |
 | `macos-arm64-py312` | macOS latest hosted | 3.12 | arm64，Apple Silicon |
 | `macos-intel-py312` | macOS 15 Intel hosted | 3.12 | x86_64，Intel Mac |
-| `linux-arm64-qemu-py310` | Ubuntu 22.04 hosted 上的 QEMU guest | 系统 Python 3.10 | aarch64，Linux ARM64 兼容验证 |
+| `linux-arm64-py312` | Ubuntu 22.04 ARM64 hosted | 3.12 | aarch64，与 ARM64 发布构建使用同一环境 |
 
 主分片统一显示为
 `<domain display name> (<platform id>, Python <version>)`。例如
-`Qt and desktop UI (linux-arm64-qemu-py310, Python 3.10)`；域、平台 ID 和 Python 版本可直接从
+`Qt and desktop UI (linux-arm64-py312, Python 3.12)`；域、平台 ID 和 Python 版本可直接从
 check 名称定位。
 
 hosted 分片使用 uv 0.12.3、`uv sync --frozen --group dev`、架构断言和 Qt 离屏环境。
-ARM64 QEMU 安装系统 PyQt5、QtMultimedia、QtSvg、QtX11Extras，在带
-`system-site-packages` 的虚拟环境中运行；还按锁定版本补齐 `pyqt-fluent-widgets==1.8.7`、
-`pyqt5-frameless-window==0.7.5`、`darkdetect==0.8.0` 和 `xcffib==1.12.0`。QEMU 结果是兼容
-验证，不等于原生 ARM runner；未在本机或 Actions 运行的平台必须如实标记为未验证。
-
-QEMU 下 QtMultimedia/GStreamer 可能在 `qt-ui` 域已经输出全部成功结果后的解释器 teardown
-阶段崩溃，因此只有该域使用 `--hard-exit-on-success`：runner 先确认 suite 成功并刷新
-stdout/stderr，再以 0 跳过 teardown。任何收集、导入或断言失败仍返回非零；hosted 平台和
-其它 QEMU 域都禁止该选项。这个兼容措施仍须由 exact-SHA 的自然 ARM job 验证。
+ARM64 测试和发布共用 `scripts/setup_linux_arm64_ci.sh`。脚本用 `uv sync --locked` 安装
+Python 3.12 环境，使用 Ubuntu 22.04 的 Qt 开发包编译 PyQt5 5.15.11，并使用锁文件中的
+`pyqt5-sip` 构建对应的 SIP 扩展。脚本还补齐 `pyqt-fluent-widgets==1.8.7`、
+`pyqt5-frameless-window==0.7.5`、`darkdetect==0.8.0` 和 `xcffib==1.12.0`。
+Linux 发布工作流会在 Ubuntu 22.04 ARM64 上离屏启动 PyInstaller 产物，再制作各格式的安装包。
 
 构建、发布和定时任务继续由独立的 `.github/workflows/build_linux.yml`、`build_macos.yml`、
 `build_windows.yml`、`deploy.yml`、`empty_room.yml`、`upload.yml` 和 `update_aur.yml` 负责；
