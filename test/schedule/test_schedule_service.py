@@ -101,6 +101,37 @@ class AddExamFromJsonTest(unittest.TestCase):
 
         self.assertEqual(Term.get(Term.term_number == TERM).start_date, TERM_START)
 
+    def test_fullwidth_colon_and_single_digit_hour(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        for text in ("9：00-11：00", "９：００－１１：００", "9:00 — 11:00"):
+            with self.subTest(text=text):
+                payload = _exam_json(time_range=text)
+                payload["exams"][0]["KSSJMS"] = f"2026-01-08  {text}（星期四）"
+                self.assertEqual(self.service.addExamFromJson(payload), 0)
+                exam = Exam.select().get()
+                self.assertEqual(exam.start_exact_time.isoformat(), "09:00:00")
+                self.assertEqual(exam.end_exact_time.isoformat(), "11:00:00")
+                self.assertEqual(exam.day_of_week, 4)
+
+    def test_invalid_later_row_keeps_saved_exams(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        self.service.addExamFromJson(_exam_json())
+        payload = _exam_json(time_range="09:00-11:00")
+        payload["exams"].append({"KCM": "示例课程乙", "KSSJMS": "待定"})
+        with self.assertRaises(ValueError):
+            self.service.addExamFromJson(payload)
+        self.assertEqual(Exam.select().get().start_exact_time.isoformat(), "08:00:00")
+
+    def test_reimport_does_not_remove_same_course_in_other_term(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        self.service.setTermInfo(OTHER_TERM, "2026-09-07")
+        self.service.addExamFromJson(_exam_json())
+        other = _exam_json(term_number=OTHER_TERM)
+        other["exams"][0]["KSSJMS"] = "2027-01-04 09:00-11:00"
+        self.service.addExamFromJson(other)
+        self.service.addExamFromJson(_exam_json())
+        self.assertEqual(Exam.select().count(), 2)
+
 
 if __name__ == '__main__':
     unittest.main()
