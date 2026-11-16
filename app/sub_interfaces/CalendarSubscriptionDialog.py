@@ -9,6 +9,11 @@ from ..threads.CalendarThread import CalendarThread
 from ..utils import accounts
 
 
+def _has_unpublished_rotation(state):
+    return (state is not None and state.last_push is not None
+            and state.last_push.token != state.token)
+
+
 class CalendarConfigurationDialog(MessageBoxBase):
     def __init__(self, service, parent=None):
         super().__init__(parent)
@@ -134,6 +139,14 @@ class CalendarSubscriptionDialog(MessageBoxBase):
             self.repo.setText(state.repo_url)
             self.branch.setText(state.branch)
             self.urlBase.setText(state.url_base)
+            if _has_unpublished_rotation(state):
+                self.link.clear()
+                for action in ("copy", "webcal", "verify", "rotate"):
+                    self.buttons[action].setEnabled(False)
+                self.status.setText(self.tr(
+                    "新订阅链接尚未发布，请先完成发布；若发布结果不确定，请先修复发布状态。"
+                    "确认成功前，请保留客户端原订阅。"))
+                return
             self.link.setText(state.subscription_url)
             self.buttons["webcal"].setEnabled(state.webcal_url is not None)
             self.status.setText(self.tr("上次发布：") +
@@ -155,6 +168,10 @@ class CalendarSubscriptionDialog(MessageBoxBase):
         if self.job is not None or self._account_changed:
             return
         try:
+            if action in ("copy", "webcal", "verify", "rotate"):
+                if _has_unpublished_rotation(self.service.subscription_state()):
+                    self.refresh_state()
+                    return
             if action in ("copy", "webcal"):
                 state = self.service.subscription_state()
                 if state:

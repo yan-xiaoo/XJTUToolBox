@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QWidget
-from xjtu_calendar.subscribe import SubscriptionState, save_state
+from xjtu_calendar.subscribe import PushRecord, SubscriptionState, save_state
 
 from app.sub_interfaces.CalendarSubscriptionDialog import CalendarConfigurationDialog, CalendarSubscriptionDialog
 from app.threads.CalendarThread import CalendarThread
@@ -54,6 +54,34 @@ class CalendarDialogTest(unittest.TestCase):
         self.assertEqual(APP.clipboard().text(), state.subscription_url)
         dialog.run_action("webcal")
         self.assertEqual(APP.clipboard().text(), state.webcal_url)
+
+    def test_unpublished_rotation_blocks_links_until_publish_recovers(self):
+        state = SubscriptionState(TERM, "https://github.com/example/calendar.git", "cal", "newtoken",
+                                  "https://example.github.io/calendar/")
+        state.last_push = PushRecord("2026-11-16T10:00:00Z", "synthetic", "oldtoken")
+        cfg = self.service.settings("subscription")
+        save_state(cfg, state)
+        dialog = CalendarSubscriptionDialog(self.service, None, self.parent)
+        self.assertEqual(dialog.link.text(), "")
+        self.assertIn("尚未发布", dialog.status.text())
+        self.assertNotIn(state.last_push.pushed_at, dialog.status.text())
+        APP.clipboard().setText("keep existing subscription")
+        with patch("app.sub_interfaces.CalendarSubscriptionDialog.CalendarThread") as thread:
+            for action in ("copy", "webcal", "verify", "rotate"):
+                self.assertFalse(dialog.buttons[action].isEnabled())
+                dialog.run_action(action)
+            thread.assert_not_called()
+        self.assertEqual(APP.clipboard().text(), "keep existing subscription")
+        for action in ("push", "repair"):
+            self.assertTrue(dialog.buttons[action].isEnabled())
+        state.last_push.token = state.token
+        save_state(cfg, state)
+        dialog.refresh_state()
+        self.assertEqual(dialog.link.text(), state.subscription_url)
+        for action in ("copy", "webcal", "verify", "rotate"):
+            self.assertTrue(dialog.buttons[action].isEnabled())
+        dialog.run_action("copy")
+        self.assertEqual(APP.clipboard().text(), state.subscription_url)
 
     def test_invalid_editor_input_is_not_saved(self):
         before = self.service.calendar_path.read_bytes()

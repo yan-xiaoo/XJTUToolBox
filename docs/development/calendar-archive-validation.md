@@ -10,10 +10,10 @@
 
 ## 已执行检查
 
-- `python -m test.ci.run_offline_review --domains schedule qt-ui ai auth-session notification-crawler`：489 个唯一测试，486 个通过，3 个跳过，无失败。跳过项是 Windows 符号链接权限测试，以及两项未提供真实账户的联网测试。未把分组测试和单独重跑结果相加计数。
+- `python -m test.ci.run_offline_review --domains schedule qt-ui ai auth-session notification-crawler`：PR #94 审查修复后重新执行，493 个唯一测试，490 个通过，3 个跳过，无失败。跳过项是 Windows 符号链接权限测试，以及两项未提供真实账户的联网测试。未把分组测试和单独重跑结果相加计数。
 - `python -m unittest test.ci.test_pr_workflow`：61 项通过。Windows 上需将 Git Bash 放在 PATH 前部；首次命中 WSL 启动器时失败，切换正确工具后通过。
 - `python -m test.ci.check_test_contract`：40 个产品测试模块均归属已声明分组。
-- Windows 构建实际生成主程序和更新器；使用合成课表执行打包后的 `--calendar-worker`，验证 ICS 导出、事件和提醒，并检查许可证随包分发。
+- 首次提交 `125b645` 的 Windows 构建实际生成主程序和更新器；使用合成课表执行打包后的 `--calendar-worker`，验证 ICS 导出、事件和提醒，并检查许可证随包分发。本轮两处审查修复未重新打包。
 - 中文路径下的原生 Windows Qt 启动、资料归档窗口渲染，以及真实子进程超时清理均已检查。
 - 完整差异的空白检查通过。测试和构建产物不纳入提交。
 
@@ -26,6 +26,11 @@
 `test/app/test_lms_archive.py` 使用实际 vendored 采集和下载函数，仅替换 HTTP 传输，检查正文与作业附件发现、回放稳定窗口、精确大小、续传版本、取消、已存在文件保护、账户/课程目录隔离、Cookie 作用域和不落盘临时链接。原生线程测试另行验证结果传回与任务注册表释放。
 
 ## 验证边界
+
+本轮审查修复补充了以下检查：
+
+- 轮换失败后，对话框隐藏未发布的新地址，禁用复制、检查链接和再次轮换；保留发布与修复入口。状态恢复后重新开放链接操作。除状态测试外，还用临时本地 Git 仓库注入提交失败，确认实际对话框无法复制新地址。
+- 回放临时地址返回 401/403 时，交由下载核心重新获取地址；学校 API 的会话拒绝仍立即停止。新增测试通过实际下载与校验流程验证刷新成功、刷新次数上限，以及 WebVPN 地址改写后的学校 API 拒绝处理。HTTP 响应均为合成数据，未连接学校或回放服务器。
 
 未访问学校服务、读取真实学校账户凭据或上传真实课表。真实学校接口、WebVPN、真实回放服务器、手机日历客户端和完整登录后的主窗口流程仍需人工验收。macOS、Linux、Windows 32 位、Python 3.11/3.12 未在本次本地验证中运行；应以对应 CI 和平台验收为准。
 

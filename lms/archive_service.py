@@ -53,7 +53,12 @@ class SessionOpener:
                 self.rewrite(url), headers=headers, stream=True, timeout=(5, 10))
         except requests.RequestException as exc:
             raise OSError(f'资源请求失败（{type(exc).__name__}）') from None
-        if response.status_code in (401, 403):
+        # Replay URLs have their own short-lived authorization. Preserve their
+        # HTTP errors so the replay downloader can resolve a fresh URL. Classify
+        # the original LMS API URL, before an optional WebVPN rewrite.
+        is_lms_api = (parsed.netloc == urlparse(core.BASE).netloc
+                      and parsed.path.startswith("/api/"))
+        if response.status_code in (401, 403) and is_lms_api:
             response.close()
             raise ArchiveStopped('访问被拒绝或登录已失效，请在思源学堂页面重新登录后重试')
         if response.status_code >= 400:
