@@ -3646,6 +3646,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/84/ca4a0d870178ad21dc5d6721c782d924b2aa8ced93bcf7fe715c1eae01fd/xcffib-1.12.0.tar.gz", hash = "sha256:43452de509c1264d5bcea4bc025ca1bf68272d240ef26d3340b46e11f63d3d4a", size = 131116, upload-time = "2025-12-14T17:38:01.296Z" }
 
 [[package]]
+name = "xjtu-timetable-calendar"
+version = "0.11.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "icalendar" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/c3/76e98360e131f2a2769719549e01f90e4ccd5a542c00e4534a7541a8811c/xjtu_timetable_calendar-0.11.1.tar.gz", hash = "sha256:b04c25b054857c2e6cc027fc90aadf43174e03238fc418eee62e8373b808d813", size = 447491, upload-time = "2026-11-15T03:41:10.588Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/02/7c6123cfb5cb1cd0a4c9201064e760e7ec0320e5e2037febbd0c3c10338d/xjtu_timetable_calendar-0.11.1-py3-none-any.whl", hash = "sha256:024dc90973c8ce88fadb066dd4a97155d7eedf12dc1a2ab798697046e1f67757", size = 236663, upload-time = "2026-11-15T03:41:09.062Z" },
+]
+
+[[package]]
 name = "xjtutoolbox"
 version = "1.4.1"
 source = { virtual = "." }
@@ -3680,6 +3692,7 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
     { name = "urllib3" },
+    { name = "xjtu-timetable-calendar" },
 ]
 
 [package.dev-dependencies]
@@ -3722,6 +3735,7 @@ requires-dist = [
     { name = "tqdm", specifier = "~=4.67.1" },
     { name = "typing-extensions", specifier = ">=4.0.0" },
     { name = "urllib3", specifier = ">=2.8.0" },
+    { name = "xjtu-timetable-calendar", specifier = "==0.11.1" },
 ]
 
 [package.metadata.requires-dev]

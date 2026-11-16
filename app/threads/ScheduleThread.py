@@ -26,6 +26,7 @@ class ScheduleThread(ProcessThread):
         super().__init__(parent)
         self.term_number = term_number
         self._attendance = None
+        self._jwxt_schedule = None
         # 本次任务使用的账户快照，由 run() 在任务开始时设置
         self.account = None
 
@@ -192,6 +193,7 @@ class ScheduleThread(ProcessThread):
             })
             self.exam.emit({
                 "exams": exam,
+                "complete": self._jwxt_schedule.exam_snapshot_complete if self._jwxt_schedule else False,
                 "term_number": exam_term,
             })
             self.hasFinished.emit()

@@ -599,12 +599,23 @@ class ScheduleService:
 
         with self.database.atomic():
             # 整批解析成功后再替换；错误行不能清掉先前已保存的考试。
-            if result:
-                Exam.delete().where(
-                    Exam.course.in_({exam.course_id for exam in result}),
-                    Exam.term_number == term_number,
-                ).execute()
+            if exam_json.get("complete") is True:
+                Exam.delete().where(Exam.term_number == term_number).execute()
+            else:
+                # Partial responses can update a known sitting, but cannot
+                # establish that other sittings of the same course disappeared.
+                for exam in result:
+                    Exam.delete().where(
+                        Exam.course == exam.course_id,
+                        Exam.term_number == term_number,
+                        Exam.week_number == exam.week_number,
+                        Exam.day_of_week == exam.day_of_week,
+                        Exam.start_exact_time == exam.start_exact_time,
+                        Exam.end_exact_time == exam.end_exact_time,
+                    ).execute()
             Exam.bulk_create(result)
+            set_config(f"calendar_exams_complete_{term_number}",
+                       "1" if exam_json.get("complete") is True else "0")
         return 0
 
     def addCourseFromGroup(self, course_group, merge_with_existing: bool = False):

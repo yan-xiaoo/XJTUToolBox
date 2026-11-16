@@ -10,7 +10,7 @@ from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QStandardPaths, QBuffer
 from PyQt5.QtGui import QDesktopServices, QImageReader, QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QFileDialog, QSizePolicy, QDialog
 from qfluentwidgets import ScrollArea, TitleLabel, StrongBodyLabel, InfoBar, InfoBarPosition, BreadcrumbBar, \
-    TransparentToolButton, FluentIcon
+    TransparentToolButton, FluentIcon, PushButton
 
 from .components.ProgressInfoBar import ProgressInfoBar
 from .sessions.lms_session import LMSSession
@@ -28,6 +28,7 @@ from auth import getVPNUrl
 from lms import LMSUtil
 from lms.models import ActivityType
 from .threads.LMSBatchDownloadThread import LMSBatchDownloadThread
+from .sub_interfaces.lms.archive_dialog import LMSArchiveDialog
 
 
 class LMSInterface(ScrollArea):
@@ -100,6 +101,9 @@ class LMSInterface(ScrollArea):
 
         self.navLayout.addWidget(self.returnButton, alignment=Qt.AlignVCenter)
         self.navLayout.addWidget(self.breadcrumbBar, stretch=1, alignment=Qt.AlignVCenter)
+        self.archiveButton = PushButton(self.tr('课程资料归档…'), self.navFrame)
+        self.archiveButton.clicked.connect(self.onArchiveRequested)
+        self.navLayout.addWidget(self.archiveButton)
 
         self.thread_ = LMSThread()
         self.processWidget = ProcessWidget(self.thread_, self.view, stoppable=True, hide_on_end=True)
@@ -126,6 +130,15 @@ class LMSInterface(ScrollArea):
         StyleSheet.LMS_INTERFACE.apply(self)
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+
+    def onArchiveRequested(self):
+        if self.selected_course_id is None or accounts.current is None:
+            self.error(self.tr('请先选择课程'), self.tr('打开课程后可预览并归档全部资料。'), parent=self)
+            return
+        dialog = LMSArchiveDialog(accounts.current, self.selected_course_id,
+                                  self.selected_course_name, self.window())
+        dialog.exec()
+        dialog.deleteLater()
 
     def _initPages(self):
         """创建并挂载六个子页面。"""

@@ -5,8 +5,17 @@ import platform
 import sys
 import os
 
+# Calendar publishing must work in frozen builds without starting another GUI
+# or hitting the single-instance lock. It needs neither Qt nor account secrets.
+if __name__ == '__main__' and len(sys.argv) == 4 and sys.argv[1] == '--calendar-worker':
+    from schedule.calendar_worker import main as calendar_worker_main
+    raise SystemExit(calendar_worker_main(sys.argv[2], sys.argv[3]))
+
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QApplication
+from app.qt_bootstrap import configure_qt_plugins
+
+configure_qt_plugins()
 
 
 # 矫正工作目录

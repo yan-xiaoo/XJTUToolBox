@@ -122,6 +122,7 @@ class ExamScheduleThread(ProcessThread):
         else:
             self.exam.emit({
                 "exams": exam,
+                "complete": self.util.exam_snapshot_complete,
                 "term_number": self.term_number if self.term_number is not None else self.util.termString
             })
             self.hasFinished.emit()

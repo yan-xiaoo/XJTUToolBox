@@ -13,6 +13,7 @@ class Schedule:
 
         # 缓存的当前学年学期代码
         self._termString = None
+        self.exam_snapshot_complete = False
 
     @property
     def termString(self):
@@ -39,6 +40,7 @@ class Schedule:
         获取某一学期的考试安排
         :param timestamp: 学年学期时间戳，比如 2020-2021-1。留空会自动获取当前学期
         """
+        self.exam_snapshot_complete = False
         if timestamp is None:
             if self._termString is None:
                 self._termString = self.getCurrentTerm()
@@ -51,8 +53,21 @@ class Schedule:
                 "*order": "-KSRQ,-KSSJMS"
             }
         )
+        response.raise_for_status()
         data = response.json()
-        return data['datas']['wdksap']['rows']
+        module = data['datas']['wdksap']
+        rows = module['rows']
+        if not isinstance(rows, list):
+            raise ValueError("考试列表格式无效")
+        # Empty or truncated responses must not be interpreted as cancellations.
+        ext = module.get('extParams') or {}
+        total = module.get('totalSize')
+        if isinstance(ext, dict) and ext.get('code') == 1:
+            try:
+                self.exam_snapshot_complete = int(total) == len(rows)
+            except (TypeError, ValueError):
+                pass
+        return rows
 
     def getSchedule(self, timestamp=None):
         """

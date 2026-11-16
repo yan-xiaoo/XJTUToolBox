@@ -2,12 +2,34 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from PyInstaller.__main__ import run
+
+
+def configure_windows_qt_paths() -> None:
+    """Repair Qt 5.15.2's lossy Unicode paths before PyInstaller hooks run."""
+    if sys.platform != 'win32':
+        return
+    import PyQt5
+    from PyInstaller.utils.hooks.qt import pyqt5_library_info as info
+    root = Path(PyQt5.__file__).resolve().parent / 'Qt5'
+    if not (root / 'plugins' / 'platforms').is_dir():
+        return  # Leave non-wheel/custom Qt installations to PyInstaller.
+    old = info.location['PrefixPath'].replace('\\', '/')
+    if Path(info.location['PluginsPath']).is_dir():
+        return
+    for key, value in list(info.location.items()):
+        normalized = value.replace('\\', '/')
+        if normalized == old or normalized.startswith(old + '/'):
+            info.location[key] = str(root) + normalized[len(old):]
+    info.qt_inside_package = True
+    info.qt_lib_dir = root / 'bin'
 
 def main() -> None:
     """按平台打包应用，并为 macOS 配置 Sparkle 与最终签名。"""
     # 确定当前操作系统
     system = sys.platform
+    configure_windows_qt_paths()
     # Windows 使用分号 ; 作为路径分隔符，Unix/Linux/macOS 使用冒号 :
     path_sep = ';' if system == 'win32' else ':'
 
@@ -20,6 +42,8 @@ def main() -> None:
         '--windowed',                               # 无控制台窗口
         '--name=XJTUToolbox',                       # 可执行文件名称
         '--collect-datas=fake_useragent',           # 收集 fake_useragent 数据
+        '--collect-all=xjtu_calendar',              # 日历核心、动态模块与包内接口定义
+        f'--add-data=lms/vendor/siyuan_grab/LICENSE{path_sep}lms/vendor/siyuan_grab',
         '--icon=assets/icons/main_icon.ico',        # 图标
         f'--add-data=assets{path_sep}assets',       # 添加资源文件夹
         f'--add-data=jwxt/templates{path_sep}jwxt/templates', # 添加模板文件夹

@@ -21,6 +21,7 @@ dependencies = [
     "platformdirs~=4.3.6",
     "peewee~=3.17.8",
     "icalendar~=6.1.0",
+    "xjtu-timetable-calendar==0.11.1",
     "packaging~=24.2",
     "markdown~=3.7",
     "pygments>=2.18,<3",

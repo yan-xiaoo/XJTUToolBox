@@ -1,12 +1,9 @@
 import datetime
 import os.path
-import pytz
-
-from icalendar import Calendar, Alarm
+from dataclasses import dataclass
 
 from PyQt5.QtCore import pyqtSlot, QPoint
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHBoxLayout, QHeaderView
-from icalendar.cal import Event
 from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
     PushButton, InfoBarPosition, InfoBar, MessageBox, PrimaryPushButton, TransparentPushButton, RoundMenu, Action, \
     StateToolTip
@@ -15,6 +12,9 @@ from qfluentwidgets import FluentIcon as FIF
 from .components.ScheduleTable import ScheduleTableWidget
 from .sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from .sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
+from .sub_interfaces.CalendarSubscriptionDialog import CalendarSubscriptionDialog
+from .threads.CalendarThread import CalendarThread
+from schedule.calendar_service import CalendarService
 from .sub_interfaces.LessonConflictDialog import LessonConflictDialog
 from .sub_interfaces.LessonDetailDialog import LessonDetailDialog
 from .sub_interfaces.TermStartTimeDialog import TermStartTimeDialog
@@ -33,6 +33,14 @@ from schedule import getAttendanceEndTime, getAttendanceStartTime, getClassStart
 from schedule.schedule_database import CourseInstance, CourseStatus, Exam
 from schedule.schedule_service import ScheduleService
 from schedule.xjtu_time import isSummerTime
+
+
+@dataclass(frozen=True)
+class CalendarExportContext:
+    calendar: CalendarService
+    snapshot: dict
+    path: str
+    set_alarm: bool
 
 
 class ScheduleInterface(ScrollArea):
@@ -106,6 +114,7 @@ class ScheduleInterface(ScrollArea):
         self.holiday_thread = HolidayThread()
         self.holiday_thread.result.connect(self.onReceiveHoliday)
         self.holiday_thread.error.connect(self.onHolidayError)
+        self.holiday_thread.finished.connect(self.updateCalendarActions)
 
         self.commandFrame = QFrame(self)
         self.frameLayout = QHBoxLayout(self.commandFrame)
@@ -170,6 +179,9 @@ class ScheduleInterface(ScrollArea):
         self.exportAction = Action(FIF.SHARE, self.tr("导出 ics..."))
         self.moreMenu.addAction(self.exportAction)
         self.exportAction.triggered.connect(self.onExportClicked)
+        self.calendarAction = Action(FIF.CALENDAR, self.tr("日历订阅与配置..."))
+        self.moreMenu.addAction(self.calendarAction)
+        self.calendarAction.triggered.connect(self.onCalendarClicked)
         # 修改开始日期菜单项
         self.changeTermStartAction = Action(FIF.DATE_TIME, self.tr("修改学期开始日期..."))
         self.moreMenu.addAction(self.changeTermStartAction)
@@ -180,7 +192,9 @@ class ScheduleInterface(ScrollArea):
         self.clearAction.triggered.connect(self.onClearClicked)
 
         self.stateToolTip = None
-        self._export_path = None
+        self._export_context = None
+        self._holiday_export_pending = False
+        self._calendar_export_job = None
 
         self.table_widget = TableWidget(self)
         self.table_widget.setColumnCount(7)
@@ -447,6 +461,7 @@ class ScheduleInterface(ScrollArea):
         self.getExamAction.setEnabled(False)
         self.changeTermAction.setEnabled(False)
         self.exportAction.setEnabled(False)
+        self.calendarAction.setEnabled(False)
         self.clearAction.setEnabled(False)
 
     @pyqtSlot()
@@ -468,7 +483,7 @@ class ScheduleInterface(ScrollArea):
 
         self.getExamAction.setEnabled(True)
         self.changeTermAction.setEnabled(True)
-        self.exportAction.setEnabled(True)
+        self.updateCalendarActions()
         self.clearAction.setEnabled(True)
 
     def success(self,
@@ -896,7 +911,10 @@ class ScheduleInterface(ScrollArea):
         if w.exec():
             if os.path.exists(os.path.dirname(
                     w.result_path)) and not os.path.isdir(w.result_path):
-                self.exportICS(w.result_path, w.ignore_holiday, w.set_alarm)
+                try:
+                    self.exportICS(w.result_path, w.ignore_holiday, w.set_alarm)
+                except Exception as exc:
+                    self.error(self.tr("导出失败"), str(exc), parent=self)
             else:
                 self.error("", self.tr("导出位置不存在"), parent=self)
 
@@ -907,7 +925,18 @@ class ScheduleInterface(ScrollArea):
         :param ignore_holiday: 是否忽略节假日
         :param set_alarm: 是否在课程和考试事件中设置提醒
         """
-        self._export_path = path
+        if self._export_context is not None or self._calendar_export_job is not None or self.holiday_thread.isRunning():
+            raise ValueError("已有日历任务正在运行")
+        calendar = self.calendarService()
+        self._export_context = CalendarExportContext(calendar, calendar.snapshot(self.schedule_service), path, set_alarm)
+        self.updateCalendarActions()
+        try:
+            self.startCalendarExport(ignore_holiday)
+        except Exception:
+            self.resetCalendarExport()
+            raise
+
+    def startCalendarExport(self, ignore_holiday):
         if ignore_holiday:
             ignore_data = cacheManager.read_expire_json(
                 "ignore_holiday.json", 7)
@@ -916,135 +945,130 @@ class ScheduleInterface(ScrollArea):
                     ignore_data[i] = datetime.datetime.strptime(
                         ignore_data[i], "%Y-%m-%d").date()
             else:
+                # Each request owns its callbacks. A queued result from an old
+                # worker must never satisfy a later export's holiday wait.
+                previous = self.holiday_thread
+                self.holiday_thread = HolidayThread(self)
+                self.holiday_thread.result.connect(self.onReceiveHoliday)
+                self.holiday_thread.error.connect(self.onHolidayError)
+                self.holiday_thread.finished.connect(self.updateCalendarActions)
+                previous.deleteLater()
                 self.stateToolTip = StateToolTip(self.tr("正在获取节假日信息..."),
                                                  self.tr("请稍等..."), self)
                 self.stateToolTip.move(self.stateToolTip.getSuitablePos())
                 self.stateToolTip.show()
+                self._holiday_export_pending = True
                 self.holiday_thread.start()
                 return
 
         else:
             ignore_data = []
 
-        self.export(path, ignore_data, set_alarm)
+        self.export(ignore_data)
 
     @pyqtSlot(str, str)
     def onHolidayError(self, title, msg):
+        sender = self.sender() if hasattr(self, 'sender') else None
+        if sender is not None and sender is not self.holiday_thread:
+            return
+        if not self._holiday_export_pending:
+            return
         if self.stateToolTip is not None:
             self.stateToolTip.setState(False)
             self.stateToolTip.setContent(msg)
             self.stateToolTip = None
+        self.resetCalendarExport()
 
     @pyqtSlot(list)
     def onReceiveHoliday(self, data: list):
+        sender = self.sender() if hasattr(self, 'sender') else None
+        if sender is not None and sender is not self.holiday_thread:
+            return
+        if not self._holiday_export_pending or self._export_context is None:
+            return
+        self._holiday_export_pending = False
         if self.stateToolTip is not None:
             self.stateToolTip.setState(True)
             self.stateToolTip.setContent(self.tr("获取节假日成功"))
             self.stateToolTip = None
 
-        write_data = []
-        for one_date in data:
-            write_data.append(one_date.strftime("%Y-%m-%d"))
-        cacheManager.write_expire_json("ignore_holiday.json", write_data, True)
-        self.export(self._export_path, data)
+        try:
+            write_data = [one_date.strftime("%Y-%m-%d") for one_date in data]
+            cacheManager.write_expire_json("ignore_holiday.json", write_data, True)
+            self.export(data)
+        except Exception as exc:
+            self.resetCalendarExport()
+            self.error(self.tr("导出失败"), str(exc), parent=self)
 
-    def export(self, path, ignore_holidays: list[datetime.date], set_alarm: bool = True):
-        """
-        内部函数，实际实现导出功能
-        :param path: 导出目标的路径
-        :param ignore_holidays: 需要忽略的节假日日期
-        :param set_alarm: 是否在课程和考试事件中设置提醒
-        :return:
-        """
-        LOCAL_TIMEZONE = pytz.timezone("Asia/Shanghai")  # 设定为北京时间
-        term_start = self.schedule_service.getStartOfTerm()
-        if term_start is None:
-            raise ValueError("学期开始时间为空")
+    def calendarService(self):
+        if self.schedule_service is None or accounts.current is None:
+            raise ValueError("请先添加一个账户")
+        term = self.schedule_service.getCurrentTerm()
+        if term is None:
+            raise ValueError("请先获取当前学期课表")
+        return CalendarService(account_data_directory(accounts.current), term)
 
-        cal = Calendar()
+    @pyqtSlot()
+    def onCalendarClicked(self):
+        try:
+            if self._export_context is not None or self._calendar_export_job is not None or self.holiday_thread.isRunning():
+                raise ValueError("已有日历任务正在运行，请等待结束")
+            service = self.calendarService()
+            service.initialize(self.schedule_service.getStartOfTerm())
+            CalendarSubscriptionDialog(service, self.schedule_service, self).exec()
+        except Exception as exc:
+            self.error(self.tr("日历设置"), str(exc), parent=self)
 
-        for course in self.schedule_service.getCourseInTerm():
+    def export(self, ignore_holidays: list[datetime.date]):
+        context = self._export_context
+        cfg = context.calendar.prepare(context.snapshot, "export", excluded_dates=ignore_holidays)
+        request = {"action": "export", "term": context.calendar.term, "home": str(cfg.home),
+                   "output": context.path, "alarm": context.set_alarm}
+        self._calendar_export_job = CalendarThread(request, self)
+        self._calendar_export_job.result.connect(self.onCalendarExportResult)
+        self._calendar_export_job.finished.connect(self.onCalendarExportFinished)
+        self.exportAction.setEnabled(False)
+        self.calendarAction.setEnabled(False)
+        try:
+            self._calendar_export_job.start()
+        except Exception:
+            self._calendar_export_job.deleteLater()
+            self._calendar_export_job = None
+            raise
 
-            term_start_time = datetime.datetime(term_start.year,
-                                                term_start.month,
-                                                term_start.day)
-            date = term_start_time + datetime.timedelta(
-                days=(course.week_number - 1) * 7 + course.day_of_week - 1)
+    def onCalendarExportResult(self, result):
+        sender = self.sender() if hasattr(self, 'sender') else None
+        if sender is not None and sender is not self._calendar_export_job:
+            return
+        if result["ok"]:
+            self.success(self.tr("成功"), result["message"], parent=self)
+        else:
+            self.error(self.tr("导出失败"), result["message"], parent=self)
 
-            e = Event()
-            name = course.name if course.name else ""
-            location = course.location if course.location else ""
-            e.add("summary", name)
-            e.add("description", f"{name} {location}")
-            # 有的课程可能没有地点信息，如果没有就不添加这个字段
-            if location:
-                e.add('location', location)
+    def onCalendarExportFinished(self):
+        sender = self.sender() if hasattr(self, 'sender') else None
+        if self._calendar_export_job is None or (sender is not None and sender is not self._calendar_export_job):
+            return
+        self._calendar_export_job.deleteLater()
+        self._calendar_export_job = None
+        self.resetCalendarExport()
 
-            if date.date() in ignore_holidays:
-                continue
+    def resetCalendarExport(self):
+        if self.stateToolTip is not None:
+            self.stateToolTip.setState(False)
+            self.stateToolTip = None
+        self._export_context = None
+        self._holiday_export_pending = False
+        self.updateCalendarActions()
 
-            begin_time = getClassStartTime(course.start_time,
-                                           isSummerTime(date))
-            end_time = getClassEndTime(course.end_time, isSummerTime(date))
-
-            e.add(
-                "dtstart",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=begin_time.hour,
-                                 minute=begin_time.minute)))
-            e.add(
-                "dtend",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=end_time.hour,
-                                 minute=end_time.minute)))
-
-            if set_alarm:
-                alarm = Alarm()
-                alarm.add("action", "display")
-                alarm.add("description", self.tr("上课提醒"))
-                alarm.add("trigger", datetime.timedelta(minutes=-15))
-                e.add_component(alarm)
-
-            cal.add_component(e)
-
-        for exam in self.schedule_service.getExamInTerm():
-            term_start_time = datetime.datetime(term_start.year,
-                                                term_start.month,
-                                                term_start.day)
-            date = term_start_time + datetime.timedelta(
-                days=(exam.week_number - 1) * 7 + exam.day_of_week - 1)
-
-            e = Event()
-            e.add("summary", exam.name)
-            e.add("description", self.tr("座位号:") + exam.seat_number)
-            e.add('location', exam.location)
-
-            begin_time = exam.start_exact_time
-            end_time = exam.end_exact_time
-
-            e.add(
-                "dtstart",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=begin_time.hour,
-                                 minute=begin_time.minute)))
-            e.add(
-                "dtend",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=end_time.hour,
-                                 minute=end_time.minute)))
-
-            if set_alarm:
-                alarm = Alarm()
-                alarm.add("action", "display")
-                alarm.add("description", self.tr("考试提醒"))
-                alarm.add("trigger", datetime.timedelta(minutes=-30))
-                e.add_component(alarm)
-
-            cal.add_component(e)
-        with open(path, "wb") as f:
-            f.write(cal.to_ical())
-
-        self.success(self.tr("成功"), self.tr("导出日历成功"), parent=self)
+    def updateCalendarActions(self):
+        busy = self._export_context is not None or self._calendar_export_job is not None
+        busy = busy or any(thread.isRunning() for thread in (
+            self.holiday_thread, self.schedule_thread, self.graduate_schedule_thread,
+            self.schedule_exam_thread, self.schedule_attendance_thread,
+        ))
+        self.exportAction.setEnabled(not busy)
+        self.calendarAction.setEnabled(not busy)
 
     def checkCourse(self, course1, course2):
         return course1.day_of_week == course2.day_of_week and course1.start_time == course2.start_time and course1.end_time == course2.end_time\
@@ -1156,7 +1180,11 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot(dict)
     def onReceiveExam(self, exam: dict):
-        skipped = self.schedule_service.addExamFromJson(exam)
+        try:
+            skipped = self.schedule_service.addExamFromJson(exam)
+        except ValueError as exc:
+            self.error(self.tr("考试未导入"), str(exc), parent=self)
+            return
         if skipped:
             self.warning(self.tr("部分考试未导入"),
                          self.tr("{count} 场考试因缺少学期开始日期未导入，请先获取课表或设置学期开始日期").format(count=skipped),
