@@ -124,6 +124,9 @@ marker 必须是单一、直接的布尔字面量赋值，不能使用变量、�
 check 名称定位。
 
 hosted 分片使用 uv 0.12.3、`uv sync --frozen --group dev`、架构断言和 Qt 离屏环境。
+Linux 系统包通过 `scripts/apt_install.sh` 安装。GitHub 的 Ubuntu runner 会把 apt 指到
+`azure.archive.ubuntu.com`；这个名字解析失败时，脚本改写到 `archive.ubuntu.com` 并重试，
+避免 Qt 运行库安装失败把 `CI Gate` 打红。
 ARM64 测试和发布共用 `scripts/setup_linux_arm64_ci.sh`。脚本用 `uv sync --locked` 安装
 Python 3.12 环境，使用 Ubuntu 22.04 的 Qt 开发包编译 PyQt5 5.15.11，并使用锁文件中的
 `pyqt5-sip` 构建对应的 SIP 扩展。脚本还补齐 `pyqt-fluent-widgets==1.8.7`、

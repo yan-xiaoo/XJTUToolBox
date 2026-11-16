@@ -2,8 +2,7 @@
 set -euo pipefail
 
 test "$(uname -m)" = "aarch64"
-sudo apt-get update
-sudo apt-get install -y build-essential qtbase5-dev qt5-qmake \
+bash scripts/apt_install.sh build-essential qtbase5-dev qt5-qmake \
   qtmultimedia5-dev libqt5svg5-dev libqt5x11extras5-dev \
   libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
 

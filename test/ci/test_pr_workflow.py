@@ -1321,6 +1321,75 @@ class TestWorkflowContract(unittest.TestCase):
             self.assertIn(pin, setup)
         self.assertNotIn("--hard-exit-on-success", workflow)
 
+    def test_linux_apt_rewrites_unresolvable_azure_mirror(self) -> None:
+        helper = "bash scripts/apt_install.sh"
+        packages = (
+            "libegl1",
+            "libgl1",
+            "libpulse-mainloop-glib0",
+            "libxkbcommon-x11-0",
+            "libxcb-cursor0",
+            "libxcb-xinerama0",
+        )
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        for job_id in ("test-shards", "existing-bug-regressions"):
+            section = job_section(workflow, job_id)
+            self.assertIn(helper, section)
+            self.assertNotIn("apt-get", section)
+            for package in packages:
+                self.assertIn(package, section)
+        setup = (REPOSITORY_ROOT / "scripts" / "setup_linux_arm64_ci.sh").read_text(
+            encoding="utf-8"
+        )
+        build = (
+            REPOSITORY_ROOT / ".github" / "workflows" / "build_linux.yml"
+        ).read_text(encoding="utf-8")
+        script = (REPOSITORY_ROOT / "scripts" / "apt_install.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(helper, setup)
+        self.assertIn(helper, build)
+        self.assertNotIn("apt-get", setup)
+        self.assertNotIn("apt-get", build)
+        self.assertIn("azure.archive.ubuntu.com", script)
+        self.assertIn("https://archive.ubuntu.com/ubuntu", script)
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            apt = root / "etc" / "apt"
+            sources = apt / "sources.list.d"
+            sources.mkdir(parents=True)
+            (apt / "apt-mirrors.txt").write_text(
+                "http://azure.archive.ubuntu.com/ubuntu\n",
+                encoding="utf-8",
+            )
+            (apt / "sources.list").write_text(
+                "deb https://azure.archive.ubuntu.com/ubuntu jammy main\n",
+                encoding="utf-8",
+            )
+            (sources / "ubuntu.sources").write_text(
+                "URIs: mirror+file:/etc/apt/apt-mirrors.txt\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["bash", str(REPOSITORY_ROOT / "scripts" / "apt_install.sh"), "--rewrite-only"],
+                env=os.environ | {"APT_CONFIG_ROOT": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(
+                "https://archive.ubuntu.com/ubuntu/\n",
+                (apt / "apt-mirrors.txt").read_text(encoding="utf-8"),
+            )
+            rewritten_sources = (apt / "sources.list").read_text(encoding="utf-8")
+            rewritten_deb822 = (sources / "ubuntu.sources").read_text(encoding="utf-8")
+            self.assertNotIn("azure.archive.ubuntu.com", rewritten_sources)
+            self.assertNotIn("azure.archive.ubuntu.com", rewritten_deb822)
+            self.assertIn("https://archive.ubuntu.com/ubuntu", rewritten_sources)
+            self.assertIn("https://archive.ubuntu.com/ubuntu", rewritten_deb822)
+
     def test_regression_job_uses_the_dynamic_runner(self) -> None:
         section = job_section(
             WORKFLOW_PATH.read_text(encoding="utf-8"),
@@ -1410,6 +1479,8 @@ class TestWorkflowContract(unittest.TestCase):
             "workflow_dispatch",
             "required status check",
             "PR 测试成功不能替代构建成功",
+            "scripts/apt_install.sh",
+            "azure.archive.ubuntu.com",
         ):
             self.assertIn(phrase, documentation)
 

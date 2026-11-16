@@ -54,8 +54,7 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev
+          bash scripts/apt_install.sh ruby ruby-dev rubygems build-essential rpm libarchive-tools zstd file libxml2-dev libxslt-dev
           sudo gem install fpm
 
       - name: Install dependencies
@@ -137,7 +136,7 @@ jobs:
       - name: Install Linux ARM64 dependencies
         run: |
           bash scripts/setup_linux_arm64_ci.sh
-          sudo apt-get install -y ruby ruby-dev rubygems rpm libarchive-tools zstd file libxml2-dev libxslt-dev wget
+          bash scripts/apt_install.sh ruby ruby-dev rubygems rpm libarchive-tools zstd file libxml2-dev libxslt-dev wget
           sudo gem install fpm
 
       - name: Extract Icon
