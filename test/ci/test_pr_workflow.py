@@ -1321,6 +1321,175 @@ class TestWorkflowContract(unittest.TestCase):
             self.assertIn(pin, setup)
         self.assertNotIn("--hard-exit-on-success", workflow)
 
+    def test_linux_apt_keeps_original_mirror_until_install_fails(self) -> None:
+        helper = "bash scripts/apt_install.sh"
+        packages = (
+            "libegl1",
+            "libgl1",
+            "libpulse-mainloop-glib0",
+            "libxkbcommon-x11-0",
+            "libxcb-cursor0",
+            "libxcb-xinerama0",
+        )
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        for job_id in ("test-shards", "existing-bug-regressions"):
+            section = job_section(workflow, job_id)
+            self.assertIn(helper, section)
+            self.assertNotIn("apt-get", section)
+            for package in packages:
+                self.assertIn(package, section)
+        setup = (REPOSITORY_ROOT / "scripts" / "setup_linux_arm64_ci.sh").read_text(
+            encoding="utf-8"
+        )
+        build = (
+            REPOSITORY_ROOT / ".github" / "workflows" / "build_linux.yml"
+        ).read_text(encoding="utf-8")
+        script = (REPOSITORY_ROOT / "scripts" / "apt_install.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(helper, setup)
+        self.assertIn(helper, build)
+        self.assertNotIn("apt-get", setup)
+        self.assertNotIn("apt-get", build)
+        self.assertIn("azure.archive.ubuntu.com", script)
+        self.assertIn("https://archive.ubuntu.com/ubuntu", script)
+        self.assertIn("https://ports.ubuntu.com/ubuntu-ports", script)
+
+        def write_sources(root: Path) -> Path:
+            apt = root / "etc" / "apt"
+            sources = apt / "sources.list.d"
+            sources.mkdir(parents=True)
+            (apt / "apt-mirrors.txt").write_text(
+                "http://azure.archive.ubuntu.com/ubuntu\n",
+                encoding="utf-8",
+            )
+            (apt / "sources.list").write_text(
+                "deb https://azure.archive.ubuntu.com/ubuntu jammy main\n",
+                encoding="utf-8",
+            )
+            (sources / "ubuntu.sources").write_text(
+                "URIs: mirror+file:/etc/apt/apt-mirrors.txt\n",
+                encoding="utf-8",
+            )
+            return apt
+
+        def rewritten_text(apt: Path) -> str:
+            return "\n".join(
+                (
+                    (apt / "apt-mirrors.txt").read_text(encoding="utf-8"),
+                    (apt / "sources.list").read_text(encoding="utf-8"),
+                    (apt / "sources.list.d" / "ubuntu.sources").read_text(encoding="utf-8"),
+                )
+            )
+
+        script_path = REPOSITORY_ROOT / "scripts" / "apt_install.sh"
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            apt = write_sources(root)
+            completed = subprocess.run(
+                ["bash", str(script_path), "--rewrite-only"],
+                env=os.environ | {
+                    "APT_CONFIG_ROOT": str(root),
+                    "APT_FALLBACK_ARCH": "x86_64",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(
+                "https://archive.ubuntu.com/ubuntu/\n",
+                (apt / "apt-mirrors.txt").read_text(encoding="utf-8"),
+            )
+            text = rewritten_text(apt)
+            self.assertNotIn("azure.archive.ubuntu.com", text)
+            self.assertIn("https://archive.ubuntu.com/ubuntu", text)
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            apt = write_sources(root)
+            completed = subprocess.run(
+                ["bash", str(script_path), "--rewrite-only"],
+                env=os.environ | {
+                    "APT_CONFIG_ROOT": str(root),
+                    "APT_FALLBACK_ARCH": "aarch64",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(
+                "https://ports.ubuntu.com/ubuntu-ports/\n",
+                (apt / "apt-mirrors.txt").read_text(encoding="utf-8"),
+            )
+            text = rewritten_text(apt)
+            self.assertNotIn("azure.archive.ubuntu.com", text)
+            self.assertNotIn("archive.ubuntu.com/ubuntu", text)
+            self.assertIn("https://ports.ubuntu.com/ubuntu-ports", text)
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            apt = write_sources(root)
+            original = rewritten_text(apt)
+            apt_get = root / "apt-get"
+            apt_get.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+            apt_get.chmod(0o755)
+            completed = subprocess.run(
+                ["bash", str(script_path), "libegl1"],
+                env=os.environ | {
+                    "APT_CONFIG_ROOT": str(root),
+                    "APT_GET_BIN": str(apt_get),
+                    "APT_FALLBACK_ARCH": "x86_64",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(original, rewritten_text(apt))
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            apt = write_sources(root)
+            seen = root / "seen-mirror"
+            apt_get = root / "apt-get"
+            apt_get.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/bash
+                    if [ ! -f {seen} ]; then
+                      cp {apt / "apt-mirrors.txt"} {seen}
+                      exit 100
+                    fi
+                    exit 0
+                    """
+                ),
+                encoding="utf-8",
+            )
+            apt_get.chmod(0o755)
+            completed = subprocess.run(
+                ["bash", str(script_path), "libegl1"],
+                env=os.environ | {
+                    "APT_CONFIG_ROOT": str(root),
+                    "APT_GET_BIN": str(apt_get),
+                    "APT_FALLBACK_ARCH": "aarch64",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(
+                "http://azure.archive.ubuntu.com/ubuntu\n",
+                seen.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "https://ports.ubuntu.com/ubuntu-ports",
+                rewritten_text(apt),
+            )
+            self.assertNotIn("azure.archive.ubuntu.com", rewritten_text(apt))
+
     def test_regression_job_uses_the_dynamic_runner(self) -> None:
         section = job_section(
             WORKFLOW_PATH.read_text(encoding="utf-8"),
@@ -1410,6 +1579,9 @@ class TestWorkflowContract(unittest.TestCase):
             "workflow_dispatch",
             "required status check",
             "PR 测试成功不能替代构建成功",
+            "scripts/apt_install.sh",
+            "azure.archive.ubuntu.com",
+            "ports.ubuntu.com/ubuntu-ports",
         ):
             self.assertIn(phrase, documentation)
 
@@ -1429,6 +1601,10 @@ class TestWorkflowContract(unittest.TestCase):
             "cookie",
         ):
             self.assertIn(phrase, template)
+
+
+# Loaded with this module so the existing contract command also runs it.
+from test.ci.test_update_aur_workflow import TestUpdateAurWorkflow  # noqa: E402,F401
 
 
 if __name__ == "__main__":
