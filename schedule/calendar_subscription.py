@@ -12,8 +12,9 @@ from pathlib import Path
 
 
 class _CalendarHTTPServer(ThreadingHTTPServer):
-    # SO_REUSEADDR permits duplicate listeners on Windows, hiding port conflicts.
-    allow_reuse_address = False
+    # Windows SO_REUSEADDR can hide duplicate listeners; POSIX needs it
+    # to rebind after a completed HTTP connection enters TIME_WAIT.
+    allow_reuse_address = os.name != "nt"
     daemon_threads = True
     block_on_close = False
     request_deadline = 5
