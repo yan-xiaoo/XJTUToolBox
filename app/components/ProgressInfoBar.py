@@ -400,7 +400,8 @@ class ProgressInfoBar(QFrame):
             # 结束判定统一由 onThreadExited（QThread.finished）负责
             return
         # 如果已经发送了停止请求，且超过了设定的时间线程仍然没有退出，强制终止线程
-        if self.stopped and time.time() - self.dead_time_start > self.thread_dead_time:
+        if (self.stopped and not self.thread_.cooperative_stop_only
+                and time.time() - self.dead_time_start > self.thread_dead_time):
             logger.warning(f"{str(self.thread_)} 线程强制退出")
             self.thread_.terminate()
             self.thread_.wait()
@@ -409,6 +410,9 @@ class ProgressInfoBar(QFrame):
 
 
 class ProgressBarThread(QThread):
+    # Resource-owning coordinators must finish their own cleanup on cancellation.
+    cooperative_stop_only = False
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.can_run = True
