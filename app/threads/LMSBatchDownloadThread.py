@@ -3,6 +3,8 @@ import logging
 import os
 import re
 import threading
+import hashlib
+import tempfile
 from collections import deque
 
 from PyQt5.QtCore import pyqtSignal, QThread
@@ -12,6 +14,7 @@ from ..sub_interfaces.lms.common import format_size as common_format_size, forma
 from ..utils import cfg
 from lms import LMSUtil
 from lms.models import ActivityType
+from lms.archive_manifest import ArchiveManifest
 
 
 logger = logging.getLogger("default")
@@ -24,6 +27,7 @@ class _DownloadJob:
         self.output_path = output_path
         self.file_label = file_label
         self.session = session
+        self.archive_row = None
 
 
 class LMSBatchDownloadThread(ProgressBarThread):
@@ -32,6 +36,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
     fileStarted = pyqtSignal(str)
     fileCompleted = pyqtSignal(str, bool, str)
     allCompleted = pyqtSignal(int, int)
+    archiveSaved = pyqtSignal(str, str)
 
     @staticmethod
     def max_concurrent() -> int:
@@ -40,7 +45,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
     def __init__(self, selected_activities, activity_type, account,
                  target_dir, layout_mode,
                  download_uploads=True, download_submissions=True, download_marked=False,
-                 parent=None):
+                 parent=None, *, archive=False, course_name=""):
         """初始化批量下载线程。
 
         :param selected_activities: 用户选中的活动字典列表。
@@ -62,6 +67,9 @@ class LMSBatchDownloadThread(ProgressBarThread):
         self._download_uploads = download_uploads
         self._download_submissions = download_submissions
         self._download_marked = download_marked
+        self._archive_enabled = archive
+        self._course_name = course_name
+        self._archive = None
 
         self._session = None
         self._util = None
@@ -101,16 +109,49 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     def run(self):
         """Phase 0: 登录 → Phase 1: 收集 → Phase 2: 下载"""
+        try:
+            self._run_batch()
+        except Exception:
+            logger.exception("批量下载失败")
+            self.onStopSignal()
+            self._jobs.clear()
+            for worker in list(self._active_workers):
+                worker.wait()
+                self._onWorkerFinished(worker)
+            self.error.emit(self.tr("批量下载失败"), self.tr("请检查下载目录和网络连接后重试"))
+            self.canceled.emit()
+            if self._archive is not None:
+                self._save_archive("failed")
+
+    def _save_archive(self, status):
+        if self._archive is None:
+            return
+        try:
+            self._archive.finish(status)
+            self.archiveSaved.emit(str(self._archive.path), status)
+        except OSError:
+            logger.exception("保存归档清单失败")
+            self.error.emit(self.tr("归档清单保存失败"), self.tr("下载文件仍保留在目标目录，请检查磁盘空间与权限"))
+
+    def _run_batch(self):
         if not self._ensure_login():
             self.canceled.emit()
             return
+        if not self.can_run:
+            self.canceled.emit()
+            return
+        if self._archive_enabled:
+            self._archive = ArchiveManifest(self._target_dir, self._course_name, self._selected_activities)
+            self._target_dir = str(self._archive.root)
 
         # Phase 1: 收集
         files = self._collect_all()
         if not self.can_run:
+            self._save_archive("cancelled")
             self.canceled.emit()
             return
         if not files:
+            self._save_archive("partial" if self._archive and self._archive.data["collection_failures"] else "complete")
             self.messageChanged.emit(self.tr("没有找到可下载的文件"))
             self.allCompleted.emit(0, 0)
             self.hasFinished.emit()
@@ -132,6 +173,8 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
             activity_id = activity.get("id")
             if not isinstance(activity_id, int):
+                if self._archive:
+                    self._archive.data["collection_failures"].append({"id": None, "reason": "invalid_activity"})
                 continue
             activity_title = str(activity.get("title") or "-")
             safe_title = self._sanitize_filename(activity_title)
@@ -145,11 +188,17 @@ class LMSBatchDownloadThread(ProgressBarThread):
             try:
                 detail = self._util.get_activity_detail(activity_id)
             except Exception as e:
+                if self._archive:
+                    self._archive.data["collection_failures"].append({"id": activity_id, "reason": "detail_unavailable"})
                 logger.exception("获取活动详情失败 activity_id=%s", activity_id)
                 self.messageChanged.emit(self.tr("跳过「{0}」：{1}").format(activity_title, str(e)))
                 continue
             if not isinstance(detail, dict):
+                if self._archive:
+                    self._archive.data["collection_failures"].append({"id": activity_id, "reason": "invalid_detail"})
                 continue
+            if self._archive:
+                safe_title = f"{safe_title}_{activity_id}"
 
             if act_type == ActivityType.HOMEWORK.value:
                 if self._download_uploads:
@@ -157,11 +206,14 @@ class LMSBatchDownloadThread(ProgressBarThread):
                 if self._download_submissions:
                     self._collect_submission_uploads(files, detail, safe_title, activity_title)
                 if self._download_marked:
-                    self._collect_marked_attachments(files, detail, safe_title, activity_title, self._util)
+                    self._collect_marked_attachments(files, detail, safe_title, activity_title, self._util,
+                        self._archive.data["collection_failures"] if self._archive else None)
             elif act_type == ActivityType.MATERIAL.value:
                 self._collect_uploads(files, detail, safe_title, activity_title)
             elif act_type == ActivityType.LESSON.value:
                 self._collect_replay_videos(files, detail, safe_title, activity_title)
+            elif self._archive:
+                self._archive.data["collection_failures"].append({"id": activity_id, "reason": "unsupported_activity_type"})
 
         return files
 
@@ -170,7 +222,11 @@ class LMSBatchDownloadThread(ProgressBarThread):
         """清理文件名中的非法字符。"""
         cleaned = re.sub(r'[\\/:*?"<>|]+', "_", name)
         cleaned = cleaned.strip().strip(".")
-        return cleaned or "file"
+        cleaned = cleaned[:160].rstrip(". ") or "file"
+        if cleaned.split(".", 1)[0].upper() in {"CON", "PRN", "AUX", "NUL",
+                *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+            cleaned = "_" + cleaned
+        return cleaned
 
     def _output_path(self, file_name: str, safe_activity_title: str) -> str:
         """根据布局模式构建输出路径。
@@ -224,7 +280,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
             files.append((url, f"提交_{name}", f"{activity_title}_提交_{name}", safe_title))
 
     @staticmethod
-    def _collect_marked_attachments(files, detail, safe_title, activity_title, util):
+    def _collect_marked_attachments(files, detail, safe_title, activity_title, util, failures=None):
         """收集批阅附件（老师批改后的标注文件）。"""
         sl = detail.get("submission_list")
         if not isinstance(sl, dict):
@@ -241,6 +297,8 @@ class LMSBatchDownloadThread(ProgressBarThread):
             try:
                 md = util.get_submission_marked_attachments(sid)
             except Exception:
+                if failures is not None:
+                    failures.append({"submission_id": sid, "reason": "marked_attachments_unavailable"})
                 continue
             if not isinstance(md, dict):
                 continue
@@ -281,41 +339,62 @@ class LMSBatchDownloadThread(ProgressBarThread):
         self.maximumChanged.emit(self._total_jobs)
         self.progressChanged.emit(0)
 
+        reserved = set()
         for url, fn, label, safe_title in files:
-            self._jobs.append(_DownloadJob(url, self._output_path(fn, safe_title), label, self._session))
+            path = self._output_path(fn, safe_title)
+            original, ext = os.path.splitext(path)
+            suffix = 1
+            while os.path.normcase(path).casefold() in reserved or (self._archive and os.path.exists(path)):
+                suffix += 1
+                path = f"{original}_{suffix}{ext}"
+            reserved.add(os.path.normcase(path).casefold())
+            job = _DownloadJob(url, path, label, self._session)
+            if self._archive:
+                job.archive_row = self._archive.add(path, label)
+            self._jobs.append(job)
+        if self._archive:
+            self._archive.save()
 
-        while self._jobs and self.can_run:
+        # The coordinator owns completion accounting; queued GUI callbacks can
+        # otherwise arrive after allCompleted or after the progress bar closes.
+        while self._jobs or self._active_workers:
             with self._lock:
+                if not self.can_run:
+                    self._jobs.clear()
+                    for worker in self._active_workers:
+                        worker.stop()
                 while len(self._active_workers) < self.max_concurrent() and self._jobs and self.can_run:
                     job = self._jobs.popleft()
                     w = _WorkerThread(job)
-                    w.finished.connect(self._onWorkerFinished)
-                    self._active_workers.append(w)
                     w.start()
+                    self._active_workers.append(w)
                     self.fileStarted.emit(job.file_label)
+                completed = [w for w in self._active_workers if w.isFinished()]
+                for w in completed:
+                    self._active_workers.remove(w)
+            for w in completed:
+                w.wait()
+                self._onWorkerFinished(w)
             self.msleep(100)
 
-        with self._lock:
-            rem = list(self._active_workers)
-        for w in rem:
-            w.wait()
-        with self._lock:
-            self._active_workers.clear()
-
         if not self.can_run:
+            self._save_archive("cancelled")
             self.canceled.emit()
             return
+        partial = self._fail_count or (self._archive and self._archive.data["collection_failures"])
+        self._save_archive("partial" if partial else "complete")
 
         self.progressChanged.emit(self._total_jobs)
         self.messageChanged.emit(self.tr("{0} / {1} 已完成").format(self._total_jobs, self._total_jobs))
         self.allCompleted.emit(self._success_count, self._fail_count)
         self.hasFinished.emit()
 
-    def _onWorkerFinished(self):
+    def _onWorkerFinished(self, w):
         """单个工作线程完成回调。"""
-        w = self.sender()
-        if w is None:
-            return
+        if w.job.archive_row is not None:
+            w.job.archive_row.update(status="complete" if w.success else ("cancelled" if not self.can_run else "failed"))
+            if w.success:
+                w.job.archive_row.update(size=w.bytes_written, sha256=w.sha256)
         with self._lock:
             self._completed_jobs += 1
             if w.success:
@@ -331,6 +410,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
     def onStopSignal(self):
         """停止所有下载。"""
+        super().onStopSignal()
         with self._lock:
             workers = list(self._active_workers)
         for w in workers:
@@ -360,6 +440,9 @@ class _WorkerThread(QThread):
         self.success = False
         self.error_msg = ""
         self._can_run = True
+        self._temporary_path = None
+        self.bytes_written = 0
+        self.sha256 = None
 
     def stop(self):
         """请求停止当前下载。"""
@@ -368,6 +451,8 @@ class _WorkerThread(QThread):
     def run(self):
         resp = None
         try:
+            if not self._can_run:
+                return
             # 检查路径合法性
             if not self.job.output_path or not self.job.output_path.strip():
                 raise ValueError(self.tr("下载路径为空"))
@@ -377,30 +462,43 @@ class _WorkerThread(QThread):
             resp = self.job.session.get(self.job.url, stream=True, timeout=60)
             resp.raise_for_status()
             os.makedirs(os.path.dirname(self.job.output_path), exist_ok=True)
-            with open(self.job.output_path, "wb") as f:
+            fd, self._temporary_path = tempfile.mkstemp(prefix=".lms-download-", dir=os.path.dirname(self.job.output_path))
+            digest = hashlib.sha256()
+            with os.fdopen(fd, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     if not self._can_run:
-                        self._cleanup()
                         self.success = False
                         self.error_msg = self.tr("已取消")
                         return
                     if not chunk:
                         continue
                     f.write(chunk)
+                    self.bytes_written += len(chunk)
+                    digest.update(chunk)
+            if not self._can_run:
+                self.error_msg = self.tr("已取消")
+                return
+            expected = resp.headers.get("Content-Length")
+            if expected and not resp.headers.get("Content-Encoding") and int(expected) != self.bytes_written:
+                raise ValueError(self.tr("下载文件长度不完整"))
+            os.replace(self._temporary_path, self.job.output_path)
+            self._temporary_path = None
+            self.sha256 = digest.hexdigest()
             self.success = True
         except Exception as e:
-            logger.exception("下载失败: %s -> %s", self.job.url, self.job.output_path)
+            logger.error("下载失败: %s (%s)", self.job.output_path, type(e).__name__)
             self._cleanup()
             self.success = False
             self.error_msg = LMSBatchDownloadThread._extract_error_msg(e)
         finally:
+            self._cleanup()
             if resp is not None:
                 resp.close()
 
     def _cleanup(self):
         """删除下载过程中残留的不完整文件。"""
-        if self.job.output_path and os.path.exists(self.job.output_path):
+        if self._temporary_path and os.path.exists(self._temporary_path):
             try:
-                os.remove(self.job.output_path)
+                os.remove(self._temporary_path)
             except OSError:
                 pass

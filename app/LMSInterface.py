@@ -1091,10 +1091,15 @@ class LMSInterface(ScrollArea):
             download_uploads=dialog.download_uploads,
             download_submissions=dialog.download_submissions,
             download_marked=dialog.download_marked,
+            archive=dialog.archive,
+            course_name=self.selected_course_name,
             parent=self,
         )
 
         bar.connectToThread(thread)
+        thread.archiveSaved.connect(lambda path, status: (self.success if status == "complete" else self.warning)(
+            self.tr("归档清单已保存") if status == "complete" else self.tr("归档未全部完成，请查看清单"),
+            path, duration=8000, parent=self))
         thread.allCompleted.connect(
             lambda success, fail: self._onBatchDownloadFinished(success, fail, bar)
         )
