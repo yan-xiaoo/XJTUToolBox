@@ -2,6 +2,8 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -191,6 +193,108 @@ class ArchiveTest(unittest.TestCase):
         LMSBatchDownloadThread._collect_marked_attachments([], {"submission_list": {"list": [{"id": 12}]}},
                                                            "title", "title", util, failures)
         self.assertEqual(failures, [{"submission_id": 12, "reason": "marked_attachments_unavailable"}])
+
+    def test_filename_control_characters_are_removed(self):
+        for control in range(32):
+            cleaned = LMSBatchDownloadThread._sanitize_filename("before" + chr(control) + "after.pdf")
+            self.assertFalse(any(ord(c) < 32 for c in cleaned))
+            self.assertTrue(cleaned.endswith(".pdf"))
+
+    def test_missing_attachment_url_is_partial_not_complete(self):
+        batch = self.batch()
+        batch._collect_all = lambda: LMSBatchDownloadThread._collect_all(batch)
+        batch._util = SimpleNamespace(get_activity_detail=lambda _: {"uploads": [{"name": "missing.pdf"}]})
+        batch.run()
+        self.assertEqual(batch._archive.data["status"], "partial")
+        self.assertEqual(batch._archive.data["files"], [])
+        self.assertEqual(batch._archive.data["collection_failures"], [
+            {"id": 1, "source": "uploads", "reason": "missing_download_url"}])
+
+    def test_all_attachment_sources_record_missing_urls(self):
+        cases = [
+            (LMSBatchDownloadThread._collect_uploads, {"uploads": [{"name": "x"}]}, ()),
+            (LMSBatchDownloadThread._collect_submission_uploads,
+             {"submission_list": {"uploads": [{"name": "x"}], "list": [{"uploads": [{"name": "y"}]}]}}, ()),
+            (LMSBatchDownloadThread._collect_replay_videos, {"replay_videos": [{"label": "x"}]}, ()),
+            (LMSBatchDownloadThread._collect_marked_attachments,
+             {"submission_list": {"list": [{"id": 3}]}},
+             (SimpleNamespace(get_submission_marked_attachments=lambda _: {"rules": [{"origin_upload_name": "x"}]}),)),
+        ]
+        for collect, detail, extra in cases:
+            with self.subTest(source=collect.__name__):
+                files, failures = [], []
+                collect(files, detail, "activity", "activity", *extra, failures=failures)
+                self.assertEqual(files, [])
+                self.assertTrue(failures)
+                self.assertTrue(all(f["reason"] == "missing_download_url" for f in failures))
+
+    def test_malformed_attachment_lists_are_recorded(self):
+        for value in ({"unexpected": "shape"}, [None, 7, "bad"]):
+            with self.subTest(value=value):
+                files, failures = [], []
+                LMSBatchDownloadThread._collect_uploads(files, {"uploads": value}, "a", "a", failures)
+                self.assertEqual(files, [])
+                self.assertTrue(failures)
+
+    def test_fallback_url_is_used_without_false_failure(self):
+        files, failures = [], []
+        LMSBatchDownloadThread._collect_uploads(files, {"uploads": [
+            {"download_url": 123, "preview_url": "https://example.invalid/ok", "name": "x"}]}, "a", "a", failures)
+        self.assertEqual(len(files), 1)
+        self.assertEqual(failures, [])
+
+    def test_genuinely_empty_activity_is_complete(self):
+        batch = self.batch()
+        batch._collect_all = lambda: LMSBatchDownloadThread._collect_all(batch)
+        batch._util = SimpleNamespace(get_activity_detail=lambda _: {"uploads": []})
+        batch.run()
+        self.assertEqual(batch._archive.data["status"], "complete")
+        self.assertEqual(batch._archive.data["collection_failures"], [])
+
+    def test_mixed_missing_and_downloaded_attachments_remain_partial(self):
+        batch = self.batch()
+        batch._collect_all = lambda: LMSBatchDownloadThread._collect_all(batch)
+        batch._util = SimpleNamespace(get_activity_detail=lambda _: {"uploads": [
+            {"name": "missing"}, {"name": "ok", "download_url": "https://example.invalid/ok"}]})
+        batch.run()
+        self.assertEqual(batch._success_count, 1)
+        self.assertEqual(batch._archive.data["status"], "partial")
+        self.assertEqual(len(batch._archive.data["collection_failures"]), 1)
+
+    def test_gui_watchdog_waits_for_cancelled_archive_cleanup(self):
+        from PyQt5.QtWidgets import QApplication
+        from qfluentwidgets import InfoBarPosition
+        from app.components.ProgressInfoBar import ProgressInfoBar
+        app = QApplication.instance() or QApplication([])
+        entered, release = threading.Event(), threading.Event()
+        batch = self.batch()
+        batch.max_concurrent = lambda: 1
+        def get(*args, **kwargs):
+            entered.set()
+            release.wait(5)
+            return Response()
+        batch._session.get = get
+        bar = ProgressInfoBar("test", "test", position=InfoBarPosition.NONE)
+        bar.connectToThread(batch)
+        batch.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            app.processEvents()
+            bar.onCloseButtonClicked()
+            bar.dead_time_start = time.time() - 10
+            with patch.object(batch, "terminate") as terminate:
+                bar.checkProcess()
+                terminate.assert_not_called()
+            self.assertTrue(batch.isRunning())
+        finally:
+            release.set()
+            batch.wait(5000)
+        self.assertFalse(batch.isRunning())
+        data = json.loads(batch._archive.path.read_text(encoding="utf-8"))
+        self.assertEqual(data["status"], "cancelled")
+        self.assertTrue(all(row["status"] == "cancelled" for row in data["files"]))
+        self.assertEqual(batch._active_workers, [])
+        app.processEvents()
 
 
 if __name__ == "__main__":

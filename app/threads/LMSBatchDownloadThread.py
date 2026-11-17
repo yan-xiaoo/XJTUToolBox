@@ -32,6 +32,7 @@ class _DownloadJob:
 
 class LMSBatchDownloadThread(ProgressBarThread):
     """批量下载协调线程：先登录 → 收集文件 → 并发下载。"""
+    cooperative_stop_only = True
 
     fileStarted = pyqtSignal(str)
     fileCompleted = pyqtSignal(str, bool, str)
@@ -200,27 +201,32 @@ class LMSBatchDownloadThread(ProgressBarThread):
             if self._archive:
                 safe_title = f"{safe_title}_{activity_id}"
 
+            failures = [] if self._archive else None
             if act_type == ActivityType.HOMEWORK.value:
                 if self._download_uploads:
-                    self._collect_uploads(files, detail, safe_title, activity_title)
+                    self._collect_uploads(files, detail, safe_title, activity_title, failures)
                 if self._download_submissions:
-                    self._collect_submission_uploads(files, detail, safe_title, activity_title)
+                    self._collect_submission_uploads(files, detail, safe_title, activity_title, failures)
                 if self._download_marked:
                     self._collect_marked_attachments(files, detail, safe_title, activity_title, self._util,
-                        self._archive.data["collection_failures"] if self._archive else None)
+                        failures)
             elif act_type == ActivityType.MATERIAL.value:
-                self._collect_uploads(files, detail, safe_title, activity_title)
+                self._collect_uploads(files, detail, safe_title, activity_title, failures)
             elif act_type == ActivityType.LESSON.value:
-                self._collect_replay_videos(files, detail, safe_title, activity_title)
+                self._collect_replay_videos(files, detail, safe_title, activity_title, failures)
             elif self._archive:
                 self._archive.data["collection_failures"].append({"id": activity_id, "reason": "unsupported_activity_type"})
+
+            if failures:
+                self._archive.data["collection_failures"].extend(
+                    {"id": activity_id, **failure} for failure in failures)
 
         return files
 
     @staticmethod
     def _sanitize_filename(name: str) -> str:
         """清理文件名中的非法字符。"""
-        cleaned = re.sub(r'[\\/:*?"<>|]+', "_", name)
+        cleaned = re.sub(r'[\x00-\x1f\\/:*?"<>|]+', "_", name)
         cleaned = cleaned.strip().strip(".")
         cleaned = cleaned[:160].rstrip(". ") or "file"
         if cleaned.split(".", 1)[0].upper() in {"CON", "PRN", "AUX", "NUL",
@@ -243,56 +249,75 @@ class LMSBatchDownloadThread(ProgressBarThread):
         return os.path.join(self._target_dir, safe)
 
     @staticmethod
-    def _collect_uploads(files, detail, safe_title, activity_title):
-        """收集活动附件（教师上传的题目附件）。"""
-        for upload in (detail.get("uploads") or []):
-            if not isinstance(upload, dict):
-                continue
-            url = upload.get("download_url") or upload.get("preview_url")
-            if not isinstance(url, str) or not url:
+    def _collection_failure(failures, source, reason):
+        if failures is not None:
+            failures.append({"source": source, "reason": reason})
+
+    @staticmethod
+    def _attachment_items(value, failures, source):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            LMSBatchDownloadThread._collection_failure(failures, source, "invalid_attachment_list")
+            return []
+        items = []
+        for item in value:
+            if isinstance(item, dict):
+                items.append(item)
+            else:
+                LMSBatchDownloadThread._collection_failure(failures, source, "invalid_attachment")
+        return items
+
+    @staticmethod
+    def _attachment_url(item, keys, failures, source):
+        for key in keys:
+            url = item.get(key)
+            if isinstance(url, str) and url.strip().lower().startswith(("http://", "https://")):
+                return url.strip()
+        LMSBatchDownloadThread._collection_failure(failures, source, "missing_download_url")
+        return None
+
+    @staticmethod
+    def _collect_uploads(files, detail, safe_title, activity_title, failures=None):
+        for upload in LMSBatchDownloadThread._attachment_items(detail.get("uploads"), failures, "uploads"):
+            url = LMSBatchDownloadThread._attachment_url(
+                upload, ("download_url", "preview_url"), failures, "uploads")
+            if url is None:
                 continue
             name = str(upload.get("name") or "file")
             files.append((url, name, f"{activity_title}_{name}", safe_title))
 
     @staticmethod
-    def _collect_submission_uploads(files, detail, safe_title, activity_title):
-        """收集提交附件（学生提交的作业文件）。"""
+    def _submission_list(detail, failures):
         sl = detail.get("submission_list")
+        if sl is None:
+            return {}
         if not isinstance(sl, dict):
-            return
-        all_u: list[dict] = []
-        up = sl.get("uploads")
-        if isinstance(up, list):
-            all_u.extend(u for u in up if isinstance(u, dict))
-        items = sl.get("list")
-        if isinstance(items, list):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                iu = item.get("uploads")
-                if isinstance(iu, list):
-                    all_u.extend(u for u in iu if isinstance(u, dict))
-        for u in all_u:
-            url = u.get("download_url") or u.get("preview_url")
-            if not isinstance(url, str) or not url:
+            LMSBatchDownloadThread._collection_failure(failures, "submissions", "invalid_submission_list")
+            return {}
+        return sl
+
+    @staticmethod
+    def _collect_submission_uploads(files, detail, safe_title, activity_title, failures=None):
+        sl = LMSBatchDownloadThread._submission_list(detail, failures)
+        all_u = LMSBatchDownloadThread._attachment_items(sl.get("uploads"), failures, "submissions")
+        for item in LMSBatchDownloadThread._attachment_items(sl.get("list"), failures, "submissions"):
+            all_u.extend(LMSBatchDownloadThread._attachment_items(item.get("uploads"), failures, "submissions"))
+        for upload in all_u:
+            url = LMSBatchDownloadThread._attachment_url(
+                upload, ("download_url", "preview_url"), failures, "submissions")
+            if url is None:
                 continue
-            name = str(u.get("name") or "file")
+            name = str(upload.get("name") or "file")
             files.append((url, f"提交_{name}", f"{activity_title}_提交_{name}", safe_title))
 
     @staticmethod
     def _collect_marked_attachments(files, detail, safe_title, activity_title, util, failures=None):
-        """收集批阅附件（老师批改后的标注文件）。"""
-        sl = detail.get("submission_list")
-        if not isinstance(sl, dict):
-            return
-        items = sl.get("list")
-        if not isinstance(items, list):
-            return
-        for item in items:
-            if not isinstance(item, dict):
-                continue
+        sl = LMSBatchDownloadThread._submission_list(detail, failures)
+        for item in LMSBatchDownloadThread._attachment_items(sl.get("list"), failures, "marked"):
             sid = item.get("id")
             if not isinstance(sid, int):
+                LMSBatchDownloadThread._collection_failure(failures, "marked", "invalid_submission_id")
                 continue
             try:
                 md = util.get_submission_marked_attachments(sid)
@@ -301,30 +326,27 @@ class LMSBatchDownloadThread(ProgressBarThread):
                     failures.append({"submission_id": sid, "reason": "marked_attachments_unavailable"})
                 continue
             if not isinstance(md, dict):
+                LMSBatchDownloadThread._collection_failure(failures, "marked", "invalid_marked_detail")
                 continue
-            for rule in (md.get("rules") or []):
-                if not isinstance(rule, dict):
+            for rule in LMSBatchDownloadThread._attachment_items(md.get("rules"), failures, "marked"):
+                url = LMSBatchDownloadThread._attachment_url(
+                    rule, ("url", "marked_attachment_url"), failures, "marked")
+                if url is None:
                     continue
-                url = rule.get("url") or rule.get("marked_attachment_url")
-                if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-                    continue
-                on = rule.get("origin_upload_name") or "批阅文件"
-                so = LMSBatchDownloadThread._sanitize_filename(str(on))
+                so = LMSBatchDownloadThread._sanitize_filename(str(rule.get("origin_upload_name") or "批阅文件"))
                 fn = (so.rsplit(".", 1)[0] + "_批阅." + so.rsplit(".", 1)[1]
                       if "." in so and not so.endswith(".") else so + "_批阅")
                 files.append((url, f"批阅_{fn}", f"{activity_title}_批阅_{fn}", safe_title))
 
     @staticmethod
-    def _collect_replay_videos(files, detail, safe_title, activity_title):
-        """收集回放视频。"""
-        for v in (detail.get("replay_videos") or []):
-            if not isinstance(v, dict):
+    def _collect_replay_videos(files, detail, safe_title, activity_title, failures=None):
+        for video in LMSBatchDownloadThread._attachment_items(detail.get("replay_videos"), failures, "replay"):
+            url = LMSBatchDownloadThread._attachment_url(
+                video, ("download_url", "play_url"), failures, "replay")
+            if url is None:
                 continue
-            url = v.get("download_url") or v.get("play_url")
-            if not isinstance(url, str) or not url:
-                continue
-            label = format_replay_video_label(v.get("label"))
-            fn = f"{label}_{common_format_size(v.get('size', 0))}.mp4"
+            label = format_replay_video_label(video.get("label"))
+            fn = f"{label}_{common_format_size(video.get('size', 0))}.mp4"
             files.append((url, fn, f"{activity_title}_{label}", safe_title))
 
     # ──────────── Phase 2: 下载 ────────────
