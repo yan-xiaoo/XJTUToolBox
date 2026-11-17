@@ -7,6 +7,9 @@ import os
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QApplication
+from app.qt_bootstrap import configure_qt_plugins
+
+configure_qt_plugins()
 
 
 # 矫正工作目录

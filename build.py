@@ -2,12 +2,33 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from PyInstaller.__main__ import run
+
+def configure_windows_qt_paths() -> None:
+    """Repair Qt 5.15.2's lossy Unicode paths before PyInstaller hooks run."""
+    if sys.platform != 'win32':
+        return
+    import PyQt5
+    from PyInstaller.utils.hooks.qt import pyqt5_library_info as info
+    root = Path(PyQt5.__file__).resolve().parent / 'Qt5'
+    if not (root / 'plugins' / 'platforms').is_dir():
+        return  # Leave non-wheel/custom Qt installations to PyInstaller.
+    old = info.location['PrefixPath'].replace('\\', '/')
+    if Path(info.location['PluginsPath']).is_dir():
+        return
+    for key, value in list(info.location.items()):
+        normalized = value.replace('\\', '/')
+        if normalized == old or normalized.startswith(old + '/'):
+            info.location[key] = str(root) + normalized[len(old):]
+    info.qt_inside_package = True
+    info.qt_lib_dir = root / 'bin'
 
 def main() -> None:
     """按平台打包应用，并为 macOS 配置 Sparkle 与最终签名。"""
     # 确定当前操作系统
     system = sys.platform
+    configure_windows_qt_paths()
     # Windows 使用分号 ; 作为路径分隔符，Unix/Linux/macOS 使用冒号 :
     path_sep = ';' if system == 'win32' else ':'
 
