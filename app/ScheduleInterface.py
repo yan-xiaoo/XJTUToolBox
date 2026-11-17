@@ -985,7 +985,11 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot()
     def onCalendarSubscriptionClicked(self):
-        CalendarSubscriptionDialog(self).exec()
+        dialog = CalendarSubscriptionDialog(self)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     def startCalendarSubscription(self, address, port, ignore_holiday, set_alarm):
         context = self._calendarContext()
@@ -1000,6 +1004,7 @@ class ScheduleInterface(ScrollArea):
         data = self._subscriptionData()
         self.calendar_subscription.start(address, port, token, data)
         self._subscription_context = context
+        self._subscription_settings = (address, self.calendar_subscription._server.server_port, ignore_holiday, set_alarm)
         self._subscription_timer.start()
         self.calendarSubscriptionChanged.emit()
 
@@ -1025,6 +1030,7 @@ class ScheduleInterface(ScrollArea):
     def stopCalendarSubscription(self):
         self._subscription_timer.stop()
         self.calendar_subscription.stop()
+        self._subscription_settings = None
         self._subscription_context = None
         self._subscription_options = None
         self.calendarSubscriptionChanged.emit()

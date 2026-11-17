@@ -70,6 +70,15 @@ class CalendarSubscriptionDialog(QDialog):
     def _sync(self):
         active = self.interface.calendar_subscription.running
         self.link.setText(self.interface.calendar_subscription.url or "")
+        settings = getattr(self.interface, "_subscription_settings", None)
+        if active and settings is not None:
+            address, port, holiday, alarm = settings
+            if self.address.findText(address) < 0:
+                self.address.addItem(address)
+            self.address.setCurrentText(address)
+            self.port.setValue(port)
+            self.holiday.setChecked(holiday)
+            self.alarm.setChecked(alarm)
         self.toggle.setText(self.tr("停止订阅") if active else self.tr("开启订阅"))
         self.copy.setEnabled(active)
         for widget in (self.address, self.port, self.alarm, self.holiday):

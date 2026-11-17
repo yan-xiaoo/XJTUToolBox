@@ -1,6 +1,8 @@
 import datetime
 import http.client
 import socket
+import threading
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -140,6 +142,66 @@ class SubscriptionServerTest(unittest.TestCase):
         with self.assertRaises(OSError):
             other.start("127.0.0.1", self.port, self.token, self.data)
         self.assertFalse(other.running)
+
+    def test_slow_client_does_not_block_other_clients_or_stop(self):
+        client = socket.create_connection(("127.0.0.1", self.port), timeout=1)
+        self.addCleanup(client.close)
+        client.sendall(b"GET /")
+        # The partial request must not occupy the listener.
+        self.assertEqual(self.request()[0], 200)
+        finished = threading.Event()
+        stopper = threading.Thread(target=lambda: (self.server.stop(), finished.set()), daemon=True)
+        started = time.monotonic()
+        stopper.start()
+        while not finished.wait(.05) and time.monotonic() - started < 1:
+            try:
+                client.sendall(b"a")
+            except OSError:
+                break
+        self.assertTrue(finished.wait(1), "stop must interrupt a drip-fed connection")
+        stopper.join(1)
+        self.assertFalse(self.server.running)
+
+    def test_absolute_deadline_disconnects_drip_fed_request(self):
+        self.server._server.request_deadline = .25
+        client = socket.create_connection(("127.0.0.1", self.port), timeout=1)
+        self.addCleanup(client.close)
+        client.sendall(b"GET /")
+        started = time.monotonic()
+        disconnected = False
+        while time.monotonic() - started < 1.5:
+            try:
+                client.sendall(b"a")
+            except OSError:
+                disconnected = True
+                break
+            time.sleep(.05)
+        self.assertTrue(disconnected, "traffic must not reset the total request deadline")
+        self.assertEqual(self.request()[0], 200)
+
+    def test_restart_on_same_port_preserves_subscription_url(self):
+        self.assertEqual(self.request()[0], 200)
+        self.server.stop()
+        self.assertEqual(self.server.start("127.0.0.1", self.port, self.token, self.data), self.url)
+        self.assertEqual(self.request()[0], 200)
+
+    def test_active_client_limit_is_bounded(self):
+        clients = []
+        try:
+            for _ in range(12):
+                client = socket.create_connection(("127.0.0.1", self.port), timeout=1)
+                clients.append(client)
+                try:
+                    client.sendall(b"GET /")
+                except OSError:
+                    pass
+            time.sleep(.1)
+            with self.server._server._request_lock:
+                self.assertLessEqual(len(self.server._server._requests), 8)
+            self.server.stop()
+        finally:
+            for client in clients:
+                client.close()
 
     def test_rejects_public_and_wildcard_bind_addresses(self):
         for value in ("0.0.0.0", "8.8.8.8", "::", "not-an-ip"):

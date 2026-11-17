@@ -67,6 +67,16 @@ class SubscriptionUITest(unittest.TestCase):
         self.assertFalse(dialog.copy.isEnabled())
         self.assertFalse(self.ui._subscription_timer.isActive())
 
+    def test_reopened_dialog_shows_the_actual_running_options(self):
+        self.ui.startCalendarSubscription("127.0.0.1", 0, False, False)
+        dialog = CalendarSubscriptionDialog(self.ui)
+        self.addCleanup(dialog.reject)
+        self.assertEqual(dialog.address.currentText(), "127.0.0.1")
+        self.assertEqual(dialog.port.value(), self.ui.calendar_subscription._server.server_port)
+        self.assertFalse(dialog.alarm.isChecked())
+        self.assertFalse(dialog.holiday.isChecked())
+        self.assertFalse(dialog.port.isEnabled())
+
     def test_account_or_term_change_stops_feed(self):
         self.ui.startCalendarSubscription("127.0.0.1", 0, False, True)
         self.ui.context = (self.tmp.name, "2026-2027-2")

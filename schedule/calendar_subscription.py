@@ -5,14 +5,67 @@ import ipaddress
 import os
 import re
 import secrets
+import socket
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-class _CalendarHTTPServer(HTTPServer):
+class _CalendarHTTPServer(ThreadingHTTPServer):
     # SO_REUSEADDR permits duplicate listeners on Windows, hiding port conflicts.
     allow_reuse_address = False
+    daemon_threads = True
+    block_on_close = False
+    request_deadline = 5
+
+    def __init__(self, *args, **kwargs):
+        self._requests = set()
+        self._request_lock = threading.Lock()
+        self._closing = False
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def _interrupt(request):
+        try:
+            request.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def process_request(self, request, client_address):
+        with self._request_lock:
+            accepted = not self._closing and len(self._requests) < 8
+            if accepted:
+                self._requests.add(request)
+        if not accepted:
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            with self._request_lock:
+                self._requests.discard(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        # An inactivity timeout alone does not bound a drip-fed request.
+        timer = threading.Timer(self.request_deadline, self._interrupt, (request,))
+        timer.daemon = True
+        timer.start()
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            timer.cancel()
+            with self._request_lock:
+                self._requests.discard(request)
+
+    def handle_error(self, request, client_address):
+        pass  # Interrupted clients must not log request paths or tokens.
+
+    def interrupt_requests(self):
+        with self._request_lock:
+            self._closing = True
+            for request in self._requests:
+                self._interrupt(request)
 
 
 def is_lan_address(value):
@@ -131,6 +184,8 @@ class CalendarSubscription:
         with self._lock:
             self._data = self._etag = None
         if self._server is not None:
+            self._server.interrupt_requests()
+            # Only wait for the listener's short poll, never for a client.
             self._server.shutdown()
             self._server.server_close()
             self._thread.join()
