@@ -1,8 +1,9 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from schedule.schedule_database import Exam, Term
+from schedule.schedule_database import Course, Exam, Term
 from schedule.schedule_service import ScheduleService
 
 TEST_DOMAIN = "schedule"
@@ -131,6 +132,37 @@ class AddExamFromJsonTest(unittest.TestCase):
         self.service.addExamFromJson(other)
         self.service.addExamFromJson(_exam_json())
         self.assertEqual(Exam.select().count(), 2)
+
+    def test_invalid_later_row_does_not_leave_new_courses(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        payload = _exam_json(name="new course")
+        payload["exams"].append({"KCM": "bad row", "KSSJMS": "pending"})
+        with self.assertRaises(ValueError):
+            self.service.addExamFromJson(payload)
+        self.assertEqual(Course.select().count(), 0)
+        self.assertEqual(Exam.select().count(), 0)
+
+    def test_insert_failure_rolls_back_courses_and_existing_exams(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        self.service.addExamFromJson(_exam_json())
+        existing_id = Exam.select().get().id
+        payload = _exam_json(time_range="09:00-11:00")
+        payload["exams"].extend(_exam_json(name="new course")["exams"])
+        with patch.object(Exam, "bulk_create", side_effect=RuntimeError("synthetic insert failure")):
+            with self.assertRaises(RuntimeError):
+                self.service.addExamFromJson(payload)
+        self.assertEqual(Course.select().count(), 1)
+        self.assertEqual(Exam.select().get().id, existing_id)
+        self.assertEqual(Exam.select().get().start_exact_time.isoformat(), "08:00:00")
+
+    def test_same_course_multiple_exams_in_one_payload_are_preserved(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        payload = _exam_json()
+        payload["exams"].extend(_exam_json(time_range="14:00-16:00")["exams"])
+        self.service.addExamFromJson(payload)
+        self.service.addExamFromJson(payload)
+        self.assertEqual(Exam.select().count(), 2)
+        self.assertEqual(Course.select().count(), 1)
 
 
 if __name__ == '__main__':

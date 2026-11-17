@@ -544,6 +544,7 @@ class ScheduleService:
         start_of_term = self._parse_start_date(term.start_date)
 
         result = []
+        course_names = []
 
         for one in exams:
             time_string = unicodedata.normalize("NFKC", one.get("KSSJMS") or "")
@@ -564,7 +565,7 @@ class ScheduleService:
             location = one.get("JASMC", "")
             seat_number = one.get("ZWH", "")
 
-            course = Course.get_or_create(name=one["KCM"])[0]
+            course_names.append(one["KCM"])
 
             '''
             这里的时间是粗略的，毕竟考试的时间并不总是严格与课程节次重合
@@ -586,7 +587,6 @@ class ScheduleService:
 
             exam = Exam(name=one["KCM"] + "考试",
                         week_number=week,
-                        course=course,
                         location=location,
                         seat_number=seat_number,
                         day_of_week=day_of_week,
@@ -598,6 +598,8 @@ class ScheduleService:
             result.append(exam)
 
         with self.database.atomic():
+            for exam, course_name in zip(result, course_names):
+                exam.course = Course.get_or_create(name=course_name)[0]
             # 整批解析成功后再替换；错误行不能清掉先前已保存的考试。
             if result:
                 Exam.delete().where(
