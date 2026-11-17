@@ -1,12 +1,9 @@
 import datetime
 import os.path
-import pytz
 
-from icalendar import Calendar, Alarm
 
-from PyQt5.QtCore import pyqtSlot, QPoint
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHBoxLayout, QHeaderView
-from icalendar.cal import Event
+from PyQt5.QtCore import pyqtSlot, pyqtSignal, QPoint, QTimer
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QApplication
 from qfluentwidgets import ScrollArea, TableWidget, ComboBox, \
     PushButton, InfoBarPosition, InfoBar, MessageBox, PrimaryPushButton, TransparentPushButton, RoundMenu, Action, \
     StateToolTip
@@ -15,6 +12,7 @@ from qfluentwidgets import FluentIcon as FIF
 from .components.ScheduleTable import ScheduleTableWidget
 from .sub_interfaces.ChangeTermDialog import ChangeTermDialog
 from .sub_interfaces.ExportCalendarDialog import ExportCalendarDialog
+from .sub_interfaces.CalendarSubscriptionDialog import CalendarSubscriptionDialog
 from .sub_interfaces.LessonConflictDialog import LessonConflictDialog
 from .sub_interfaces.LessonDetailDialog import LessonDetailDialog
 from .sub_interfaces.TermStartTimeDialog import TermStartTimeDialog
@@ -32,14 +30,26 @@ from attendance.attendance import AttendanceWaterRecord, AttendanceFlow, WaterTy
 from schedule import getAttendanceEndTime, getAttendanceStartTime, getClassStartTime, getClassEndTime
 from schedule.schedule_database import CourseInstance, CourseStatus, Exam
 from schedule.schedule_service import ScheduleService
+from schedule.calendar_export import build_calendar
+from schedule.calendar_subscription import CalendarSubscription, load_token
+from schedule.schedule_database import Config, Term, Course
 from schedule.xjtu_time import isSummerTime
 
 
 class ScheduleInterface(ScrollArea):
     """课程表界面"""
+    calendarSubscriptionChanged = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.calendar_subscription = CalendarSubscription()
+        self._subscription_context = None
+        self._subscription_options = None
+        self._subscription_timer = QTimer(self)
+        self._subscription_timer.setInterval(30000)
+        self._subscription_timer.timeout.connect(self.refreshCalendarSubscription)
+        QApplication.instance().aboutToQuit.connect(self.stopCalendarSubscription)
+        self.destroyed.connect(self.calendar_subscription.stop)
 
         self.view = QWidget(self)
         self.setObjectName("ScheduleInterface")
@@ -170,6 +180,9 @@ class ScheduleInterface(ScrollArea):
         self.exportAction = Action(FIF.SHARE, self.tr("导出 ics..."))
         self.moreMenu.addAction(self.exportAction)
         self.exportAction.triggered.connect(self.onExportClicked)
+        self.subscriptionAction = Action(FIF.LINK, self.tr("局域网日历订阅..."))
+        self.moreMenu.addAction(self.subscriptionAction)
+        self.subscriptionAction.triggered.connect(self.onCalendarSubscriptionClicked)
         # 修改开始日期菜单项
         self.changeTermStartAction = Action(FIF.DATE_TIME, self.tr("修改学期开始日期..."))
         self.moreMenu.addAction(self.changeTermStartAction)
@@ -600,6 +613,7 @@ class ScheduleInterface(ScrollArea):
         加载某一周的课程表到页面中
         :param week: 周数
         """
+        self.refreshCalendarSubscription()
         if week is None:
             week = self.getCurrentWeek()
         # 设置当前周数为加载的周数
@@ -956,95 +970,64 @@ class ScheduleInterface(ScrollArea):
         :param set_alarm: 是否在课程和考试事件中设置提醒
         :return:
         """
-        LOCAL_TIMEZONE = pytz.timezone("Asia/Shanghai")  # 设定为北京时间
-        term_start = self.schedule_service.getStartOfTerm()
-        if term_start is None:
-            raise ValueError("学期开始时间为空")
-
-        cal = Calendar()
-
-        for course in self.schedule_service.getCourseInTerm():
-
-            term_start_time = datetime.datetime(term_start.year,
-                                                term_start.month,
-                                                term_start.day)
-            date = term_start_time + datetime.timedelta(
-                days=(course.week_number - 1) * 7 + course.day_of_week - 1)
-
-            e = Event()
-            name = course.name if course.name else ""
-            location = course.location if course.location else ""
-            e.add("summary", name)
-            e.add("description", f"{name} {location}")
-            # 有的课程可能没有地点信息，如果没有就不添加这个字段
-            if location:
-                e.add('location', location)
-
-            if date.date() in ignore_holidays:
-                continue
-
-            begin_time = getClassStartTime(course.start_time,
-                                           isSummerTime(date))
-            end_time = getClassEndTime(course.end_time, isSummerTime(date))
-
-            e.add(
-                "dtstart",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=begin_time.hour,
-                                 minute=begin_time.minute)))
-            e.add(
-                "dtend",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=end_time.hour,
-                                 minute=end_time.minute)))
-
-            if set_alarm:
-                alarm = Alarm()
-                alarm.add("action", "display")
-                alarm.add("description", self.tr("上课提醒"))
-                alarm.add("trigger", datetime.timedelta(minutes=-15))
-                e.add_component(alarm)
-
-            cal.add_component(e)
-
-        for exam in self.schedule_service.getExamInTerm():
-            term_start_time = datetime.datetime(term_start.year,
-                                                term_start.month,
-                                                term_start.day)
-            date = term_start_time + datetime.timedelta(
-                days=(exam.week_number - 1) * 7 + exam.day_of_week - 1)
-
-            e = Event()
-            e.add("summary", exam.name)
-            e.add("description", self.tr("座位号:") + exam.seat_number)
-            e.add('location', exam.location)
-
-            begin_time = exam.start_exact_time
-            end_time = exam.end_exact_time
-
-            e.add(
-                "dtstart",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=begin_time.hour,
-                                 minute=begin_time.minute)))
-            e.add(
-                "dtend",
-                LOCAL_TIMEZONE.localize(
-                    date.replace(hour=end_time.hour,
-                                 minute=end_time.minute)))
-
-            if set_alarm:
-                alarm = Alarm()
-                alarm.add("action", "display")
-                alarm.add("description", self.tr("考试提醒"))
-                alarm.add("trigger", datetime.timedelta(minutes=-30))
-                e.add_component(alarm)
-
-            cal.add_component(e)
+        data = build_calendar(self.schedule_service, ignore_holidays, set_alarm, tr=self.tr)
         with open(path, "wb") as f:
-            f.write(cal.to_ical())
+            f.write(data)
 
         self.success(self.tr("成功"), self.tr("导出日历成功"), parent=self)
+
+    def _calendarContext(self):
+        if self.schedule_service is None or accounts.current is None:
+            raise ValueError(self.tr("请先登录并获取课表"))
+        with self.schedule_service.database.bind_ctx([Config, Term, Course, CourseInstance, Exam]):
+            term = self.schedule_service.getCurrentTerm()
+        return (str(account_data_directory(accounts.current)), term)
+
+    @pyqtSlot()
+    def onCalendarSubscriptionClicked(self):
+        CalendarSubscriptionDialog(self).exec()
+
+    def startCalendarSubscription(self, address, port, ignore_holiday, set_alarm):
+        context = self._calendarContext()
+        token = load_token(context[0])
+        excluded = []
+        if ignore_holiday:
+            cached = cacheManager.read_expire_json("ignore_holiday.json", 7)
+            if cached is None:
+                raise ValueError(self.tr("没有有效的节假日缓存，请先勾选忽略节假日导出一次 ICS"))
+            excluded = [datetime.date.fromisoformat(day) for day in cached]
+        self._subscription_options = (excluded, set_alarm, token)
+        data = self._subscriptionData()
+        self.calendar_subscription.start(address, port, token, data)
+        self._subscription_context = context
+        self._subscription_timer.start()
+        self.calendarSubscriptionChanged.emit()
+
+    def _subscriptionData(self):
+        excluded, alarm, token = self._subscription_options
+        stamp = datetime.datetime.fromtimestamp(
+            os.path.getmtime(self.schedule_service.database.database), datetime.timezone.utc)
+        return build_calendar(self.schedule_service, excluded, alarm, uid_namespace=token,
+                              stamp=stamp, tr=self.tr)
+
+    def refreshCalendarSubscription(self):
+        if not self.calendar_subscription.running:
+            return
+        try:
+            if self._calendarContext() != self._subscription_context:
+                self.stopCalendarSubscription()
+                return
+            self.calendar_subscription.update(self._subscriptionData())
+        except Exception:
+            self.stopCalendarSubscription()
+            self.error(self.tr("日历订阅已停止"), self.tr("课表暂时无法生成，请检查当前学期后重新开启"), parent=self)
+
+    def stopCalendarSubscription(self):
+        self._subscription_timer.stop()
+        self.calendar_subscription.stop()
+        self._subscription_context = None
+        self._subscription_options = None
+        self.calendarSubscriptionChanged.emit()
 
     def checkCourse(self, course1, course2):
         return course1.day_of_week == course2.day_of_week and course1.start_time == course2.start_time and course1.end_time == course2.end_time\
@@ -1226,6 +1209,7 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot()
     def onCurrentAccountChanged(self):
+        self.stopCalendarSubscription()
         if accounts.current is None:
             self.schedule_service = None
             self.table_widget.clear()
