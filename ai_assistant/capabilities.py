@@ -206,7 +206,7 @@ def _read_schedule(path: Path) -> list[str] | None:
     if not path.is_file():
         return None
     try:
-        connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=1)
+        connection = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=1)
         try:
             rows = connection.execute(
                 "SELECT name, day_of_week, start_time, end_time, week_number, location, teacher "
