@@ -8,11 +8,12 @@ from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QActionGroup, QSizePolicy
 from qfluentwidgets import ScrollArea, CommandBar, FluentIcon, Action, BodyLabel, PrimaryPushButton, \
     TransparentDropDownPushButton, setFont, CheckableMenu, MenuIndicatorType, InfoBarPosition, InfoBar, CaptionLabel, \
-    MessageBox, SearchLineEdit
+    MessageBox, SearchLineEdit, PushButton
 
 from app.search import fuzzy_score, rank_items
 from ..components.NoticeCard import NoticeCard
 from ..threads.NoticeThread import NoticeThread
+from ..threads.SiteSearchThread import SiteSearchThread
 from ..threads.ProcessWidget import ProcessWidget
 from ..utils import StyleSheet, cfg
 from ..utils.notification import notify
@@ -45,6 +46,9 @@ class NoticeInterface(ScrollArea):
         self.commandBar.addAction(self.editAction)
         self.commandBar.addAction(self.refreshAction)
         self.commandBar.addAction(self.confirmAction)
+        self.siteSearchAction = Action(FluentIcon.GLOBE, self.tr("站内搜索"), self.commandBar)
+        self.siteSearchAction.triggered.connect(self.onSiteSearchClicked)
+        self.commandBar.addAction(self.siteSearchAction)
         # 排序菜单的按钮
         self.sortButton = TransparentDropDownPushButton(FluentIcon.SYNC, self.tr("排序方式"))
         self.sortButton.setFixedHeight(34)
@@ -95,12 +99,14 @@ class NoticeInterface(ScrollArea):
         self.commandBar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.vBoxLayout.addWidget(self.commandBar, alignment=Qt.AlignTop)
         self.searchEdit = SearchLineEdit(self)
-        self.searchEdit.setPlaceholderText(self.tr("搜索通知标题、来源、标签或日期"))
+        self.searchEdit.setPlaceholderText(self.tr("筛选已获取的通知；按回车在各网站站内搜索（可搜到更早的通知）"))
         self.searchEdit.setClearButtonEnabled(True)
         self.searchEdit.setMaximumWidth(760)
         self.searchEdit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.searchEdit.setFixedHeight(38)
         self.searchEdit.textChanged.connect(self.onNoticeSearchChanged)
+        self.searchEdit.returnPressed.connect(self.onSiteSearchClicked)
+        self.searchEdit.searchSignal.connect(self.onSiteSearchClicked)
         self.vBoxLayout.addWidget(self.searchEdit, alignment=Qt.AlignTop)
         self.statusLayout = QHBoxLayout()
         self.statusLayout.setContentsMargins(0, 0, 0, 0)
@@ -125,6 +131,17 @@ class NoticeInterface(ScrollArea):
         self.processWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.vBoxLayout.addWidget(self.processWidget, alignment=Qt.AlignTop)
         self.processWidget.setVisible(False)
+
+        # 站内搜索
+        self.siteSearchThread = SiteSearchThread(self)
+        self.siteSearchThread.results.connect(self.onSiteSearchResults)
+        self.siteSearchThread.error.connect(self.onThreadError)
+        self.siteSearchThread.finished.connect(self.unlock)
+        self.siteSearchProcess = ProcessWidget(self.siteSearchThread, self, stoppable=True)
+        self.siteSearchProcess.setMaximumWidth(760)
+        self.siteSearchProcess.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.vBoxLayout.addWidget(self.siteSearchProcess, alignment=Qt.AlignTop)
+        self.siteSearchProcess.setVisible(False)
 
         # 没有配置时的界面
         self.startFrame = QFrame(self.view)
@@ -164,6 +181,23 @@ class NoticeInterface(ScrollArea):
         self.noticeWidgets = []
 
         self.vBoxLayout.addWidget(self.noticeFrame, stretch=1)
+
+        # 站内搜索结果界面：与已获取的通知分开，不写进本地通知缓存
+        self.siteResultFrame = QFrame(self.view)
+        self.siteResultLayout = QVBoxLayout(self.siteResultFrame)
+        self.siteResultLayout.setContentsMargins(0, 0, 0, 0)
+        self.siteResultLayout.setAlignment(Qt.AlignTop)
+        self.siteResultHeader = QHBoxLayout()
+        self.siteResultLabel = BodyLabel(self.siteResultFrame)
+        self.siteResultBackButton = PushButton(FluentIcon.RETURN, self.tr("返回已获取的通知"), self.siteResultFrame)
+        self.siteResultBackButton.clicked.connect(self.closeSiteResults)
+        self.siteResultHeader.addWidget(self.siteResultLabel)
+        self.siteResultHeader.addStretch(1)
+        self.siteResultHeader.addWidget(self.siteResultBackButton)
+        self.siteResultLayout.addLayout(self.siteResultHeader)
+        self.siteResultWidgets = []
+        self.siteResultFrame.setVisible(False)
+        self.vBoxLayout.addWidget(self.siteResultFrame, stretch=1)
 
         self.updateFilterHint()
 
@@ -209,6 +243,7 @@ class NoticeInterface(ScrollArea):
         self.editAction.setEnabled(False)
         self.emptyButton.setEnabled(False)
         self.refreshAction.setEnabled(False)
+        self.siteSearchAction.setEnabled(False)
 
     def unlock(self):
         """
@@ -217,6 +252,7 @@ class NoticeInterface(ScrollArea):
         self.editAction.setEnabled(True)
         self.emptyButton.setEnabled(True)
         self.refreshAction.setEnabled(True)
+        self.siteSearchAction.setEnabled(True)
 
     def updateFilterHint(self):
         """
@@ -349,6 +385,66 @@ class NoticeInterface(ScrollArea):
             self.searchResultLabel.setVisible(True)
         else:
             self.searchResultLabel.setVisible(False)
+            # 清空搜索框即回到已获取的通知
+            if self.siteResultFrame.isVisible():
+                self.closeSiteResults()
+
+    @pyqtSlot()
+    def onSiteSearchClicked(self):
+        """
+        用各网站自己的全文检索搜索关键词，可以搜到本地没抓到的旧通知
+        """
+        keyword = self.searchEdit.text().strip()
+        if not keyword:
+            self.error(self.tr("请输入关键词"), self.tr("在搜索框里输入要站内搜索的内容"), parent=self)
+            self.searchEdit.setFocus()
+            return
+        if not self.noticeManager.subscription:
+            self.error(self.tr("没有可搜索的网站"), self.tr("请先添加通知配置"), parent=self)
+            return
+        if self.siteSearchThread.isRunning() or self.noticeThread.isRunning():
+            return
+        self.siteSearchThread.keyword = keyword
+        self.siteSearchThread.source_ids = list(self.noticeManager.subscription)
+        self.siteSearchProcess.setVisible(True)
+        self.lock()
+        self.siteSearchThread.start()
+
+    @pyqtSlot(str, list)
+    def onSiteSearchResults(self, keyword, notices):
+        for widget in self.siteResultWidgets:
+            self.siteResultLayout.removeWidget(widget)
+            widget.deleteLater()
+        self.siteResultWidgets = []
+        for notice in notices:
+            # 已获取过的通知沿用本地对象，保留已读状态
+            local = next((one for one in self.notices if one.link == notice.link), None)
+            card = NoticeCard(local or notice, self.siteResultFrame)
+            if local is not None:
+                card.noticeChanged.connect(self.onNoticeChanged)
+                card.noticeClicked.connect(self.onNoticeClicked)
+            else:
+                card.noticeClicked.connect(lambda n: QDesktopServices().openUrl(QUrl(n.link)))
+            self.siteResultLayout.addWidget(card)
+            self.siteResultWidgets.append(card)
+        self.siteResultLabel.setText(
+            self.tr("站内搜索「{keyword}」：{count} 条结果").format(keyword=keyword, count=len(notices))
+            if notices else self.tr("站内搜索「{keyword}」：没有找到结果").format(keyword=keyword)
+        )
+        self.startFrame.setVisible(False)
+        self.emptyFrame.setVisible(False)
+        self.noticeFrame.setVisible(False)
+        self.siteResultFrame.setVisible(True)
+
+    @pyqtSlot()
+    def closeSiteResults(self):
+        self.siteResultFrame.setVisible(False)
+        if not self.noticeManager.subscription:
+            self.switchTo(self.startFrame)
+        elif self.notices:
+            self.switchTo(self.noticeFrame)
+        else:
+            self.switchTo(self.emptyFrame)
 
     @pyqtSlot(Notification)
     def onNoticeChanged(self, notice):
@@ -473,6 +569,7 @@ class NoticeInterface(ScrollArea):
         """
         在自身的初始界面和通知显示界面之间切换
         """
+        self.siteResultFrame.setVisible(False)
         if item == self.startFrame:
             self.startFrame.setVisible(True)
             self.emptyFrame.setVisible(False)
