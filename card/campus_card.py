@@ -159,7 +159,7 @@ class CampusCard:
                 time=str(item.get("jndatetimeStr") or ""),
                 amount_cents=_signed_amount_cents(
                     amount_cents, type_name, icon,
-                    type_from=_optional_str(item.get("typeFrom")),
+                    type_from=_type_from_value(item.get("typeFrom")),
                     to_account=_optional_int(item.get("toAccount")),
                     from_account=_optional_int(item.get("fromAccount")),
                 ),
@@ -230,11 +230,19 @@ _EXPENSE_MARKERS = (
 )
 
 
-def _optional_str(value: Any) -> str | None:
-    if value is None:
+def _type_from_value(value: Any) -> str | None:
+    """只接受接口约定的字符串/整数 ``typeFrom``，其余一律视为缺失。
+
+    ``True``、``1.0`` 之类的异常值若被 ``str()`` 成非空字符串，会被当成权威方向
+    并全部判为支出，盖过关键词和账户回退。这里返回 ``None``，让它走回退路径。
+    """
+    if isinstance(value, bool):
         return None
-    text = str(value).strip()
-    return text or None
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
 
 
 def _optional_int(value: Any) -> int | None:
