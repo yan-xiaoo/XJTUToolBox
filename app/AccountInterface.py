@@ -10,6 +10,7 @@ from .sub_interfaces.AvatarDialog import AvatarDialog
 from .sub_interfaces.EncryptDialog import DecryptFrame
 from .utils import StyleSheet, cfg, AccountDataManager
 from .utils.account import Account, AccountManager
+from .utils.account_storage import AccountStorageError
 
 
 class BadgeLabel(QLabel):
@@ -366,7 +367,7 @@ class AccountInterface(ScrollArea):
         self.decryptFrame.setMaximumWidth(300)
 
         self.vBoxLayout.addWidget(self.decryptFrame, alignment=Qt.AlignHCenter)
-        if accounts.encrypted:
+        if accounts.locked:
             self.decryptFrame.setVisible(True)
         else:
             self.decryptFrame.setVisible(False)
@@ -386,7 +387,7 @@ class AccountInterface(ScrollArea):
         self.addAccountWidget.clicked.connect(self._onAddAccountClicked)
 
         self.accounts = accounts
-        if accounts.encrypted:
+        if accounts.locked:
             self.accountClickable = False
         else:
             self.accountClickable = True
@@ -423,36 +424,34 @@ class AccountInterface(ScrollArea):
             self._add_account_widget(account, is_current=account == self.accounts.current)
 
     def _onAccountChanged(self):
-        # 如果没有账户了，则取消加密
-        if len(self.accounts) == 0:
-            self.accounts.setEncrypted(False, use_keyring=cfg.useKeyring.value)
-
-        if cfg.useKeyring.value:
-            self.accounts.save_to_keyring()
-        else:
+        try:
             self.accounts.save_suitable()
+        except AccountStorageError as exc:
+            InfoBar.error(self.tr("账户改动未保存"), str(exc), parent=self)
 
     @pyqtSlot(Account)
     def _onAccountDeleted(self, account: Account):
-        account.session_manager.clear_all_session_state(account, include_persisted=True)
-        if account == self.accounts.current:
-            self.accounts.current = self.accounts[0]
+        try:
             self.accounts.remove(account)
-            if len(self.accounts) > 0:
-                self._onCurrentAccountChanged(self.accounts[0])
-        else:
-            self.accounts.remove(account)
+        except AccountStorageError as exc:
+            InfoBar.error(self.tr("无法删除账户"), str(exc), parent=self)
+            return
 
+        account.session_manager.clear_all_session_state(account, include_persisted=True)
         AccountDataManager(account).remove_all()
-        self.accountAreaLayout.removeWidget(self.account_widgets[account])
-        self.account_widgets[account].deleteLater()
-        self._onAccountChanged()
+        widget = self.account_widgets.pop(account)
+        self.accountAreaLayout.removeWidget(widget)
+        widget.deleteLater()
+        self._updateCurrentCards()
 
     @pyqtSlot(Account)
     def _onAvatarChanged(self, account: Account):
         self.avatarChanged.emit(account)
 
     def _onAddAccountClicked(self):
+        if self.accounts.storage_error is not None:
+            InfoBar.error(self.tr("无法添加账户"), str(self.accounts.storage_error), parent=self)
+            return
         if not self.accountClickable:
             InfoBar.error(self.tr("无法添加账户"), self.tr("请先解密账户"), duration=2000, parent=self)
             return
@@ -472,16 +471,12 @@ class AccountInterface(ScrollArea):
         self.main_window.login_interface.loginSuccess.disconnect()
 
     def add_account(self, account: Account):
-        self.accounts.append(account)
-        self._add_account_widget(account)
-        if len(self.accounts) == 1:
-            self.accounts.current = account
-            self._onCurrentAccountChanged(account)
-
-        if cfg.useKeyring.value:
-            self.accounts.save_to_keyring()
-        else:
-            self.accounts.save_suitable()
+        try:
+            self.accounts.append(account)
+        except AccountStorageError as exc:
+            InfoBar.error(self.tr("无法保存新账户"), str(exc), parent=self)
+            return
+        self._add_account_widget(account, is_current=account is self.accounts.current)
 
     def _add_account_widget(self, account: Account, is_current=False):
         """is_current 仅仅影响按钮样式，不会影响账户的切换行为"""
@@ -496,10 +491,16 @@ class AccountInterface(ScrollArea):
 
     @pyqtSlot(Account)
     def _onCurrentAccountChanged(self, account: Account):
-        self.accounts.current = account
+        try:
+            self.accounts.select(account)
+        except AccountStorageError as exc:
+            InfoBar.error(self.tr("无法切换账户"), str(exc), parent=self)
+            return
+        self._updateCurrentCards()
+
+    def _updateCurrentCards(self):
         for a, w in self.account_widgets.items():
-            w.setCurrent(a == account)
-        self._onAccountChanged()
+            w.setCurrent(a is self.accounts.current)
 
     @pyqtSlot(str, str, object, str)
     def _onLoginFinish(self, username, password, type_, real_name):

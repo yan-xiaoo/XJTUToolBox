@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-import os
 import sys
 import shlex
 import threading
 
-import keyring
 import keyring.errors
 from PyQt5.QtCore import pyqtSlot, QUrl, pyqtSignal, QTimer, QSignalBlocker
 from qfluentwidgets import ScrollArea, ExpandLayout, SettingCardGroup, ComboBoxSettingCard, setTheme, \
@@ -21,10 +19,10 @@ from .cards.custom_switch_card import CustomSwitchSettingCard
 from .components.CustomMessageBox import ConfirmBox
 from .sub_interfaces.ResetVisitorIdDialog import ResetVisitorIdDialog
 from .threads.UpdateThread import checkUpdate, UpdateStatus
-from .utils.account import KEYRING_SERVICE_NAME
+from .utils.account_storage import AccountStorageError
 from .utils.auto_start import add_to_startup, delete_from_startup
 from .utils.config import cfg, TraySetting
-from .utils import accounts, LOG_DIRECTORY, DEFAULT_ACCOUNT_PATH
+from .utils import accounts, LOG_DIRECTORY
 from .sessions.session_backend import AccessMode
 from .utils.session_manager import SessionManager
 from .utils.style_sheet import StyleSheet
@@ -222,7 +220,7 @@ class SettingInterface(ScrollArea):
                                                   self.tr("加密账户"), self.tr("加密本地存储的账户信息，以免泄漏"),
                                                   self.accountGroup)
         self.decryptCard = PushSettingCard(self.tr("不再加密"), FIF.FINGERPRINT,
-                                           self.tr("不再加密账户"), self.tr("撤销账户加密，重新使用明文存储账户信息"),
+                                           self.tr("不再加密账户"), self.tr("取消启动时需要输入的账户加密密码"),
                                            self.accountGroup)
         self.clearCard = PushSettingCard(self.tr("清除"), FIF.CLEAR_SELECTION,
                                          self.tr("清除所有账户"), self.tr("清除本地存储的所有账户信息并撤销账户加密"))
@@ -236,10 +234,10 @@ class SettingInterface(ScrollArea):
         self.saveKeyringCard = CustomSwitchSettingCard(
             FIF.VPN,
             self.tr("使用系统密码管理器"),
-            self.tr("将账户密码存储在系统密码管理器中（如 macOS 钥匙串、Windows 凭据管理器）"),
-            cfg.useKeyring,
-            self.accountGroup
+            self.tr("加密本地账户文件，并用系统密码管理器保管加密密钥"),
+            parent=self.accountGroup
         )
+        self.saveKeyringCard.setChecked(cfg.useKeyring.value)
         self.qrcodeLoginCard = CustomSwitchSettingCard(
             FIF.CONNECT,
             self.tr("启用二维码登录"),
@@ -548,59 +546,44 @@ class SettingInterface(ScrollArea):
 
     @pyqtSlot(bool)
     def _onSaveKeyringChanged(self, checked: bool):
+        previous = cfg.useKeyring.value
+        if checked == previous:
+            return
+
         if not checked and not accounts.encrypted:
-            box = MessageBox(self.tr("关闭系统密码管理器"), self.tr("关闭后，账户密码将以明文存储在数据文件中，可能会增加密码泄漏风险。\n是否确认关闭？"),
+            box = MessageBox(self.tr("关闭系统密码管理器"),
+                             self.tr("关闭后，账户密码将以明文存储在数据文件中。是否确认关闭？"),
                              parent=self)
             box.yesButton.setText(self.tr("确认"))
             box.cancelButton.setText(self.tr("取消"))
-            if box.exec():
-                pass
-            else:
-                self.saveKeyringCard.setChecked(True)
+            if not box.exec():
+                with QSignalBlocker(self.saveKeyringCard.switchButton):
+                    self.saveKeyringCard.setChecked(previous)
+                return
 
-        if cfg.useKeyring.value:
-            if accounts.is_encrypted():
-                with open(DEFAULT_ACCOUNT_PATH, "r") as f:
-                    data = f.read()
-                try:
-                    keyring.set_password(KEYRING_SERVICE_NAME, "accounts", data)
-                except keyring.errors.KeyringError:
-                    InfoBar.error(self.tr(""), self.tr("错误：无法将账户保存到系统密码管理器中"), parent=self)
-                    self.saveKeyringCard.setChecked(False)
-            else:
-                try:
-                    accounts.save_to_keyring()
-                except keyring.errors.KeyringError:
-                    InfoBar.error(self.tr(""), self.tr("错误：无法将账户保存到系统密码管理器中"), parent=self)
-                    self.saveKeyringCard.setChecked(False)
-            try:
-                os.remove(DEFAULT_ACCOUNT_PATH)
-            except OSError:
-                pass
-        else:
-            if accounts.is_encrypted():
-                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
-                if data:
-                    with open(DEFAULT_ACCOUNT_PATH, "w") as f:
-                        f.write(data)
-            else:
-                accounts.save_suitable()
+        try:
+            accounts.save_suitable(use_keyring=checked)
+        except AccountStorageError as exc:
+            with QSignalBlocker(self.saveKeyringCard.switchButton):
+                self.saveKeyringCard.setChecked(previous)
+            InfoBar.error(self.tr("无法切换账户存储"), str(exc), parent=self)
+            return
 
-            try:
-                accounts.remove_from_keyring()
-            except keyring.errors.KeyringError:
-                pass
+        try:
+            cfg.set(cfg.useKeyring, checked)
+        except OSError:
+            InfoBar.error(self.tr("设置未能写入磁盘"), self.tr("账户文件已更新，请检查配置目录权限。"), parent=self)
 
         if cfg.keepSessionOnExit.value:
             try:
                 accounts.migrate_all_persisted_session_state()
-            except keyring.errors.KeyringError:
+            except (keyring.errors.KeyringError, OSError):
                 InfoBar.error(self.tr("迁移登录状态失败"), self.tr("无法迁移已保存的登录状态"), parent=self)
             else:
-                if cfg.useKeyring.value:
-                    InfoBar.info(self.tr("登录状态存储已切换"), self.tr("已保存的登录状态将存储到系统密码管理器"), parent=self)
+                if checked:
+                    InfoBar.info(self.tr("登录状态存储设置已更新"), self.tr("登录状态使用加密文件"), parent=self)
                 else:
-                    InfoBar.warning(self.tr("登录状态存储已切换"), self.tr("已保存的登录状态将以明文文件保存"), parent=self)
+                    InfoBar.warning(self.tr("登录状态存储设置已更新"), self.tr("登录状态将以明文文件保存"), parent=self)
 
     @pyqtSlot(bool)
     def _onKeepSessionChanged(self, checked: bool):
@@ -746,11 +729,14 @@ class SettingInterface(ScrollArea):
                 return
 
         w = MessageBox(self.tr("是否确认不再加密?"),
-                       self.tr("取消加密后，你的账户信息将重新使用明文存储，存在泄漏风险"), self)
+                       self.tr("取消后，启动时将无需输入账户加密密码。关闭系统密码管理器时，账户信息会以明文保存。"), self)
         w.yesButton.setText(self.tr("不再加密"))
         w.cancelButton.setText(self.tr("取消"))
         if w.exec():
-            accounts.setEncrypted(False, use_keyring=cfg.useKeyring.value)
+            try:
+                accounts.setEncrypted(False, use_keyring=cfg.useKeyring.value)
+            except AccountStorageError as exc:
+                InfoBar.error(self.tr("取消加密失败"), str(exc), parent=self)
 
     @pyqtSlot()
     def _onClearAccountsClicked(self):
@@ -761,8 +747,15 @@ class SettingInterface(ScrollArea):
         w = ConfirmBox(self.tr("清除所有账户"), msg, self.tr("清除"), self.tr("请输入“清除”以确认"), self)
         w.yesButton.setText(self.tr("清除"))
         if w.exec():
-            accounts.clear()
-            InfoBar.success(title='', content="清除账户成功", parent=self)
+            try:
+                warning = accounts.clear()
+            except AccountStorageError as exc:
+                InfoBar.error(self.tr("无法清除账户"), str(exc), parent=self)
+            else:
+                if warning is not None:
+                    InfoBar.warning(self.tr("账户列表已清空"), str(warning), parent=self)
+                else:
+                    InfoBar.success("", self.tr("清除账户成功"), parent=self)
 
     @pyqtSlot()
     def _showAvatarClicked(self):
