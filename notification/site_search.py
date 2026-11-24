@@ -5,18 +5,20 @@
 - 学院 / 部门站几乎都是博达 CMS，首页有个 ``search.jsp``（有的站叫 ``ssjgy.jsp``、``sou.jsp``）
   的全文检索表单。关键词 Base64 后放进 ``newskeycode2``，GET 就能翻页；每页约 15 条，每条带日期。
   结果按相关度排，旧通知常排在前面，所以取前两页再按日期倒序。
-- 首页找不到检索表单、或检索结果不带完整日期的站，退回「抓列表前两页、本地按标题筛」。
+- 检索的是全站索引，结果不属于哪个频道：同一站点只搜一次，再按文章链接 ``info/<栏目id>/`` 归到
+  订阅的频道（栏目 id 从频道列表里的通知链接学来），归不到已订阅频道的丢掉。
+- 首页找不到检索表单、检索结果不带完整日期、或学不到频道栏目的，退回「抓列表前两页、本地按标题筛」。
 """
 
 from __future__ import annotations
 
 import base64
 import datetime
+import queue
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 from urllib.parse import quote, urljoin, urlparse
 
 from lxml import etree
@@ -26,15 +28,20 @@ from .crawlers.crawler import get_session, pass_challenge_for_website
 from .notification import Notification
 from .source import SourceDescriptor, source_registry
 
-_FORM_ACTION_RE = re.compile(r'<form[^>]+action="/?([a-zA-Z0-9_]+\.jsp\?wbtreeid=\d+)"', re.IGNORECASE)
 _DATE_RE = re.compile(r"(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})")
 _CATEGORY_RE = re.compile(r"^\s*[\[【]([^\]】]{1,12})[\]】]\s*")
-_ROW_TAGS = {"li", "tr", "dd", "div"}
+_COLUMN_RE = re.compile(r"(?:^|/)info/(\d+)/")
 _TIMEOUT = 20
+_WORKERS = 8
 
-# 搜索入口，按站点 origin 缓存；空串表示这个站没有博达检索，别每次都去首页找。
+# 检索入口按站点首页缓存，空串表示这个站没有博达检索；频道栏目 id 按来源缓存。
 _actions: dict[str, str] = {}
-_actions_lock = threading.Lock()
+_columns: dict[str, frozenset[str]] = {}
+_cache_lock = threading.Lock()
+
+
+class SearchCancelled(Exception):
+    """用户取消了站内搜索。"""
 
 
 @dataclass
@@ -43,9 +50,24 @@ class SiteSearchResult:
     errors: dict[str, str] = field(default_factory=dict)
 
 
+def column_of(link: str) -> str | None:
+    """博达文章链接 ``…/info/1146/12345.htm`` 里的栏目 id。"""
+    match = _COLUMN_RE.search(urlparse(link).path)
+    return match.group(1) if match else None
+
+
+def _check(cancel: threading.Event) -> None:
+    if cancel.is_set():
+        raise SearchCancelled
+
+
 def _origin(url: str) -> str:
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _home(source: SourceDescriptor) -> str:
+    return source.home or f"{_origin(source.url)}/"
 
 
 def _session_for(source: SourceDescriptor):
@@ -55,45 +77,55 @@ def _session_for(source: SourceDescriptor):
     return pass_challenge_for_website(source.url, f"{origin}/dynamic_challenge")
 
 
-def _action_for(session, source: SourceDescriptor) -> str | None:
-    """站点首页上博达检索表单的 action（相对站点根），没有返回 None。"""
-    origin = _origin(source.url)
-    with _actions_lock:
-        if origin in _actions:
-            return _actions[origin] or None
+def _action_for(session, source: SourceDescriptor, cancel: threading.Event) -> str | None:
+    """站点首页上博达检索表单的绝对 action，没有返回 None。"""
+    home = _home(source)
+    with _cache_lock:
+        if home in _actions:
+            return _actions[home] or None
+    _check(cancel)
     try:
-        response = session.get(f"{origin}/", timeout=_TIMEOUT)
+        response = session.get(home, timeout=_TIMEOUT)
         response.raise_for_status()
     except Exception:
         return None  # 首页都打不开：不缓存结论，下次再试
-    html = response.content.decode(response.encoding or "utf-8", errors="replace")
+    root = etree.HTML(response.content, parser=etree.HTMLParser(recover=True))
     action = ""
     # 只认带博达检索字段的表单，别把登录框之类的 jsp 当成搜索
-    for match in _FORM_ACTION_RE.finditer(html):
-        index = html.find("lucenenewssearchkey", match.start())
-        if 0 <= index <= match.start() + 1500:
-            action = match.group(1)
+    for form in root.iter("form") if root is not None else ():
+        target = form.get("action") or ""
+        if ".jsp" in target and "wbtreeid=" in target and form.xpath(".//input[starts-with(@name, 'lucenenewssearchkey')]"):
+            action = urljoin(response.url, target)
             break
-    with _actions_lock:
-        _actions[origin] = action
+    with _cache_lock:
+        _actions[home] = action
     return action or None
 
 
-def _row_text(anchor) -> str:
-    """日期和标题同在一行（li / tr / div），在它的文字里找。"""
+def _row_date(anchor) -> datetime.date | None:
+    """从链接往外逐层找日期，直到外层包住了别的通知链接为止（那已是整段列表，日期不是这条的）。"""
+    title = "".join(anchor.itertext())
     node = anchor.getparent()
-    while node is not None and not (isinstance(node.tag, str) and node.tag.lower() in _ROW_TAGS):
+    while node is not None and isinstance(node.tag, str) and node.tag.lower() not in ("body", "html"):
+        links = {a.get("href") for a in node.iter("a") if "info/" in (a.get("href") or "")}
+        if len(links) > 1:
+            return None
+        # 去掉标题再找：标题里的「2025年1月20日放假」不是发布日期
+        text = "".join(node.itertext())
+        match = _DATE_RE.search(text.replace(title, " ") if title else text)
+        if match:
+            try:
+                return datetime.date(*(int(part) for part in match.groups()))
+            except ValueError:
+                return None
         node = node.getparent()
-    if node is None:
-        node = anchor.getparent()
-    return " ".join("".join(node.itertext()).split()) if node is not None else ""
+    return None
 
 
 def _search_vsb(session, source: SourceDescriptor, action: str, keyword: str, page: int):
-    """返回 (通知列表, 是否还有下一页, 搜到但没有完整日期的条数)。"""
-    origin = _origin(source.url)
+    """返回 (通知列表, 是否还有下一页, 搜到但没有完整日期的条数)；通知暂记在 source 名下，之后再归属。"""
     key = base64.b64encode(keyword.encode("utf-8")).decode("ascii")
-    url = f"{origin}/{action}&searchScope=0&currentnum={page}&newskeycode2={quote(key, safe='')}"
+    url = f"{action}&searchScope=0&currentnum={page}&newskeycode2={quote(key, safe='')}"
     response = session.get(url, timeout=_TIMEOUT)
     response.raise_for_status()
     root = etree.HTML(response.content, parser=etree.HTMLParser(recover=True))
@@ -116,13 +148,8 @@ def _search_vsb(session, source: SourceDescriptor, action: str, keyword: str, pa
         if link in seen:
             continue
         # 没年份就没法和别的站一起按时间排，猜年份会把老通知显示成今年：不收，记一笔
-        date_match = _DATE_RE.search(_row_text(anchor))
-        if date_match is None:
-            undated += 1
-            continue
-        try:
-            date = datetime.date(*(int(part) for part in date_match.groups()))
-        except ValueError:
+        date = _row_date(anchor)
+        if date is None:
             undated += 1
             continue
         # 置顶占位会写成 2099-12-31 之类的未来日期，不是真通知
@@ -135,61 +162,132 @@ def _search_vsb(session, source: SourceDescriptor, action: str, keyword: str, pa
     return items, has_more, undated
 
 
-def _search_list(source: SourceDescriptor, keyword: str, pages: int) -> list[Notification]:
+def _search_list(source: SourceDescriptor, keyword: str, pages: int, cancel: threading.Event) -> list[Notification]:
+    _check(cancel)
     terms = [term.casefold() for term in keyword.split() if term]
     notifications = create_crawler(source.id, pages).get_notifications()
     return [n for n in notifications if all(term in n.title.casefold() for term in terms)]
 
 
-def search_source(source_id: str, keyword: str, pages: int = 2) -> list[Notification]:
-    """在一个来源里搜 ``keyword``，最多翻 ``pages`` 页，按日期倒序。"""
-    keyword = keyword.strip()
-    if not keyword:
-        return []
-    source = source_registry.require(source_id)
-    found: dict[str, Notification] = {}
-    action = None
-    session = None
-    if source.crawler == "generic":
-        session = _session_for(source)
-        action = _action_for(session, source)
-    if action is None:
-        results = _search_list(source, keyword, pages)
-    else:
-        results = []
+def _columns_for(source: SourceDescriptor, known_links: Iterable[str], cancel: threading.Event) -> frozenset[str]:
+    """频道列表里的通知都在哪些栏目下：优先用本地已抓到的链接，没有就抓列表第一页。学不到给空集。"""
+    with _cache_lock:
+        learned = set(_columns.get(source.id, ()))
+    learned.update(filter(None, map(column_of, known_links)))
+    if not learned:
+        _check(cancel)
+        try:
+            learned.update(filter(None, (column_of(n.link) for n in create_crawler(source.id, 1).get_notifications())))
+        except Exception:
+            return frozenset()
+    result = frozenset(learned)
+    with _cache_lock:
+        _columns[source.id] = result
+    return result
+
+
+def _search_site(sources: list[SourceDescriptor], keyword: str, pages: int,
+                 known: dict[str, list[str]], cancel: threading.Event) -> list[Notification]:
+    """同一站点的几个频道：站内检索只跑一次，结果按栏目归到频道；归不了的频道退回列表筛。"""
+    first = sources[0]
+    _check(cancel)
+    session = _session_for(first) if first.crawler == "generic" else None
+    action = _action_for(session, first, cancel) if session is not None else None
+    hits: list[Notification] | None = None
+    if action is not None:
+        hits = []
         for page in range(1, max(1, pages) + 1):
-            items, has_more, undated = _search_vsb(session, source, action, keyword, page)
+            _check(cancel)
+            items, has_more, undated = _search_vsb(session, first, action, keyword, page)
             # 这个站的检索结果不带完整日期：没法按时间排，改用列表本地筛
             if page == 1 and not items and undated > 0:
-                results = _search_list(source, keyword, pages)
+                hits = None
                 break
-            results.extend(items)
+            hits.extend(items)
             if not has_more:
                 break
-    for notification in results:
-        found.setdefault(notification.link, notification)
-    return sorted(found.values(), key=lambda n: n.date, reverse=True)
+
+    columns = {s.id: _columns_for(s, known.get(s.id, ()), cancel) for s in sources} if hits is not None else {}
+    results: list[Notification] = []
+    for hit in hits or ():
+        column = column_of(hit.link)
+        owners = [s for s in sources if column in columns[s.id]]
+        if not owners:
+            continue  # 站内其他没订阅的栏目
+        # 父栏目和子栏目都能认领时归给更具体（栏目更少）的那个
+        owner = min(owners, key=lambda s: len(columns[s.id]))
+        results.append(Notification(hit.title, hit.link, owner.id, tags=hit.tags, date=hit.date))
+    for source in sources:
+        if hits is None or not columns[source.id]:
+            results.extend(_search_list(source, keyword, pages, cancel))
+    return results
 
 
-def search(source_ids: Iterable[str], keyword: str, pages: int = 2) -> SiteSearchResult:
-    """多个来源并发搜，合并去重、按日期倒序；失败的来源记进 errors。"""
-    ids = [source_id for source_id in source_ids if source_registry.get(source_id) is not None]
-    result = SiteSearchResult([])
-    if not ids or not keyword.strip():
-        return result
+def _run_parallel(tasks: list[tuple[str, Callable[[], list[Notification]]]], cancel: threading.Event):
+    """用守护线程并发跑；取消时立刻返回，在途请求留给守护线程自生自灭，不拖住程序退出。"""
+    pending: queue.Queue = queue.Queue()
+    for task in tasks:
+        pending.put(task)
+    done: queue.Queue = queue.Queue()
 
-    def run(source_id: str):
+    def worker() -> None:
+        while not cancel.is_set():
+            try:
+                key, job = pending.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                done.put((key, job(), None))
+            except Exception as error:  # 单个站点失败不影响其他站点
+                done.put((key, [], error))
+
+    for _ in range(min(_WORKERS, len(tasks))):
+        threading.Thread(target=worker, name="site-search", daemon=True).start()
+    finished = []
+    while len(finished) < len(tasks):
+        _check(cancel)
         try:
-            return source_id, search_source(source_id, keyword, pages), None
-        except Exception as error:  # 单个来源失败不影响其他来源
-            return source_id, [], f"{type(error).__name__}: {error}"
+            finished.append(done.get(timeout=0.1))
+        except queue.Empty:
+            continue
+    return finished
 
+
+def search(source_ids: Iterable[str], keyword: str, pages: int = 2, *,
+           known: Iterable[tuple[str, str]] = (),
+           accept: Callable[[Notification], bool] | None = None,
+           cancel: threading.Event | None = None) -> SiteSearchResult:
+    """
+    在订阅的来源里搜 ``keyword``，合并去重、按日期倒序；失败的站点记进 errors。
+
+    :param known: 本地已有通知的 (来源, 链接)，用来学各频道的栏目 id，省得再抓列表。
+    :param accept: 二次过滤，一般传 ``NotificationManager.satisfy_filter``，让用户的规则照样生效。
+    :param cancel: 置位后尽快抛 ``SearchCancelled``。
+    """
+    cancel = cancel or threading.Event()
+    result = SiteSearchResult([])
+    keyword = keyword.strip()
+    sources = [one for one in map(source_registry.get, source_ids) if one is not None]
+    if not sources or not keyword:
+        return result
+    known_links: dict[str, list[str]] = {}
+    for source_id, link in known:
+        known_links.setdefault(source_id, []).append(link)
+    sites: dict[str, list[SourceDescriptor]] = {}
+    for source in sources:
+        sites.setdefault(urlparse(_home(source)).netloc, []).append(source)
+
+    tasks = [
+        (group[0].site_name or group[0].id,
+         lambda group=group: _search_site(group, keyword, pages, known_links, cancel))
+        for group in sites.values()
+    ]
     merged: dict[str, Notification] = {}
-    with ThreadPoolExecutor(max_workers=min(8, len(ids))) as pool:
-        for source_id, items, error in pool.map(run, ids):
-            if error is not None:
-                result.errors[source_id] = error
-            for notification in items:
+    for name, items, error in _run_parallel(tasks, cancel):
+        if error is not None:
+            result.errors[name] = f"{type(error).__name__}: {error}"
+        for notification in items:
+            if accept is None or accept(notification):
                 merged.setdefault(notification.link, notification)
     result.notifications = sorted(merged.values(), key=lambda n: n.date, reverse=True)
     return result

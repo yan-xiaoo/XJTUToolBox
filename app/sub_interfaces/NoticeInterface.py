@@ -406,6 +406,8 @@ class NoticeInterface(ScrollArea):
             return
         self.siteSearchThread.keyword = keyword
         self.siteSearchThread.source_ids = list(self.noticeManager.subscription)
+        self.siteSearchThread.known = [(notice.source, notice.link) for notice in self.notices]
+        self.siteSearchThread.accept = self.noticeManager.satisfy_filter
         self.siteSearchProcess.setVisible(True)
         self.lock()
         self.siteSearchThread.start()
