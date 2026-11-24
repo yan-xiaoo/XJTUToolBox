@@ -4,11 +4,11 @@ import os
 import sys
 from typing import Optional
 
-from PyQt5.QtCore import QRectF, QSize, QSizeF, QUrl, Qt
+from PyQt5.QtCore import QRectF, QSize, QSizeF, QUrl, Qt, pyqtSignal
 from PyQt5.QtMultimedia import QMediaContent
-from PyQt5.QtWidgets import QFrame, QGraphicsView, QSizePolicy, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, TitleLabel
-from qfluentwidgets.multimedia import VideoWidget
+from PyQt5.QtWidgets import QApplication, QDialog, QFrame, QGraphicsView, QShortcut, QSizePolicy, QVBoxLayout, QWidget
+from qfluentwidgets import BodyLabel, CaptionLabel, FluentIcon, TitleLabel
+from qfluentwidgets.multimedia import MediaPlayBarButton, VideoWidget
 
 from .common import format_replay_video_label, safe_text
 
@@ -19,16 +19,28 @@ class ReplayVideoWidget(VideoWidget):
     参考：https://github.com/ldm0715/BiliEmojiDD/blob/main/app/components/video_player.py
     """
 
+    fullScreenRequested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.fullScreenMode = False
+        self.timer.setSingleShot(True)
         self.setFrameShape(QFrame.NoFrame)
         self.setBackgroundBrush(Qt.black)
+        self.viewport().setMouseTracking(True)
 
     def setVideo(self, url):
         super().setVideo(url)
         # VideoItem 自己按比例缩放，避免 fitInView 再加边距、做第二次缩放。
         self.resetTransform()
 
+    def setFullScreenMode(self, enabled):
+        self.fullScreenMode = enabled
+        self.videoItem.setAspectRatioMode(Qt.KeepAspectRatioByExpanding if enabled else Qt.KeepAspectRatio)
+        self.resetTransform()
+        if not enabled:
+            self.timer.stop()
+            self.playBar.show()
 
     def sizeHint(self):
         return QSize(240, 180)
@@ -40,17 +52,59 @@ class ReplayVideoWidget(VideoWidget):
         QGraphicsView.resizeEvent(self, event)
         self.videoItem.setSize(QSizeF(self.viewport().size()))
         self.graphicsScene.setSceneRect(QRectF(0, 0, self.viewport().width(), self.viewport().height()))
+        if self.fullScreenMode:
+            self.playBar.setGeometry(11, self.height() - self.playBar.height() - 11,
+                                     max(100, self.width() - 22), self.playBar.height())
+
+    def showControls(self):
+        if self.fullScreenMode:
+            self.playBar.show()
+            self.playBar.raise_()
+            self.timer.start(3000)
 
 
     def enterEvent(self, event):
         QGraphicsView.enterEvent(self, event)
+        self.showControls()
 
     def leaveEvent(self, event):
         QGraphicsView.leaveEvent(self, event)
 
+    def mouseMoveEvent(self, event):
+        self.showControls()
+        QGraphicsView.mouseMoveEvent(self, event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.fullScreenRequested.emit()
 
     def _onHideTimeOut(self):
-        return
+        if not self.fullScreenMode:
+            return
+        if self.playBar.underMouse() or QApplication.activePopupWidget() or self.playBar.volumeButton.volumeFlyout.isVisible():
+            self.timer.start(3000)
+        else:
+            self.playBar.hide()
+
+
+class _PlayerDialog(QDialog):
+    """关闭前记录播放状态，避免 hideEvent 自动暂停后丢失原状态。"""
+
+    def __init__(self, view, parent):
+        super().__init__(parent, Qt.Window | Qt.FramelessWindowHint)
+        # 显式定位，避免 QDialog 首次显示时按父窗口居中。
+        self.setGeometry(parent.screen().geometry())
+        self.view = view
+        self.wasPlaying = view.player.isPlaying()
+
+
+    def done(self, result):
+        self.wasPlaying = self.view.player.isPlaying()
+        super().done(result)
+
+
+    def closeImmediately(self):
+        self.reject()
 
 
 class LMSVideoPage(QFrame):
@@ -78,7 +132,7 @@ class LMSVideoPage(QFrame):
         self.videoHintLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.videoHintLabel.setTextColor("#606060", "#d2d2d2")
 
-        self.usageHintLabel = CaptionLabel(self.tr("使用画面下方控制栏进行播放操作"), self)
+        self.usageHintLabel = CaptionLabel(self.tr("双击画面或按 F11 全屏，Esc 返回；全屏时控制栏自动隐藏"), self)
         self.usageHintLabel.setWordWrap(True)
         self.usageHintLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.usageHintLabel.setTextColor("#606060", "#d2d2d2")
@@ -98,7 +152,16 @@ class LMSVideoPage(QFrame):
         self.videoWidget.player.positionChanged.connect(self._onPositionChanged)
         self.playerLayout.addWidget(self.videoWidget, 1)
         self.playerLayout.addWidget(self.playBar)
+        self.fullScreenDialog = None
+
+        self.fullScreenButton = MediaPlayBarButton(FluentIcon.FULL_SCREEN, self.playBar)
+        self.fullScreenButton.setToolTip(self.tr("全屏（F11）"))
+        self.fullScreenButton.clicked.connect(self.toggleFullScreen)
+        self.playBar.rightButtonLayout.addWidget(self.fullScreenButton)
         self.videoWidget.player.stateChanged.connect(lambda _: self.playBar.playButton.setPlay(self.videoWidget.player.isPlaying()))
+        self.videoWidget.fullScreenRequested.connect(self.toggleFullScreen)
+        QShortcut("F11", self.playerContainer, activated=self.toggleFullScreen)
+        QShortcut("Escape", self.playerContainer, activated=lambda: self.fullScreenDialog.reject() if self.fullScreenDialog else None)
 
         layout.addWidget(self.videoTitleLabel)
         layout.addWidget(self.videoLabel)
@@ -110,6 +173,43 @@ class LMSVideoPage(QFrame):
         # WMF 在尚未取得有效位置时可能发出 qint64 的未知值，不能传给 32 位滑块。
         if 0 <= position <= min(2**31 - 1, max(0, self.videoWidget.player.duration())):
             self.playBar._onPositionChanged(position)
+
+    def toggleFullScreen(self):
+        if self.fullScreenDialog:
+            self.fullScreenDialog.reject()
+            return
+        playing = self.videoWidget.player.isPlaying()
+        self.fullScreenDialog = _PlayerDialog(self.videoWidget, self.window())
+        self.fullScreenDialog.setWindowTitle(self.videoTitleLabel.text())
+        dialogLayout = QVBoxLayout(self.fullScreenDialog)
+        dialogLayout.setContentsMargins(0, 0, 0, 0)
+        dialogLayout.addWidget(self.playerContainer)
+        self.playerLayout.removeWidget(self.playBar)
+        self.playBar.setParent(self.videoWidget)
+        self.videoWidget.setFullScreenMode(True)
+        self.fullScreenButton.setIcon(FluentIcon.BACK_TO_WINDOW)
+        self.fullScreenButton.setToolTip(self.tr("退出全屏（Esc）"))
+        self.fullScreenDialog.finished.connect(self._restorePlayer)
+        self.fullScreenDialog.showFullScreen()
+        self.fullScreenDialog.raise_()
+        self.fullScreenDialog.activateWindow()
+        self.videoWidget.showControls()
+        if playing:
+            self.videoWidget.play()
+
+    def _restorePlayer(self):
+        dialog = self.fullScreenDialog
+        self.fullScreenDialog = None
+        self.videoWidget.setFullScreenMode(False)
+        self.layout().addWidget(self.playerContainer, stretch=1)
+        self.playerLayout.addWidget(self.playBar)
+        self.playerContainer.show()
+        self.playBar.show()
+        self.fullScreenButton.setIcon(FluentIcon.FULL_SCREEN)
+        self.fullScreenButton.setToolTip(self.tr("全屏（F11）"))
+        if dialog.wasPlaying:
+            self.videoWidget.play()
+        dialog.deleteLater()
 
     def setReplayVideo(self, video_info: dict, activity_name: str) -> None:
         """用指定回放视频信息初始化播放器。"""
@@ -131,6 +231,8 @@ class LMSVideoPage(QFrame):
         """停止当前播放并清空媒体源。"""
         self.videoWidget.stop()
         self.videoWidget.player.setMedia(QMediaContent())
+        if self.fullScreenDialog:
+            self.fullScreenDialog.closeImmediately()
 
     def reset(self) -> None:
         """重置页面为默认状态。"""

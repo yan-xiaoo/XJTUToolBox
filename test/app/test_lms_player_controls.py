@@ -7,13 +7,14 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt5.QtGui import QMouseEvent
+from PyQt5.QtCore import QEvent, QPoint, QPointF, QRectF, QUrl, Qt
+from PyQt5.QtGui import QImage, QMouseEvent
+from PyQt5.QtMultimedia import QMediaContent, QVideoFrame, QVideoSurfaceFormat
 from PyQt5.QtTest import QSignalSpy, QTest
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import Theme, setTheme
 
-from app.sub_interfaces.lms.video_page import LMSVideoPage
+from app.sub_interfaces.lms.video_page import LMSVideoPage, ReplayVideoWidget
 
 TEST_DOMAIN = "qt-ui"
 TEST_REGRESSION = True
@@ -62,6 +63,34 @@ class LMSPlayerControlsTest(unittest.TestCase):
         self.assertEqual(len(clicks), 1)
         self.assertGreater(slider.value(), 20)
 
+    def test_fullscreen_and_escape_preserve_player_and_restore_controls(self):
+        player = self.page.videoWidget.player
+        self.page.fullScreenButton.click()
+        QTest.qWait(30)
+        dialog = self.page.fullScreenDialog
+        self.assertTrue(dialog.isFullScreen())
+        self.assertEqual(dialog.frameGeometry(), dialog.screen().geometry())
+        self.assertIs(self.page.videoWidget.player, player)
+        self.page.videoWidget._onHideTimeOut()
+        self.assertTrue(self.bar.isHidden())
+        event = QMouseEvent(QEvent.MouseMove, QPointF(40, 40), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+        QApplication.sendEvent(self.page.videoWidget.viewport(), event)
+        self.assertTrue(self.bar.isVisible())
+        QTest.keyClick(dialog, Qt.Key_Escape)
+        QTest.qWait(30)
+        self.assertIsNone(self.page.fullScreenDialog)
+        self.assertGreaterEqual(self.bar.y(), self.page.videoWidget.y() + self.page.videoWidget.height())
+        self.assertTrue(self.bar.isVisible())
+
+    def test_leaving_page_closes_fullscreen_and_releases_media(self):
+        fixture = Path(__file__).with_name("fixtures") / "playback-h264.mp4"
+        self.page.videoWidget.player.setMedia(QMediaContent(QUrl.fromLocalFile(str(fixture))))
+        self.page.fullScreenButton.click()
+        QTest.qWait(30)
+        self.page.hide()
+        QTest.qWait(30)
+        self.assertIsNone(self.page.fullScreenDialog)
+        self.assertTrue(self.page.videoWidget.player.media().isNull())
 
     def test_backend_unknown_position_does_not_overflow_slider(self):
         errors = []
@@ -81,6 +110,36 @@ class LMSPlayerControlsTest(unittest.TestCase):
         self.assertEqual(view.backgroundBrush().color().name(), "#000000")
         setTheme(Theme.LIGHT)
         self.assertEqual(view.backgroundBrush().color().name(), "#000000")
+
+
+    def test_fullscreen_cover_has_no_empty_pixels_and_normal_mode_restores_aspect(self):
+        # Qt's documented videoSurface API supplies a local 4:3 frame in a 16:9 view.
+        view = ReplayVideoWidget()
+        try:
+            view.resize(801, 451)
+            view.show()
+            image = QImage(640, 480, QImage.Format_ARGB32)
+            image.fill(Qt.blue)
+            surface = view.videoItem.videoSurface()
+            self.assertTrue(surface.start(QVideoSurfaceFormat(image.size(), QVideoFrame.Format_ARGB32)))
+            self.assertTrue(surface.present(QVideoFrame(image)))
+            QTest.qWait(30)
+            view.setFullScreenMode(True)
+            QTest.qWait(30)
+            bounds = view.viewportTransform().mapRect(view.videoItem.boundingRect())
+            self.assertEqual(bounds, QRectF(view.viewport().rect()))
+            rendered = view.viewport().grab().toImage()
+            for x, y in ((0, 0), (800, 0), (0, 450), (800, 450)):
+                self.assertEqual(rendered.pixelColor(x, y).name(), "#0000ff", "Full-screen video must reach every edge")
+            view.setFullScreenMode(False)
+            bounds = view.viewportTransform().mapRect(view.videoItem.boundingRect())
+            self.assertAlmostEqual(bounds.center().x(), view.viewport().width() / 2, places=5)
+            self.assertAlmostEqual(bounds.width() / bounds.height(), 4 / 3, places=5)
+            surface.stop()
+        finally:
+            view.close()
+            view.deleteLater()
+            QTest.qWait(30)
 
 
 def load_tests(loader, tests, pattern):
