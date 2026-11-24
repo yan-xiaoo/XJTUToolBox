@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from unittest.mock import Mock
 
 TEST_DOMAIN = "auth-session"
@@ -28,11 +29,12 @@ class _FakeSession:
 
 
 class QMSQuestionnaireDisplayTest(unittest.TestCase):
-    def questionnaires(self, responses, status="DRAFT"):
+    def questionnaires(self, responses, status="DRAFT", deadline=None):
         course = {
             "course_id": 3,
             "primary_plan_course_name": "测试课程",
             "lecturers": ["教师甲", "教师乙"],
+            "evaluation_end_at": deadline,
             "surveys": [{"response": response} for response in responses],
         }
         judge = QMSAutoJudge(session=None)
@@ -44,6 +46,16 @@ class QMSQuestionnaireDisplayTest(unittest.TestCase):
             {"data": [course] if status == "ENABLED" else []},
         ])
         return judge.get_questionnaires()
+
+    def test_deadline_uses_the_course_evaluation_date(self):
+        pending, _ = self.questionnaires([{"id": "response-1"}], deadline="2026-11-29")
+        self.assertEqual(getattr(pending[0], "deadline", None), date(2026, 11, 29))
+
+    def test_missing_or_invalid_deadline_is_omitted(self):
+        for deadline in (None, "", "not-a-date", "2026-02-30", 20261129):
+            with self.subTest(deadline=deadline):
+                pending, _ = self.questionnaires([{"id": "response-1"}], deadline=deadline)
+                self.assertIsNone(getattr(pending[0], "deadline", None))
 
     def test_each_response_displays_its_own_teacher(self):
         for status in ("DRAFT", "ENABLED"):

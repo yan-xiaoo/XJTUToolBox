@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import requests
@@ -95,6 +96,16 @@ class QMSQuestionnaire:
     @property
     def display_title(self) -> str:
         return f"{self.course_name} {self.BPJS or '未知教师'}"
+
+    @property
+    def deadline(self) -> date | None:
+        value = self.course.get("evaluation_end_at")
+        if not isinstance(value, str):
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
 
     @property
     def display_description(self) -> str:
