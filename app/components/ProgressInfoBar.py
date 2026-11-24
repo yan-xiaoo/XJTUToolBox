@@ -1,6 +1,7 @@
 import time
 from enum import Enum
 
+from PyQt5 import sip
 from PyQt5.QtCore import pyqtSignal, Qt, QPropertyAnimation, QSize, QEvent, pyqtSlot, QThread, QTimer
 from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import QFrame, QLabel, QHBoxLayout, QGraphicsOpacityEffect, QVBoxLayout, QWidget
@@ -10,6 +11,20 @@ from qfluentwidgets.components.widgets.info_bar import InfoIconWidget
 from qfluentwidgets import FluentIcon as FIF
 
 from app.utils import logger
+
+
+def _disconnect_thread_receivers(receivers: list) -> None:
+    """断开列表中的全部线程信号连接并清空（幂等、不访问组件自身）。
+
+    用于 closeEvent 与 destroyed 自清理：断开 线程信号→接收器（闭包代理）连接，
+    使已关闭/已销毁组件的 Python 包装对象不再被长生命周期线程的连接持有。
+    """
+    for signal, receiver in list(receivers):
+        try:
+            signal.disconnect(receiver)
+        except (TypeError, RuntimeError):
+            pass
+    receivers.clear()
 
 
 class ProgressInfoBar(QFrame):
@@ -48,9 +63,17 @@ class ProgressInfoBar(QFrame):
         self.position = position
 
         self.thread_ = None
+        self._thread_receivers = []  # [(signal, receiver)]，用于重绑定时断开并做绑定校验
+        # 关闭（closeEvent）与销毁（destroyed）时显式断开接收器连接，释放线程连接对
+        # 本包装对象的持有；destroyed 自清理刻意不接回自身方法（父控件销毁路径不可靠），
+        # 只捕获接收器列表。迟到信号再由 _closed 与 sip.isdeleted 在派发时判活兜底
+        receivers = self._thread_receivers
+        self.destroyed.connect(lambda: _disconnect_thread_receivers(receivers))
+        self._closed = False
         self.thread_dead_time = 5
         self.dead_time_start = 0
         self.stopped = False
+        self._saw_end = False  # 本轮是否已经收到 hasFinished / canceled
 
         self.timer = QTimer(self)
         self.timer.setInterval(500)
@@ -86,33 +109,47 @@ class ProgressInfoBar(QFrame):
         :param disconnect_last: 是否断开上一个线程的连接。多线程连接到同一组件可能会导致意想不到的问题。
         """
         if disconnect_last and self.thread_ is not None:
-            self.thread_.progressChanged.disconnect(self.onProgressChange)
-            self.thread_.progressPause.disconnect(self.onProgressPause)
-            self.thread_.processFinish.disconnect(self.onProcessFinish)
-            self.thread_.messageChanged.disconnect(self.onMessageChange)
-            self.thread_.deadTime.disconnect(self.onSetDeadTime)
-            self.thread_.started.disconnect(self.onThreadStart)
-            self.thread_.canceled.disconnect(self.onStopped)
-            self.thread_.titleChanged.disconnect(self.onTitleChange)
+            for signal, receiver in self._thread_receivers:
+                signal.disconnect(receiver)
+            self._thread_receivers.clear()
             self.closedSignal.disconnect(self.thread_.onStopSignal)
-            self.thread_.maximumChanged.disconnect(self.onMaximumChange)
 
-        thread.progressChanged.connect(self.onProgressChange)
-        thread.progressPaused.connect(self.onProgressPause)
-        thread.hasFinished.connect(self.onProcessFinish)
-        thread.titleChanged.connect(self.onTitleChange)
-        thread.messageChanged.connect(self.onMessageChange)
-        thread.maximumChanged.connect(self.onMaximumChange)
-        thread.deadTime.connect(self.onSetDeadTime)
-        thread.started.connect(self.onThreadStart)
-        thread.canceled.connect(self.onStopped)
+        self._bindThreadSignal(thread.progressChanged, thread, self.onProgressChange)
+        self._bindThreadSignal(thread.progressPaused, thread, self.onProgressPause)
+        self._bindThreadSignal(thread.hasFinished, thread, self.onProcessFinish)
+        self._bindThreadSignal(thread.titleChanged, thread, self.onTitleChange)
+        self._bindThreadSignal(thread.messageChanged, thread, self.onMessageChange)
+        self._bindThreadSignal(thread.maximumChanged, thread, self.onMaximumChange)
+        self._bindThreadSignal(thread.deadTime, thread, self.onSetDeadTime)
+        self._bindThreadSignal(thread.started, thread, self.onThreadStart)
+        self._bindThreadSignal(thread.canceled, thread, self.onStopped)
+        self._bindThreadSignal(thread.finished, thread, self.onThreadExited)  # QThread.finished
 
         self.closedSignal.connect(thread.onStopSignal)
 
         self.dead_time_start = 0
         self.stopped = False
+        self._saw_end = False
         self.thread_dead_time = 5
+        self._closed = False  # 允许在关闭前重新绑定
         self.thread_ = thread
+
+    def _bindThreadSignal(self, signal, thread: "ProgressBarThread", handler):
+        """将线程信号接到 handler 上，并在派发时校验绑定仍然有效。
+
+        disconnect() 不撤销已经排队的 queued signal，且 PyQt5 在 queued 派发时
+        sender() 为 None，因此必须按连接时的绑定线程做校验；控件关闭或 C++ 对象
+        已销毁时（含父控件直接销毁、不经过 closeEvent 的情况）也要丢弃迟到信号，
+        避免访问已删除的 C++ 子控件。
+        """
+        def receiver(*args):
+            # 控件已关闭、C++ 对象已销毁，或已解绑旧线程的迟到信号（含重绑定前已入队的事件）
+            if self._closed or sip.isdeleted(self) or thread is not self.thread_:
+                return
+            handler(*args)
+
+        signal.connect(receiver)
+        self._thread_receivers.append((signal, receiver))
 
     def __initWidget(self):
         self.opacityEffect.setOpacity(1)
@@ -242,13 +279,17 @@ class ProgressInfoBar(QFrame):
 
         需要在真正销毁控件前先将其从 `InfoBarManager` 中移除，否则下一个
         `ProgressInfoBar` 显示时，管理器仍可能遍历到已被删除的旧对象并触发异常。
+        同时先发出停止请求、再断开线程信号接收器连接并清空绑定，既丢弃关闭后才
+        派发的排队信号，也避免已关闭组件的包装对象被线程连接持续持有。
 
         :param e: Qt 关闭事件对象。
         :return: 无返回值。
         """
         self.timer.stop()
+        self._closed = True
         self._detachFromInfoBarManager()
-        self.closedSignal.emit()
+        self.closedSignal.emit()  # 先让线程收到停止请求，再断开 UI 接收器
+        _disconnect_thread_receivers(self._thread_receivers)
         self.deleteLater()
         e.ignore()
 
@@ -282,7 +323,22 @@ class ProgressInfoBar(QFrame):
 
     @pyqtSlot()
     def onThreadStart(self):
+        self.stopped = False
+        self._saw_end = False
         self.timer.start()
+
+    @pyqtSlot()
+    def onThreadExited(self):
+        """QThread.finished：线程已结束。未收到成功/取消信号时按取消统一清理。"""
+        sender = self.sender()
+        if sender is not None and sender is not self.thread_:
+            return  # 旧线程的迟到信号
+        # onProcessFinish/onStopped 已停表并关闭，对象可能已 deleteLater，
+        # 不继续访问 timer 对象
+        if self._saw_end:
+            return
+        logger.warning("%s 线程未发送结束信号即退出", type(self.thread_).__name__)
+        self.onStopped()
 
     @pyqtSlot(int)
     def onProgressChange(self, progress: int):
@@ -306,12 +362,14 @@ class ProgressInfoBar(QFrame):
 
     @pyqtSlot()
     def onProcessFinish(self):
+        self._saw_end = True
         self.timer.stop()
         self.finished.emit()
         self.close()
 
     @pyqtSlot()
     def onStopped(self):
+        self._saw_end = True
         self.timer.stop()
         self.canceled.emit()
         self.close()
@@ -334,13 +392,15 @@ class ProgressInfoBar(QFrame):
 
     @pyqtSlot()
     def checkProcess(self):
-        if not self.thread_.isRunning():
-            # 如果线程是被要求退出的，发送退出信号
-            if self.stopped:
-                self.onStopped()
+        if self.thread_ is None:
             self.timer.stop()
+            return
+        if not self.thread_.isRunning():
+            self.timer.stop()
+            # 结束判定统一由 onThreadExited（QThread.finished）负责
+            return
         # 如果已经发送了停止请求，且超过了设定的时间线程仍然没有退出，强制终止线程
-        if self.stopped and self.thread_.isRunning() and time.time() - self.dead_time_start > self.thread_dead_time:
+        if self.stopped and time.time() - self.dead_time_start > self.thread_dead_time:
             logger.warning(f"{str(self.thread_)} 线程强制退出")
             self.thread_.terminate()
             self.thread_.wait()

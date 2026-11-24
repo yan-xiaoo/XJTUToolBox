@@ -8,7 +8,8 @@ from qfluentwidgets import ScrollArea, MessageBoxBase, SubtitleLabel, ToolTipFil
 from app.threads.JudgeThread import JudgeChoice
 from app.threads.ProcessWidget import ProcessThread
 from app.utils import StyleSheet, accounts, AccountDataManager
-from jwxt import Questionnaire, QuestionnaireTemplate
+from jwxt import QuestionnaireTemplate
+from qms import QMSQuestionnaire
 
 
 class _CustomFlyoutView(FlyoutViewBase):
@@ -65,7 +66,7 @@ class JudgeCacheManager(QObject):
 
         return cls.__instance
 
-    def add(self, questionnaire: Questionnaire, score: QuestionnaireTemplate.Score, class_type: QuestionnaireTemplate.Type, comment: str):
+    def add(self, questionnaire: QMSQuestionnaire, score: QuestionnaireTemplate.Score, class_type: QuestionnaireTemplate.Type, comment: str):
         # 教学班 ID+被评人代码组成唯一标识
         uuid = questionnaire.JXBID + questionnaire.BPR
         self.caches[uuid] = {
@@ -74,11 +75,11 @@ class JudgeCacheManager(QObject):
             "comment": comment
         }
 
-    def delete(self, questionnaire: Questionnaire):
+    def delete(self, questionnaire: QMSQuestionnaire):
         uuid = questionnaire.JXBID + questionnaire.BPR
         self.caches.pop(uuid)
 
-    def get(self, questionnaire: Questionnaire):
+    def get(self, questionnaire: QMSQuestionnaire):
         uuid = questionnaire.JXBID + questionnaire.BPR
         data = self.caches.get(uuid, None)
         if data is not None:
@@ -115,7 +116,7 @@ class JudgeOptionInterface(ScrollArea):
     """
     评教选项界面，可以在此界面选择评教评分、填写自定义评语等。
     """
-    def __init__(self, questionnaire: Questionnaire, thread_: ProcessThread, finished: bool, parent=None):
+    def __init__(self, questionnaire: QMSQuestionnaire, thread_: ProcessThread, finished: bool, parent=None):
         super().__init__(parent=parent)
         self.questionnaire = questionnaire
         self.thread_ = thread_
@@ -171,6 +172,7 @@ class JudgeOptionInterface(ScrollArea):
                 self.classTypeBox.setCurrentIndex(self.classTypeBox.items.index(item))
                 self.last_class_index = self.classTypeBox.currentIndex()
                 break
+        self.classTypeBox.setVisible(False)
 
         self.textArea = PlainTextEdit(self.view)
         if "理论课" in questionnaire.WJMC:
@@ -239,16 +241,11 @@ class JudgeOptionInterface(ScrollArea):
     @pyqtSlot()
     def onSubmitButtonClicked(self):
         self.thread_.questionnaire = self.questionnaire
-        template = QuestionnaireTemplate.from_file(self.classTypeBox.currentData(),
-                                                   self.scoreBox.currentData())
-        subjective_answer = self.textArea.toPlainText() if self.textArea.toPlainText() else self.tr("无")
-        for one_data in template.data:
-            if one_data.TXDM != '01':
-                one_data.ZGDA = subjective_answer
-        self.thread_.template = template
-        self.thread_.score = template.score_to_int(self.scoreBox.currentData())
+        subjective_answer = self.textArea.toPlainText().strip()
+        if not subjective_answer:
+            subjective_answer = self.tr("该课程整体教学情况良好，暂无进一步建议。")
+        self.thread_.score = QuestionnaireTemplate.score_to_int(self.scoreBox.currentData())
         self.thread_.msgAll = subjective_answer
-
         if self.finished_:
             self.thread_.choice = JudgeChoice.EDIT
         else:
@@ -260,7 +257,7 @@ class JudgeOptionMessageBox(MessageBoxBase):
     """
     将评教选择界面封装为对话框，用于显示评教选项。
     """
-    def __init__(self, questionnaire: Questionnaire, thread_: ProcessThread, finished: bool, parent=None):
+    def __init__(self, questionnaire: QMSQuestionnaire, thread_: ProcessThread, finished: bool, parent=None):
         super().__init__(parent)
 
         self.interface = JudgeOptionInterface(questionnaire, thread_, finished, self)

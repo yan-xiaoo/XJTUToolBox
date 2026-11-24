@@ -1,5 +1,7 @@
 import datetime
 import os.path
+import re
+import unicodedata
 from typing import List
 
 from peewee import SqliteDatabase, DoesNotExist, fn
@@ -542,31 +544,28 @@ class ScheduleService:
         start_of_term = self._parse_start_date(term.start_date)
 
         result = []
+        course_names = []
 
         for one in exams:
-            time_string = one.get("KSSJMS", "")
-            date_part, time_part = time_string.split(' ')
-            time_range = time_part.split('(')[0]  # 去掉 (星期二)
-            # 怎么系统里还有 EM-Dash（非 ASCII 标准字符，UTF-8 编码是 '\xe2\x80\x94' 的神秘东西）作为时间分界线的情况出现
-            # 真是太恐怖了
-            try:
-                start_str, end_str = time_range.split('-')
-            except ValueError:
-                # 说明考试时间可能是 EM-Dash 分割的（—），而不是（-）
-                start_str, end_str = time_range.split('—')
+            time_string = unicodedata.normalize("NFKC", one.get("KSSJMS") or "")
+            match = re.fullmatch(
+                r"\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):\s*(\d{2})\s*"
+                r"[-—–~至]\s*(\d{1,2}):\s*(\d{2})\s*(?:\([^)]*\))?\s*",
+                time_string,
+            )
+            if match is None:
+                raise ValueError("考试时间格式无法解析，请重新获取考试安排")
+            date_part, start_hour, start_minute, end_hour, end_minute = match.groups()
+            day = datetime.date.fromisoformat(date_part)
+            start_dt = datetime.datetime.combine(day, datetime.time(int(start_hour), int(start_minute)))
+            end_dt = datetime.datetime.combine(day, datetime.time(int(end_hour), int(end_minute)))
+            if end_dt <= start_dt:
+                raise ValueError("考试结束时间必须晚于开始时间")
 
             location = one.get("JASMC", "")
             seat_number = one.get("ZWH", "")
 
-            course = Course.get_or_create(name=one["KCM"])[0]
-
-            # 构造 datetime 对象
-            start_dt = datetime.datetime.fromisoformat(f"{date_part}T{start_str}")
-            end_dt = datetime.datetime.fromisoformat(f"{date_part}T{end_str}")
-
-            if Exam.select().where(Exam.course == course).count() != 0:
-                # 如果已经存在同名考试，则删除原先考试，重新添加
-                Exam.delete().where(Exam.course == course).execute()
+            course_names.append(one["KCM"])
 
             '''
             这里的时间是粗略的，毕竟考试的时间并不总是严格与课程节次重合
@@ -588,7 +587,6 @@ class ScheduleService:
 
             exam = Exam(name=one["KCM"] + "考试",
                         week_number=week,
-                        course=course,
                         location=location,
                         seat_number=seat_number,
                         day_of_week=day_of_week,
@@ -600,6 +598,14 @@ class ScheduleService:
             result.append(exam)
 
         with self.database.atomic():
+            for exam, course_name in zip(result, course_names):
+                exam.course = Course.get_or_create(name=course_name)[0]
+            # 整批解析成功后再替换；错误行不能清掉先前已保存的考试。
+            if result:
+                Exam.delete().where(
+                    Exam.course.in_({exam.course_id for exam in result}),
+                    Exam.term_number == term_number,
+                ).execute()
             Exam.bulk_create(result)
         return 0
 

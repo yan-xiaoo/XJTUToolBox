@@ -1,0 +1,85 @@
+name: Test Sparkle A to B
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes_tag:
+        description: 'Optional Release tag for real release notes; empty uses test notes'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+      SPARKLE_TEST_BATCH: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v5
+      - run: brew install create-dmg
+      - run: uv sync --locked --dev
+      - name: Build A for manual installation
+        env:
+          MACOS_VERSION: '0.0.0.post1'
+          MACOS_BUILD_NUMBER: '1'
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          uv run build.py
+          uv run python -m scripts.sparkle_build package --output "test-A/XJTUToolbox-macOS-$(uname -m).dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Install-A-${{ runner.arch }}
+          path: test-A/*.dmg
+          if-no-files-found: error
+      - name: Build B with only the version changed
+        env:
+          MACOS_VERSION: '0.0.0.post2'
+          MACOS_BUILD_NUMBER: '2'
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          uv run build.py
+          uv run python -m scripts.sparkle_build package --output "test-B/XJTUToolbox-macOS-$(uname -m).dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Update-B-${{ runner.arch }}
+          path: test-B/*
+          if-no-files-found: error
+  publish-test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Update-B-*
+          merge-multiple: true
+          path: test-B
+      - run: python -m pip install -r scripts/sparkle-requirements.txt
+      - name: Publish B only to the isolated test feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_TEST_BATCH: ${{ github.run_id }}-${{ github.run_attempt }}
+          NOTES_TAG: ${{ inputs.notes_tag }}
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          python -m scripts.sparkle_publish test --directory test-B --test-batch "$SPARKLE_TEST_BATCH" --notes-tag "$NOTES_TAG"
+          echo 'Download Install-A for your architecture, install it, then check for updates. The updated version should be 0.0.0.post2.' >> "$GITHUB_STEP_SUMMARY"

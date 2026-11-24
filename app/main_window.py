@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 import platform
+import threading
 from collections.abc import Callable
 from traceback import format_exception
 from types import TracebackType
 from typing import Type, Any, Dict
 import sys
 
-from PyQt5.QtCore import pyqtSlot, QUrl, Qt, QSize, QTimer, QObject, QEvent
-from PyQt5.QtGui import QIcon, QDesktopServices
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QSize, QTimer, QObject, QEvent
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
-from qfluentwidgets import MSFluentWindow, NavigationBarPushButton, MessageBox, InfoBadgePosition, \
+from qfluentwidgets import MSFluentWindow, MessageBox, InfoBadgePosition, \
     InfoBadge, SplashScreen, ConfigItem
 from PyQt5.QtWidgets import QShortcut
 from PyQt5.QtGui import QKeySequence
@@ -22,6 +25,7 @@ from .ScoreInterface import ScoreInterface
 from .SettingInterface import SettingInterface
 from .AttendanceInterface import AttendanceInterface
 from .ToolBoxInterface import ToolBoxInterface
+from .components.feature_navigation import Feature, FeatureNavigation
 from .AIInterface import AIInterface
 from .TrayInterface import TrayInterface
 from .sessions.attendance_session import AttendanceSession
@@ -29,6 +33,7 @@ from .sessions.jwxt_session import JWXTSession
 from .sessions.js_session import JsSession
 from .sessions.gmis_session import GMISSession
 from .sessions.gste_session import GSTESession
+from .sessions.qms_session import QMSSession
 from .sessions.jwapp_session import JwappSession
 from .sessions.lms_session import LMSSession
 from .sessions.venue_session import VenueSession
@@ -70,12 +75,24 @@ def registerSession():
     SessionManager.global_register(JwappSession, "jwapp")
     SessionManager.global_register(GMISSession, "gmis")
     SessionManager.global_register(GSTESession, "gste")
+    SessionManager.global_register(QMSSession, "qms")
     SessionManager.global_register(LMSSession, "lms")
     SessionManager.global_register(VenueSession, "venue")
     SessionManager.global_register(CampusCardSession, "campus_card")
     SessionManager.global_register(LibrarySession, "library")
     SessionManager.global_register(HelloSession, "hello")
     SessionManager.global_register(FitnessSession, "fitness")
+
+def _log_uncaught_thread_exception(args) -> None:
+    """记录原生 threading.Thread 中未被捕获的异常（同样运行在出错线程，不触碰 Qt）。"""
+    if args.exc_type is SystemExit:
+        # 与 CPython 默认行为保持一致：线程内的 SystemExit 静默忽略
+        return
+    logger.error(
+        "子线程 %s 发生未经处理的异常",
+        getattr(args.thread, "name", "unknown"),
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+    )
 
 
 class MacReopenFilter(QObject):
@@ -97,6 +114,8 @@ class MacReopenFilter(QObject):
 
 
 class MainWindow(MSFluentWindow):
+    # QThread 等子线程里触发的未处理异常，经此信号排队回主线程后再弹窗
+    unhandledException = pyqtSignal(str)
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -144,7 +163,9 @@ class MainWindow(MSFluentWindow):
 
         cfg.themeChanged.connect(self.on_theme_changed)
 
+        self.unhandledException.connect(self._showUnhandledExceptionDialog)
         sys.excepthook = self.catchExceptions
+        threading.excepthook = _log_uncaught_thread_exception
         self.setting_badge = None
 
         if migrate_all():
@@ -157,7 +178,7 @@ class MainWindow(MSFluentWindow):
             box.exec()
 
         self.setting_interface.updateClicked.connect(self.on_setting_button_clicked)
-        if cfg.checkUpdateAtStartTime.value:
+        if cfg.checkUpdateAtStartTime.value and not (sys.platform == "darwin" and getattr(sys, "frozen", False)):
             self.update_thread = UpdateThread()
             self.update_thread.updateSignal.connect(self.on_update_check)
             self.update_thread.updateSignal.connect(self.setting_interface.onUpdateCheck)
@@ -340,72 +361,57 @@ class MainWindow(MSFluentWindow):
             return
         self._current_qrcode_dialog.finish()
 
-    def initNavigation(self):
+    def initNavigation(self) -> None:
+        """注册固定入口和业务页面，并加载用户自定义的侧栏布局。"""
         self.addSubInterface(self.home_interface, FIF.HOME, self.tr("主页"))
-        self.addSubInterface(self.schedule_interface, FIF.CALENDAR, self.tr("课表"))
-        self.addSubInterface(self.attendance_interface, MyFluentIcon.ATTENDANCE, self.tr("考勤"))
-        self.addSubInterface(self.score_interface, FIF.EDUCATION, self.tr("成绩"))
-        self.addSubInterface(self.lms_interface, FIF.DOCUMENT, self.tr("思源学堂"))
-        self.addSubInterface(self.campus_card_interface, FIF.FOLDER, self.tr("校园卡"))
-        self.addSubInterface(self.venue_interface, FIF.BASKETBALL, self.tr("体育场馆"))
-        self.addSubInterface(self.library_interface, FIF.BOOK_SHELF, self.tr("图书馆"))
-        self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具"))
-
-        self.navigationInterface.addWidget("GitHub",
-                                           NavigationBarPushButton(FIF.GITHUB, self.tr("GitHub"), isSelectable=False,
-                                                                   parent=self),
-                                           lambda: QDesktopServices.openUrl(
-                                               QUrl("https://github.com/yan-xiaoo/XJTUToolbox")),
-                                           NavigationItemPosition.BOTTOM)
+        study = self.tr("学习教务")
+        campus = self.tr("校园生活")
+        tools = self.tr("辅助工具")
+        features = (
+            Feature("schedule", self.tr("课表"), self.tr("查看个人课表与课程安排"), study,
+                    FIF.CALENDAR, self.schedule_interface),
+            Feature("attendance", self.tr("考勤"), self.tr("查看考勤记录与签到情况"), study,
+                    MyFluentIcon.ATTENDANCE, self.attendance_interface),
+            Feature("score", self.tr("成绩"), self.tr("查询课程成绩与成绩单"), study,
+                    FIF.EDUCATION, self.score_interface),
+            Feature("lms", self.tr("思源学堂"), self.tr("查看课程、作业与教学资料"), study,
+                    FIF.DOCUMENT, self.lms_interface),
+            Feature("school_course", self.tr("全校课程"), self.tr("检索全校开课信息"), study,
+                    FIF.VIEW, self.school_course_interface),
+            Feature("judge", self.tr("一键评教"), self.tr("完成每学期的评教问卷"), study,
+                    FIF.BOOK_SHELF, self.judge_interface),
+            Feature("profile", self.tr("学籍档案"), self.tr("证件照、书院与辅导员"), study,
+                    FIF.INFO, self.profile_interface),
+            Feature("school_calendar", self.tr("校历"), self.tr("学期起止与节假日"), study,
+                    FIF.DATE_TIME, self.school_calendar_interface),
+            Feature("campus_card", self.tr("校园卡"), self.tr("查询校园卡信息与流水"), campus,
+                    FIF.FOLDER, self.campus_card_interface),
+            Feature("venue", self.tr("体育场馆"), self.tr("查询与预约体育场馆"), campus,
+                    FIF.BASKETBALL, self.venue_interface),
+            Feature("library", self.tr("图书馆"), self.tr("查询图书馆信息与预约"), campus,
+                    FIF.BOOK_SHELF, self.library_interface),
+            Feature("empty_room", self.tr("空闲教室"), self.tr("查询当前空闲的教室"), campus,
+                    FIF.LAYOUT, self.empty_room_interface),
+            Feature("fitness", self.tr("体测查询"), self.tr("查询体测项目分与总评"), campus,
+                    FIF.SPEED_HIGH, self.fitness_interface),
+            Feature("notice", self.tr("通知查询"), self.tr("在一处查询学校网站的新通知"), campus,
+                    FIF.DICTIONARY, self.notice_interface),
+            Feature("ai", self.tr("问舟"), self.tr("支持多协议的通用 AI 助手"), tools,
+                    FIF.ROBOT, self.ai_interface),
+            Feature("webvpn", self.tr("WebVPN 网址转换"), self.tr("转换为可直接访问的网址"), tools,
+                    FIF.GLOBE, self.webvpn_convert_interface, sidebarTitle=self.tr("网址转换")),
+        )
+        self.featureNavigation = FeatureNavigation(self, self.tool_box_interface, features)
+        self.addSubInterface(self.tool_box_interface, FIF.APPLICATION, self.tr("工具箱"),
+                             position=NavigationItemPosition.BOTTOM)
         self.account_item = self.addSubInterface(self.account_interface, FIF.EDUCATION, self.tr("账户"),
                                                  position=NavigationItemPosition.BOTTOM)
         self.settingButton = self.addSubInterface(self.setting_interface, FIF.SETTING, self.tr("设置"),
                                                   position=NavigationItemPosition.BOTTOM)
-
-        # 添加评教界面作为工具箱界面的卡片
-        card = self.tool_box_interface.addCard(self.judge_interface, FIF.BOOK_SHELF, self.tr("一键评教"),
-                                               self.tr("轻松完成每学期的评教问卷"))
-        card.setFixedSize(200, 180)
-
-        webvpn_card = self.tool_box_interface.addCard(self.webvpn_convert_interface, FIF.GLOBE, self.tr("WebVPN 网址转换"),
-                                                      self.tr("将 WebVPN 网址转换为可直接访问的网址"))
-        webvpn_card.setFixedSize(210, 180)
-
-        notice_card = self.tool_box_interface.addCard(self.notice_interface, FIF.DICTIONARY, self.tr("通知查询"),
-                                                      self.tr("在一处查询学校网站的新通知"))
-        notice_card.setFixedSize(200, 180)
-
-        ai_card = self.tool_box_interface.addCard(
-            self.ai_interface,
-            FIF.ROBOT,
-            self.tr("问舟"),
-            self.tr("支持 Anthropic 等多协议的通用 AI 助手"),
-        )
-        ai_card.setFixedSize(200, 180)
-
-        empty_room_card = self.tool_box_interface.addCard(self.empty_room_interface, FIF.LAYOUT, self.tr("空闲教室"),
-                                                          self.tr("查询当前空闲的教室"))
-        empty_room_card.setFixedSize(200, 180)
-
-        school_course_card = self.tool_box_interface.addCard(
-            self.school_course_interface, FIF.VIEW, self.tr("全校课程"),
-            self.tr("检索全校开课信息"),
-        )
-        school_course_card.setFixedSize(200, 180)
-        for interface, icon, title, content in (
-            (self.profile_interface, FIF.INFO, self.tr("学籍档案"), self.tr("证件照、书院与辅导员")),
-            (self.fitness_interface, FIF.SPEED_HIGH, self.tr("体测查询"), self.tr("查询体测项目分与总评")),
-            (self.school_calendar_interface, FIF.DATE_TIME, self.tr("校历"), self.tr("学期起止与节假日")),
-        ):
-            card = self.tool_box_interface.addCard(interface, icon, title, content)
-            card.setFixedSize(200, 180)
-        # 添加登录界面作为子界面，但是将其隐藏
-        button = self.addSubInterface(self.login_interface, FIF.SCROLL, self.tr("登录"),
-                                      position=NavigationItemPosition.BOTTOM)
-        button.setVisible(False)
-        button = self.addSubInterface(self.notice_setting_interface, FIF.SCROLL, self.tr("通知设置"),
-                                      position=NavigationItemPosition.BOTTOM)
-        button.setVisible(False)
+        # 登录和通知设置保留内部路由，不占用导航布局。
+        for interface in (self.login_interface, self.notice_setting_interface):
+            interface.setProperty("isStackedTransparent", False)
+            self.stackedWidget.addWidget(interface)
 
     def catchExceptions(self, ty: Type[BaseException], value: BaseException, _traceback: TracebackType):
         """
@@ -416,26 +422,35 @@ class MainWindow(MSFluentWindow):
         """
         logger.error("未经处理的异常", exc_info=(ty, value, _traceback))
         tracebackString = "".join(format_exception(ty, value, _traceback))
+        if threading.current_thread() is threading.main_thread():
+            self._showUnhandledExceptionDialog(tracebackString)
+        else:
+            # PyQt5 会在异常发生的线程调用 sys.excepthook，子线程创建 QWidget 不安全
+            self.unhandledException.emit(tracebackString)
+        return sys.__excepthook__(ty, value, _traceback)
+
+    @pyqtSlot(str)
+    def _showUnhandledExceptionDialog(self, tracebackString: str):
         box = MessageBox(
             self.tr("程序发生未经处理的异常"),
             content=tracebackString,
             parent=self,
         )
-        # 允许错误内容被复制
         box.contentLabel.setTextInteractionFlags(box.contentLabel.textInteractionFlags() | Qt.TextSelectableByMouse)
         box.yesButton.setText(self.tr("复制到剪切板"))
         box.cancelButton.setText(self.tr("关闭"))
-        box.yesSignal.connect(
-            lambda: QApplication.clipboard().setText(tracebackString)
-        )
+        box.yesSignal.connect(lambda: QApplication.clipboard().setText(tracebackString))
         box.setClosableOnMaskClicked(True)
         box.exec()
-        return sys.__excepthook__(ty, value, _traceback)
 
     def closeEvent(self, a0):
         """
         重写关闭事件
         """
+        if getattr(self, "sparkle_relaunching", False):
+            self.tray_interface.hide()
+            a0.accept()
+            return
         if cfg.traySetting.value == TraySetting.MINIMIZE:
             self.tray_interface.show()
             QApplication.setQuitOnLastWindowClosed(False)
