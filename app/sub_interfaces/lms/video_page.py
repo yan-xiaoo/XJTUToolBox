@@ -68,7 +68,9 @@ class ReplayVideoWidget(VideoWidget):
                 self.playBar.show()
             animation = self.playBar.opacityAni
             fadingIn = animation.state() == QAbstractAnimation.Running and animation.endValue() == 1
-            if self.playBar.opacityEffect.opacity() < 1 and not fadingIn:
+            fadingOut = animation.state() == QAbstractAnimation.Running and animation.endValue() == 0
+            # 淡出首帧前透明度仍为 1，也需要立即响应显示请求。
+            if not fadingIn and (self.playBar.opacityEffect.opacity() < 1 or fadingOut):
                 animation.stop()
                 self.playBar.fadeIn()
             self.playBar.raise_()
