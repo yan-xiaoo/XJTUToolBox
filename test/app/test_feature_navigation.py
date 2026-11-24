@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -379,6 +380,13 @@ class FeatureNavigationTest(unittest.TestCase):
             self.nav._closeIfOutside()
         self.assertFalse(self.nav.popup.isVisible())
 
+    def _wait_until(self, predicate, message: str = "", timeout: float = 3) -> None:
+        """轮询事件循环直到条件成立；慢速 CI 上计时器链可能明显晚于标称间隔。"""
+        deadline = time.monotonic() + timeout
+        while not predicate() and time.monotonic() < deadline:
+            QTest.qWait(5)
+        self.assertTrue(predicate(), message or "Timed out waiting for Qt events")
+
     def _open_more_by_hover(self) -> None:
         """固定离屏鼠标位置，等待悬停定时器实际触发。"""
         button = self.nav.moreButton
@@ -400,18 +408,19 @@ class FeatureNavigationTest(unittest.TestCase):
                 self.nav.showMore()
                 self.assertTrue(self.nav.popup.isVisible())
                 self.assertFalse(self.nav._containsMoreOrPopup(point))
-                QTest.qWait(450)
-                self.assertFalse(self.nav.popup.isVisible(), str(local))
+                self._wait_until(lambda: not self.nav.popup.isVisible(), str(local))
                 self.assertFalse(self.nav._pointerTimer.isActive())
 
     def test_hover_pointer_bridge_cancels_delayed_close_without_enter_event(self) -> None:
         """鼠标经过间隙进入菜单时，即使未收到 Enter 也取消延迟关闭。"""
         with patch("app.components.feature_navigation.QCursor.pos", return_value=QPoint(-10000, -10000)):
             self.nav.showMore()
-            QTest.qWait(100)
-            self.assertTrue(self.nav._leaveTimer.isActive())
+            # 指针轮询发现鼠标在外才启动延迟关闭；轮询频繁，不会错过 300ms 的计时窗口
+            self._wait_until(self.nav._leaveTimer.isActive)
         inside = self.nav.popup.mapToGlobal(self.nav.popup.rect().center())
         with patch("app.components.feature_navigation.QCursor.pos", return_value=inside):
+            self._wait_until(lambda: not self.nav._leaveTimer.isActive())
+            # 超过原本的关闭时限后浮层仍应保持打开
             QTest.qWait(400)
             self.assertTrue(self.nav.popup.isVisible())
             self.assertFalse(self.nav._leaveTimer.isActive())
