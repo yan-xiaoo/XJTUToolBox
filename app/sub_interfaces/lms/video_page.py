@@ -7,7 +7,7 @@ from typing import Optional
 from PyQt5.QtCore import QRectF, QSize, QSizeF, QUrl, Qt, pyqtSignal
 from PyQt5.QtMultimedia import QMediaContent
 from PyQt5.QtWidgets import QApplication, QDialog, QFrame, QGraphicsView, QShortcut, QSizePolicy, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, FluentIcon, TitleLabel
+from qfluentwidgets import Action, BodyLabel, CaptionLabel, FluentIcon, RoundMenu, TitleLabel, TransparentDropDownPushButton
 from qfluentwidgets.multimedia import MediaPlayBarButton, VideoWidget
 
 from .common import format_replay_video_label, safe_text
@@ -154,9 +154,18 @@ class LMSVideoPage(QFrame):
         self.playerLayout.addWidget(self.playBar)
         self.fullScreenDialog = None
 
+        self.speedButton = TransparentDropDownPushButton("1×", self.playBar)
+        self.speedMenu = RoundMenu(parent=self.speedButton)
+        for rate in (0.5, 0.75, 1, 1.25, 1.5, 2):
+            action = Action(f"{rate:g}×", self.speedMenu)
+            action.triggered.connect(lambda checked=False, r=rate: self.videoWidget.player.setPlaybackRate(r))
+            self.speedMenu.addAction(action)
+        self.speedButton.setMenu(self.speedMenu)
+        self.videoWidget.player.playbackRateChanged.connect(lambda r: self.speedButton.setText(f"{r:g}×"))
         self.fullScreenButton = MediaPlayBarButton(FluentIcon.FULL_SCREEN, self.playBar)
         self.fullScreenButton.setToolTip(self.tr("全屏（F11）"))
         self.fullScreenButton.clicked.connect(self.toggleFullScreen)
+        self.playBar.rightButtonLayout.addWidget(self.speedButton)
         self.playBar.rightButtonLayout.addWidget(self.fullScreenButton)
         self.videoWidget.player.stateChanged.connect(lambda _: self.playBar.playButton.setPlay(self.videoWidget.player.isPlaying()))
         self.videoWidget.fullScreenRequested.connect(self.toggleFullScreen)
