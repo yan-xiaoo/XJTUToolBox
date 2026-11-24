@@ -66,7 +66,18 @@ class ToolLoopTest(unittest.TestCase):
         runner.assert_called_once_with(calls[0])
         self.assertEqual([m.role for m in messages], ["user", "assistant", "tool"])
         self.assertEqual(messages[-1].tool_call_id, "c1")
-        self.assertEqual(client.complete.call_args.args[2][0].name, "activity")
+        self.assertEqual(client.complete.call_args.kwargs["tools"][0].name, "activity")
+
+    def test_thread_without_tools_keeps_two_argument_call(self):
+        from app.AIInterface import _AIRequestThread
+
+        client = Mock()
+        client.complete.return_value = ChatResult("你好", "m")
+        thread = _AIRequestThread([ChatMessage("user", "hi")], ProviderConfig("openai", "https://api.example.com/v1", "m"))
+        thread.ai_client = client
+        self.assertEqual(thread._complete([ChatMessage("user", "hi")]).text, "你好")
+        self.assertEqual(len(client.complete.call_args.args), 2)
+        self.assertEqual(client.complete.call_args.kwargs, {})
 
 
 if __name__ == "__main__":

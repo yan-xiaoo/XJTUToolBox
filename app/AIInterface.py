@@ -165,9 +165,10 @@ class _AIRequestThread(QThread):
 
     def _complete(self, messages):
         """有工具时循环：模型调工具 → 回填结果 → 再问，直到给出文字回答。工具往返只留在本次请求里。"""
-        tools = (ACTIVITY_TOOL,) if self.tool_runner else ()
+        if self.tool_runner is None:
+            return self.ai_client.complete(messages, self.config)
         for _ in range(self.MAX_TOOL_ROUNDS):
-            result = self.ai_client.complete(messages, self.config, tools)
+            result = self.ai_client.complete(messages, self.config, tools=(ACTIVITY_TOOL,))
             if not result.tool_calls or self.cancel_event.is_set():
                 return result
             self.stageChanged.emit("tools")
