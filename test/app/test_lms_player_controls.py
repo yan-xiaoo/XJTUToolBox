@@ -69,15 +69,23 @@ class LMSPlayerControlsTest(unittest.TestCase):
         QTest.qWait(30)
         dialog = self.page.fullScreenDialog
         self.assertTrue(dialog.isFullScreen())
-        self.assertEqual(dialog.frameGeometry(), dialog.screen().geometry())
         self.assertIs(self.page.videoWidget.player, player)
         self.page.videoWidget._onHideTimeOut()
+        QTest.qWait(70)
+        self.assertTrue(self.bar.isVisible())
+        self.assertGreater(self.bar.opacityEffect.opacity(), 0)
+        self.assertLess(self.bar.opacityEffect.opacity(), 1)
+        QTest.qWait(250)
         self.assertTrue(self.bar.isHidden())
         event = QMouseEvent(QEvent.MouseMove, QPointF(40, 40), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
         QApplication.sendEvent(self.page.videoWidget.viewport(), event)
+        QTest.qWait(70)
         self.assertTrue(self.bar.isVisible())
+        self.assertGreater(self.bar.opacityEffect.opacity(), 0)
+        self.assertLess(self.bar.opacityEffect.opacity(), 1)
+        QTest.qWait(250)
         QTest.keyClick(dialog, Qt.Key_Escape)
-        QTest.qWait(30)
+        QTest.qWait(430)
         self.assertIsNone(self.page.fullScreenDialog)
         self.assertGreaterEqual(self.bar.y(), self.page.videoWidget.y() + self.page.videoWidget.height())
         self.assertTrue(self.bar.isVisible())
@@ -111,6 +119,24 @@ class LMSPlayerControlsTest(unittest.TestCase):
         setTheme(Theme.LIGHT)
         self.assertEqual(view.backgroundBrush().color().name(), "#000000")
 
+    def test_fullscreen_is_borderless_and_fades_in_and_out(self):
+        self.page.fullScreenButton.click()
+        dialog = self.page.fullScreenDialog
+        self.assertTrue(dialog.windowFlags() & Qt.FramelessWindowHint)
+        QTest.qWait(100)
+        self.assertGreater(dialog.windowOpacity(), 0)
+        self.assertLess(dialog.windowOpacity(), 1)
+        QTest.qWait(100)
+        self.assertLess(dialog.windowOpacity(), 1, "The full-screen transition should still be visible at 200ms")
+        QTest.qWait(220)
+        self.assertEqual(dialog.frameGeometry(), dialog.screen().geometry())
+        self.assertEqual(dialog.windowOpacity(), 1)
+        dialog.reject()
+        QTest.qWait(100)
+        self.assertTrue(dialog.isVisible())
+        self.assertLess(dialog.windowOpacity(), 1)
+        QTest.qWait(380)
+        self.assertIsNone(self.page.fullScreenDialog)
 
     def test_fullscreen_cover_has_no_empty_pixels_and_normal_mode_restores_aspect(self):
         # Qt's documented videoSurface API supplies a local 4:3 frame in a 16:9 view.
@@ -140,6 +166,26 @@ class LMSPlayerControlsTest(unittest.TestCase):
             view.close()
             view.deleteLater()
             QTest.qWait(30)
+
+    def test_mouse_activity_can_reverse_fade_without_restarting_it_repeatedly(self):
+        self.page.fullScreenButton.click()
+        self.page.videoWidget._onHideTimeOut()
+        QTest.qWait(70)
+        self.page.videoWidget.showControls()
+        QTest.qWait(70)
+        before = self.bar.opacityAni.currentTime()
+        self.page.videoWidget.showControls()
+        self.assertGreaterEqual(self.bar.opacityAni.currentTime(), before)
+        QTest.qWait(250)
+        self.assertTrue(self.bar.isVisible())
+        self.assertEqual(self.bar.opacityEffect.opacity(), 1)
+        self.page.videoWidget._onHideTimeOut()
+        QTest.qWait(50)
+        self.page.stopPlayback()
+        QTest.qWait(300)
+        self.assertIsNone(self.page.fullScreenDialog)
+        self.assertTrue(self.bar.isVisible())
+        self.assertEqual(self.bar.opacityEffect.opacity(), 1)
 
 
 def load_tests(loader, tests, pattern):

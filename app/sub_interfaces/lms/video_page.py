@@ -4,7 +4,7 @@ import os
 import sys
 from typing import Optional
 
-from PyQt5.QtCore import QRectF, QSize, QSizeF, QUrl, Qt, pyqtSignal
+from PyQt5.QtCore import QAbstractAnimation, QEvent, QEasingCurve, QPropertyAnimation, QRectF, QSize, QSizeF, QUrl, Qt, pyqtSignal
 from PyQt5.QtMultimedia import QMediaContent
 from PyQt5.QtWidgets import QApplication, QDialog, QFrame, QGraphicsView, QShortcut, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import Action, BodyLabel, CaptionLabel, FluentIcon, RoundMenu, TitleLabel, TransparentDropDownPushButton
@@ -28,6 +28,8 @@ class ReplayVideoWidget(VideoWidget):
         self.setFrameShape(QFrame.NoFrame)
         self.setBackgroundBrush(Qt.black)
         self.viewport().setMouseTracking(True)
+        self.playBar.installEventFilter(self)
+        self.playBar.opacityAni.finished.connect(self._onControlsAnimationFinished)
 
     def setVideo(self, url):
         super().setVideo(url)
@@ -40,6 +42,8 @@ class ReplayVideoWidget(VideoWidget):
         self.resetTransform()
         if not enabled:
             self.timer.stop()
+            self.playBar.opacityAni.stop()
+            self.playBar.opacityEffect.setOpacity(1)
             self.playBar.show()
 
     def sizeHint(self):
@@ -58,10 +62,26 @@ class ReplayVideoWidget(VideoWidget):
 
     def showControls(self):
         if self.fullScreenMode:
-            self.playBar.show()
+            if self.playBar.isHidden():
+                self.playBar.opacityAni.stop()
+                self.playBar.opacityEffect.setOpacity(0)
+                self.playBar.show()
+            animation = self.playBar.opacityAni
+            fadingIn = animation.state() == QAbstractAnimation.Running and animation.endValue() == 1
+            if self.playBar.opacityEffect.opacity() < 1 and not fadingIn:
+                animation.stop()
+                self.playBar.fadeIn()
             self.playBar.raise_()
             self.timer.start(3000)
 
+    def eventFilter(self, obj, event):
+        if obj is self.playBar and event.type() == QEvent.Enter:
+            self.showControls()
+        return super().eventFilter(obj, event)
+
+    def _onControlsAnimationFinished(self):
+        if self.fullScreenMode and self.playBar.opacityEffect.opacity() == 0:
+            self.playBar.hide()
 
     def enterEvent(self, event):
         QGraphicsView.enterEvent(self, event)
@@ -84,7 +104,8 @@ class ReplayVideoWidget(VideoWidget):
         if self.playBar.underMouse() or QApplication.activePopupWidget() or self.playBar.volumeButton.volumeFlyout.isVisible():
             self.timer.start(3000)
         else:
-            self.playBar.hide()
+            self.playBar.opacityAni.stop()
+            self.playBar.fadeOut()
 
 
 class _PlayerDialog(QDialog):
@@ -92,19 +113,41 @@ class _PlayerDialog(QDialog):
 
     def __init__(self, view, parent):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint)
-        # 显式定位，避免 QDialog 首次显示时按父窗口居中。
+        # 显式定位，避免 QDialog 首次显示时按父窗口居中，偏离完整屏幕区域。
         self.setGeometry(parent.screen().geometry())
         self.view = view
         self.wasPlaying = view.player.isPlaying()
+        self._closingResult = None
+        self.transitionAnimation = QPropertyAnimation(self, b"windowOpacity", self)
+        self.transitionAnimation.setDuration(360)
+        self.transitionAnimation.setEasingCurve(QEasingCurve.InOutCubic)
+        self.transitionAnimation.finished.connect(self._finishTransition)
+        self.setWindowOpacity(0)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.transitionAnimation.setStartValue(0)
+        self.transitionAnimation.setEndValue(1)
+        self.transitionAnimation.start()
 
     def done(self, result):
+        if self._closingResult is not None:
+            return
         self.wasPlaying = self.view.player.isPlaying()
-        super().done(result)
+        self._closingResult = result
+        self.transitionAnimation.stop()
+        self.transitionAnimation.setStartValue(self.windowOpacity())
+        self.transitionAnimation.setEndValue(0)
+        self.transitionAnimation.start()
 
+    def _finishTransition(self):
+        if self._closingResult is not None:
+            QDialog.done(self, self._closingResult)
 
     def closeImmediately(self):
-        self.reject()
+        self.wasPlaying = self.view.player.isPlaying()
+        self.transitionAnimation.stop()
+        QDialog.done(self, QDialog.Rejected)
 
 
 class LMSVideoPage(QFrame):
