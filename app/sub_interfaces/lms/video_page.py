@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from typing import Optional
 
 from PyQt5.QtCore import QUrl, Qt
@@ -41,6 +43,9 @@ class LMSVideoPage(QFrame):
         self.usageHintLabel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.usageHintLabel.setTextColor("#606060", "#d2d2d2")
 
+        # DirectShow 依赖额外的 MP4 过滤器；Windows 优先使用 Qt 自带的 WMF 后端。
+        if sys.platform == "win32":
+            os.environ.setdefault("QT_MULTIMEDIA_PREFERRED_PLUGINS", "windowsmediafoundation")
         self.videoWidget = VideoWidget(self)
         self.videoWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.videoWidget.setMinimumHeight(420)
