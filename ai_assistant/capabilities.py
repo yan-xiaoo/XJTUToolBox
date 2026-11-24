@@ -24,7 +24,10 @@ CAPABILITIES = (
     CapabilityDefinition("schedule", "我的课表", "使用本机课表中的课程、时间、教师与地点", True),
     CapabilityDefinition("scores", "我的成绩", "使用本机缓存的课程成绩与学分", True),
     CapabilityDefinition("attendance", "我的考勤", "使用本机缓存的考勤时间、地点与状态", True),
+    CapabilityDefinition("ss_activity", "活动报名", "登录智慧社区查询活动，经你确认后可一键报名（需 OpenAI 或 Anthropic 协议）", True),
 )
+# 由模型按需调用的工具能力，不读本机缓存
+TOOL_CAPABILITIES = frozenset({"web_search", "ss_activity"})
 CAPABILITY_BY_ID = {one.id: one for one in CAPABILITIES}
 
 
@@ -67,7 +70,7 @@ def collect_local_context(
         "attendance": lambda: _read_attendance(account_directory / "attendance_flow.json") if account_directory else None,
     }
     for capability_id in enabled:
-        if capability_id == "web_search":
+        if capability_id in TOOL_CAPABILITIES:
             continue
         rows = readers[capability_id]()
         if rows is None:

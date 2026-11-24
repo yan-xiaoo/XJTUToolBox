@@ -46,6 +46,8 @@ from .sessions.hello_session import HelloSession
 from .sessions.fitness_session import FitnessSession
 from .ProfileInterface import ProfileInterface
 from .FitnessInterface import FitnessInterface
+from .sessions.ss_session import SsSession
+from .SsActivityInterface import SsActivityInterface
 from .SchoolCalendarInterface import SchoolCalendarInterface
 from .sub_interfaces import LoginInterface
 from .sub_interfaces.QRCodeLoginDialog import QRCodeLoginDialog
@@ -82,6 +84,7 @@ def registerSession():
     SessionManager.global_register(LibrarySession, "library")
     SessionManager.global_register(HelloSession, "hello")
     SessionManager.global_register(FitnessSession, "fitness")
+    SessionManager.global_register(SsSession, "ss")
 
 def _log_uncaught_thread_exception(args) -> None:
     """记录原生 threading.Thread 中未被捕获的异常（同样运行在出错线程，不触碰 Qt）。"""
@@ -242,6 +245,7 @@ class MainWindow(MSFluentWindow):
         self.campus_card_interface = CampusCardInterface(self)
         self.profile_interface = ProfileInterface(self)
         self.fitness_interface = FitnessInterface(self)
+        self.ss_activity_interface = SsActivityInterface(self)
         self.school_calendar_interface = SchoolCalendarInterface(self)
         QApplication.processEvents()
 
@@ -394,6 +398,8 @@ class MainWindow(MSFluentWindow):
                     FIF.LAYOUT, self.empty_room_interface),
             Feature("fitness", self.tr("体测查询"), self.tr("查询体测项目分与总评"), campus,
                     FIF.SPEED_HIGH, self.fitness_interface),
+            Feature("ss_activity", self.tr("活动报名"), self.tr("智慧社区活动报名与集体活动证明"), campus,
+                    FIF.PEOPLE, self.ss_activity_interface),
             Feature("notice", self.tr("通知查询"), self.tr("在一处查询学校网站的新通知"), campus,
                     FIF.DICTIONARY, self.notice_interface),
             Feature("ai", self.tr("问舟"), self.tr("支持多协议的通用 AI 助手"), tools,

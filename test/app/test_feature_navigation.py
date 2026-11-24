@@ -45,7 +45,7 @@ class NavigationWindow(QWidget):
         for name in (
             "home", "schedule", "attendance", "score", "lms", "school_course", "judge",
             "profile", "school_calendar", "campus_card", "venue", "library", "empty_room",
-            "fitness", "notice", "ai", "webvpn_convert", "account", "setting", "login", "notice_setting",
+            "fitness", "ss_activity", "notice", "ai", "webvpn_convert", "account", "setting", "login", "notice_setting",
         ):
             page = QWidget()
             page.setObjectName(f"{name}Interface")
@@ -102,9 +102,9 @@ class FeatureNavigationTest(unittest.TestCase):
         cfg.file.write_text('{"Settings": {"show_avatar_on_sidebar": true}}')
         cfg.load(cfg.file)
         self.assertEqual(self.nav.pinned, ["schedule", "attendance", "score", "lms"])
-        self.assertEqual(len(self.nav.features), 16)
-        self.assertEqual(self.window.stackedWidget.count(), 22)
-        self.assertEqual(len(self.toolbox.cards), 16)
+        self.assertEqual(len(self.nav.features), 17)
+        self.assertEqual(self.window.stackedWidget.count(), 23)
+        self.assertEqual(len(self.toolbox.cards), 17)
         self.assertNotIn("GitHub", self.window.navigationInterface.items)
         self.assertEqual(self.window.navigationInterface.topLayout.count(), 1)
         self.assertEqual(self.window.navigationInterface.bottomLayout.count(), 4)
@@ -132,7 +132,7 @@ class FeatureNavigationTest(unittest.TestCase):
         self.assertEqual(edit.text(), "保留未提交的内容")
         self.assertTrue(self.nav.moreButton.isSelected)
         self.assertIn("当前", row.openButton.text())
-        self.assertEqual(self.window.stackedWidget.count(), 22)
+        self.assertEqual(self.window.stackedWidget.count(), 23)
 
     def test_toolbox_pin_search_and_partition(self) -> None:
         """工具箱图钉不跳转，卡片正确换区，搜索同时覆盖两个区域。"""
@@ -304,7 +304,7 @@ class FeatureNavigationTest(unittest.TestCase):
         try:
             self.assertEqual(second.featureNavigation.pinned, ["ai", "score"])
             self.assertFalse(second.featureNavigation.buttons["schedule"].isVisible())
-            self.assertEqual(len(second.featureNavigation.rows), 16)
+            self.assertEqual(len(second.featureNavigation.rows), 17)
         finally:
             second.deleteLater()
             APP.sendPostedEvents(None, QEvent.DeferredDelete)
