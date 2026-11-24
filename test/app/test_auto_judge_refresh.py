@@ -76,7 +76,7 @@ class JudgeCardDeadlineTest(unittest.TestCase):
     def test_deadline_is_appended_beside_the_existing_description(self):
         card = self.card(5)
         self.assertIsNotNone(getattr(card, "deadlineLabel", None))
-        self.assertEqual(card.deadlineLabel.text(), "2026-11-29 截止")
+        self.assertEqual(card.deadlineLabel.text(), "2026-11-29截止 · 剩余5天")
         self.assertFalse(card.deadlineLabel.isHidden())
         self.assertEqual(card.contentLabel.text(), "计划 · CODE · 学院")
 
@@ -85,6 +85,8 @@ class JudgeCardDeadlineTest(unittest.TestCase):
             with self.subTest(days=days):
                 card = self.card(days)
                 self.assertIsNotNone(getattr(card, "deadlineLabel", None))
+                remaining = f"剩余{days}天" if days >= 0 else "已截止"
+                self.assertTrue(card.deadlineLabel.text().endswith(f"截止 · {remaining}"))
                 for color in (card.deadlineLabel.lightColor, card.deadlineLabel.darkColor):
                     self.assertEqual(color.red() > color.green(), urgent)
                     self.assertEqual(color.red() > color.blue(), urgent)

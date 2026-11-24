@@ -76,9 +76,11 @@ class JudgeCard(CardWidget):
 
     def _updateDeadline(self):
         deadline = self.questionnaire.deadline
-        self.deadlineLabel.setText(f"{deadline.isoformat()} 截止" if deadline else "")
+        days = (deadline - date.today()).days if deadline else 0
+        remaining = f"剩余{days}天" if days >= 0 else "已截止"
+        self.deadlineLabel.setText(f"{deadline.isoformat()}截止 · {remaining}" if deadline else "")
         self.deadlineLabel.setVisible(deadline is not None)
-        if deadline and not self.finished and 0 <= (deadline - date.today()).days < 7:
+        if deadline and not self.finished and 0 <= days < 7:
             self.deadlineLabel.setTextColor("#c42b1c", "#ff99a4")
         else:
             self.deadlineLabel.setTextColor("#606060", "#d2d2d2")
