@@ -397,10 +397,12 @@ class FeatureNavigationTest(unittest.TestCase):
                       QPoint(-10, 20), QPoint(500, 20)):
             point = button.mapToGlobal(local)
             with patch("app.components.feature_navigation.QCursor.pos", return_value=point):
+                closed = QSignalSpy(self.nav._leaveTimer.timeout)
                 self.nav.showMore()
                 self.assertTrue(self.nav.popup.isVisible())
                 self.assertFalse(self.nav._containsMoreOrPopup(point))
-                QTest.qWait(450)
+                # 等待关闭定时器实际触发，避免慢速 runner 延迟首次指针轮询。
+                self.assertTrue(closed or closed.wait(1500), str(local))
                 self.assertFalse(self.nav.popup.isVisible(), str(local))
                 self.assertFalse(self.nav._pointerTimer.isActive())
 
