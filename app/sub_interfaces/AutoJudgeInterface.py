@@ -1,4 +1,5 @@
 from typing import Union, Dict
+from datetime import date
 
 from PyQt5.QtCore import Qt, pyqtSlot, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
@@ -39,6 +40,8 @@ class JudgeCard(CardWidget):
         else:
             self.titleLabel = BodyLabel(title + self.tr(" (已完成)"), self)
         self.contentLabel = CaptionLabel(description, self)
+        self.deadlineLabel = CaptionLabel("", self)
+        self._updateDeadline()
         if not finished:
             self.submitButton = PrimaryPushButton(self.tr("开始评教"), self)
         else:
@@ -59,12 +62,28 @@ class JudgeCard(CardWidget):
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
         self.vBoxLayout.setSpacing(0)
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignVCenter)
-        self.vBoxLayout.addWidget(self.contentLabel, 0, Qt.AlignVCenter)
+        descriptionLayout = QHBoxLayout()
+        descriptionLayout.setSpacing(8)
+        descriptionLayout.addWidget(self.contentLabel)
+        descriptionLayout.addWidget(self.deadlineLabel)
+        descriptionLayout.addStretch()
+        self.vBoxLayout.addLayout(descriptionLayout)
         self.vBoxLayout.setAlignment(Qt.AlignVCenter)
         self.hBoxLayout.addLayout(self.vBoxLayout)
 
         self.hBoxLayout.addSpacing(10)
         self.hBoxLayout.addWidget(self.submitButton, 0, Qt.AlignVCenter)
+
+    def _updateDeadline(self):
+        deadline = self.questionnaire.deadline
+        days = (deadline - date.today()).days if deadline else 0
+        remaining = f"剩余{days}天" if days >= 0 else "已截止"
+        self.deadlineLabel.setText(f"{deadline.isoformat()}截止 · {remaining}" if deadline else "")
+        self.deadlineLabel.setVisible(deadline is not None)
+        if deadline and not self.finished and 0 <= days < 7:
+            self.deadlineLabel.setTextColor("#c42b1c", "#ff99a4")
+        else:
+            self.deadlineLabel.setTextColor("#606060", "#d2d2d2")
 
     @pyqtSlot()
     def onJudgeButtonClicked(self):
@@ -78,6 +97,7 @@ class JudgeCard(CardWidget):
         else:
             self.submitButton.setText(self.tr("开始评教"))
             self.titleLabel.setText(self.title)
+        self._updateDeadline()
 
 
 class AutoJudgeInterface(ScrollArea):
