@@ -4,10 +4,11 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QEvent, QPoint, QPointF, QRectF, QUrl, Qt
+from PyQt5.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, QRectF, QUrl, Qt
 from PyQt5.QtGui import QImage, QMouseEvent
 from PyQt5.QtMultimedia import QMediaContent, QVideoFrame, QVideoSurfaceFormat
 from PyQt5.QtTest import QSignalSpy, QTest
@@ -66,26 +67,30 @@ class LMSPlayerControlsTest(unittest.TestCase):
     def test_fullscreen_and_escape_preserve_player_and_restore_controls(self):
         player = self.page.videoWidget.player
         self.page.fullScreenButton.click()
-        QTest.qWait(30)
         dialog = self.page.fullScreenDialog
+        dialog.transitionAnimation.setCurrentTime(dialog.transitionAnimation.duration())
         self.assertTrue(dialog.isFullScreen())
         self.assertIs(self.page.videoWidget.player, player)
+        animation = self.bar.opacityAni
         self.page.videoWidget._onHideTimeOut()
-        QTest.qWait(70)
+        animation.pause()
+        animation.setCurrentTime(animation.duration() // 2)
         self.assertTrue(self.bar.isVisible())
         self.assertGreater(self.bar.opacityEffect.opacity(), 0)
         self.assertLess(self.bar.opacityEffect.opacity(), 1)
-        QTest.qWait(250)
+        animation.setCurrentTime(animation.duration())
         self.assertTrue(self.bar.isHidden())
         event = QMouseEvent(QEvent.MouseMove, QPointF(40, 40), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
         QApplication.sendEvent(self.page.videoWidget.viewport(), event)
-        QTest.qWait(70)
+        animation.pause()
+        animation.setCurrentTime(animation.duration() // 2)
         self.assertTrue(self.bar.isVisible())
         self.assertGreater(self.bar.opacityEffect.opacity(), 0)
         self.assertLess(self.bar.opacityEffect.opacity(), 1)
-        QTest.qWait(250)
+        animation.setCurrentTime(animation.duration())
         QTest.keyClick(dialog, Qt.Key_Escape)
-        QTest.qWait(430)
+        dialog.transitionAnimation.setCurrentTime(dialog.transitionAnimation.duration())
+        QApplication.processEvents()
         self.assertIsNone(self.page.fullScreenDialog)
         self.assertGreaterEqual(self.bar.y(), self.page.videoWidget.y() + self.page.videoWidget.height())
         self.assertTrue(self.bar.isVisible())
@@ -99,6 +104,37 @@ class LMSPlayerControlsTest(unittest.TestCase):
         QTest.qWait(30)
         self.assertIsNone(self.page.fullScreenDialog)
         self.assertTrue(self.page.videoWidget.player.media().isNull())
+
+    def test_exit_fade_does_not_restart_media_that_ends_during_the_transition(self):
+        self.page.fullScreenButton.click()
+        dialog = self.page.fullScreenDialog
+        dialog.transitionAnimation.setCurrentTime(dialog.transitionAnimation.duration())
+        player = self.page.videoWidget.player
+        # Simulate the backend reaching EndOfMedia while the real dialog fades out.
+        with patch.object(player, "isPlaying", return_value=True) as playing, \
+                patch.object(player, "play") as play, patch.object(player, "pause") as pause:
+            dialog.reject()
+            playing.return_value = False
+            dialog.transitionAnimation.setCurrentTime(dialog.transitionAnimation.duration())
+            self.assertIsNone(self.page.fullScreenDialog)
+            self.assertFalse(dialog.wasPlaying)
+            play.assert_not_called()
+            pause.assert_not_called()
+
+    def test_fullscreen_does_not_play_or_pause_inactive_media(self):
+        player = self.page.videoWidget.player
+        with patch.object(player, "isPlaying", return_value=False), \
+                patch.object(player, "play") as play, patch.object(player, "pause") as pause:
+            self.page.fullScreenButton.click()
+            dialog = self.page.fullScreenDialog
+            dialog.transitionAnimation.setCurrentTime(dialog.transitionAnimation.duration())
+            dialog.reject()
+            dialog.transitionAnimation.setCurrentTime(dialog.transitionAnimation.duration())
+            self.assertIsNone(self.page.fullScreenDialog)
+            self.assertIs(self.page.videoWidget.player, player)
+            self.assertTrue(self.bar.isVisible())
+            play.assert_not_called()
+            pause.assert_not_called()
 
     def test_backend_unknown_position_does_not_overflow_slider(self):
         errors = []
@@ -123,19 +159,23 @@ class LMSPlayerControlsTest(unittest.TestCase):
         self.page.fullScreenButton.click()
         dialog = self.page.fullScreenDialog
         self.assertTrue(dialog.windowFlags() & Qt.FramelessWindowHint)
-        QTest.qWait(100)
+        animation = dialog.transitionAnimation
+        animation.pause()
+        animation.setCurrentTime(animation.duration() // 2)
         self.assertGreater(dialog.windowOpacity(), 0)
         self.assertLess(dialog.windowOpacity(), 1)
-        QTest.qWait(100)
+        animation.setCurrentTime(200)
         self.assertLess(dialog.windowOpacity(), 1, "The full-screen transition should still be visible at 200ms")
-        QTest.qWait(220)
+        animation.setCurrentTime(animation.duration())
         self.assertEqual(dialog.frameGeometry(), dialog.screen().geometry())
         self.assertEqual(dialog.windowOpacity(), 1)
         dialog.reject()
-        QTest.qWait(100)
+        animation.pause()
+        animation.setCurrentTime(animation.duration() // 2)
         self.assertTrue(dialog.isVisible())
+        self.assertGreater(dialog.windowOpacity(), 0)
         self.assertLess(dialog.windowOpacity(), 1)
-        QTest.qWait(380)
+        animation.setCurrentTime(animation.duration())
         self.assertIsNone(self.page.fullScreenDialog)
 
     def test_fullscreen_cover_has_no_empty_pixels_and_normal_mode_restores_aspect(self):
@@ -193,9 +233,9 @@ class LMSPlayerControlsTest(unittest.TestCase):
         self.assertTrue(self.bar.isVisible())
         self.assertEqual(self.bar.opacityEffect.opacity(), 1)
         self.page.videoWidget._onHideTimeOut()
-        QTest.qWait(50)
+        self.bar.opacityAni.setCurrentTime(self.bar.opacityAni.duration() // 2)
         self.page.stopPlayback()
-        QTest.qWait(300)
+        self.assertEqual(self.bar.opacityAni.state(), QAbstractAnimation.Stopped)
         self.assertIsNone(self.page.fullScreenDialog)
         self.assertTrue(self.bar.isVisible())
         self.assertEqual(self.bar.opacityEffect.opacity(), 1)

@@ -36,6 +36,12 @@ class ReplayVideoWidget(VideoWidget):
         # VideoItem 自己按比例缩放，避免 fitInView 再加边距、做第二次缩放。
         self.resetTransform()
 
+    def hideEvent(self, event):
+        # 不对已暂停或已结束的媒体再次 pause，避免后端改变其状态或位置。
+        if self.player.isPlaying():
+            self.pause()
+        QGraphicsView.hideEvent(self, event)
+
     def setFullScreenMode(self, enabled):
         self.fullScreenMode = enabled
         self.videoItem.setAspectRatioMode(Qt.KeepAspectRatioByExpanding if enabled else Qt.KeepAspectRatio)
@@ -135,7 +141,6 @@ class _PlayerDialog(QDialog):
     def done(self, result):
         if self._closingResult is not None:
             return
-        self.wasPlaying = self.view.player.isPlaying()
         self._closingResult = result
         self.transitionAnimation.stop()
         self.transitionAnimation.setStartValue(self.windowOpacity())
@@ -144,6 +149,8 @@ class _PlayerDialog(QDialog):
 
     def _finishTransition(self):
         if self._closingResult is not None:
+            # 淡出期间可能已播放结束；在真正隐藏触发 pause 前读取最新状态。
+            self.wasPlaying = self.view.player.isPlaying()
             QDialog.done(self, self._closingResult)
 
     def closeImmediately(self):
