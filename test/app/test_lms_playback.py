@@ -1,4 +1,4 @@
-"""Windows playback regression using a tiny synthetic H.264 MP4."""
+"""Windows backend regressions and cross-platform playback/full-screen smoke."""
 import json
 import os
 from pathlib import Path
@@ -109,6 +109,69 @@ PROBE = textwrap.dedent(r"""
 """)
 
 
+SMOKE = textwrap.dedent(r"""
+    import json
+    import sys
+    from time import monotonic
+    from PyQt5.QtCore import QUrl
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication, QVBoxLayout, QWidget
+    from app.sub_interfaces.lms.video_page import LMSVideoPage
+
+    app = QApplication([])
+    window = QWidget()
+    page = LMSVideoPage(window)
+    QVBoxLayout(window).addWidget(page)
+    window.resize(900, 700)
+    window.show()
+    view = page.videoWidget
+    player = view.player
+    player.setMuted(True)
+    stages = {}
+
+    def blue_frame_is_visible():
+        frame = view.viewport().grab().toImage()
+        if frame.isNull():
+            return False
+        color = frame.pixelColor(frame.rect().center())
+        return color.blue() > 100 and color.blue() > max(color.red(), color.green()) + 50
+
+    def check_playing(label):
+        start = player.position()
+        deadline = monotonic() + 5
+        while monotonic() < deadline:
+            if player.position() > start + 75 and blue_frame_is_visible():
+                break
+            QTest.qWait(10)
+        assert player.isPlaying() and player.position() > start + 75 and blue_frame_is_visible(), (
+            f'{label}: position={player.position()}, state={player.state()}, '
+            f'status={player.mediaStatus()}, error={player.errorString()}'
+        )
+        stages[label] = [start, player.position()]
+
+    try:
+        page.setReplayVideo({'download_url': QUrl.fromLocalFile(sys.argv[1]).toString(),
+                             'label': 'control'}, 'local test')
+        check_playing('embedded')
+        page.toggleFullScreen()
+        dialog = page.fullScreenDialog
+        transition = dialog.transitionAnimation
+        transition.setCurrentTime(transition.duration())
+        assert dialog.isFullScreen() and view.player is player
+        check_playing('full_screen')
+        dialog.reject()
+        transition.setCurrentTime(transition.duration())
+        assert page.fullScreenDialog is None and view.player is player
+        check_playing('embedded_again')
+        print('PLAYBACK_SMOKE_RESULT=' + json.dumps({
+            'platform': app.platformName(), 'stages': stages,
+        }), flush=True)
+    finally:
+        page.stopPlayback()
+        window.close()
+""")
+
+
 @unittest.skipUnless(sys.platform == "win32", "Windows media backend regression")
 class LMSPlaybackTest(unittest.TestCase):
     def playback(self, mode):
@@ -137,6 +200,25 @@ class LMSPlaybackTest(unittest.TestCase):
     def test_windows_streams_h264_with_replay_url_constraints(self):
         data = self.playback("http")
         self.assertTrue(data["requests"], "The player must request the video")
+
+
+class LMSPlaybackSmokeTest(unittest.TestCase):
+    def test_video_keeps_playing_across_fullscreen(self):
+        # Cocoa exercises AVFoundation's native output; other UI tests stay offscreen.
+        environment = os.environ | {
+            "QT_QPA_PLATFORM": "cocoa" if sys.platform == "darwin" else "offscreen",
+            "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
+            "PYTHONUTF8": "1",
+        }
+        environment.pop("QT_MULTIMEDIA_PREFERRED_PLUGINS", None)
+        completed = subprocess.run(
+            [sys.executable, "-B", "-c", SMOKE, str(FIXTURE)],
+            cwd=ROOT, env=environment, capture_output=True, text=True, timeout=25,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        result = next(line for line in completed.stdout.splitlines()
+                      if line.startswith("PLAYBACK_SMOKE_RESULT="))
+        print(result, flush=True)
 
 
 if __name__ == "__main__":

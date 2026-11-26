@@ -93,7 +93,9 @@ jobs:
 
       - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'
-        run: bash scripts/apt_install.sh libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+        run: |
+          bash scripts/apt_install.sh libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 \
+            libgstreamer-gl1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
 
       - name: Install locked dependencies
         run: uv sync --frozen --group dev
@@ -187,7 +189,9 @@ jobs:
           enable-cache: true
 
       - name: Install Linux Qt runtime libraries
-        run: bash scripts/apt_install.sh libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+        run: |
+          bash scripts/apt_install.sh libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 \
+            libgstreamer-gl1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
 
       - name: Install locked dependencies
         run: uv sync --frozen --group dev
