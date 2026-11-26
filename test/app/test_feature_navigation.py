@@ -400,7 +400,11 @@ class FeatureNavigationTest(unittest.TestCase):
                 self.nav.showMore()
                 self.assertTrue(self.nav.popup.isVisible())
                 self.assertFalse(self.nav._containsMoreOrPopup(point))
-                QTest.qWait(450)
+                self.assertTrue(self.nav._pointerTimer.isActive())
+                self.nav._pointerTimer.timeout.emit()
+                self.assertTrue(self.nav._leaveTimer.isActive())
+                self.assertTrue(self.nav.popup.isVisible())
+                self.nav._leaveTimer.timeout.emit()
                 self.assertFalse(self.nav.popup.isVisible(), str(local))
                 self.assertFalse(self.nav._pointerTimer.isActive())
 
@@ -408,13 +412,15 @@ class FeatureNavigationTest(unittest.TestCase):
         """鼠标经过间隙进入菜单时，即使未收到 Enter 也取消延迟关闭。"""
         with patch("app.components.feature_navigation.QCursor.pos", return_value=QPoint(-10000, -10000)):
             self.nav.showMore()
-            QTest.qWait(100)
+            self.assertTrue(self.nav._pointerTimer.isActive())
+            self.nav._pointerTimer.timeout.emit()
             self.assertTrue(self.nav._leaveTimer.isActive())
         inside = self.nav.popup.mapToGlobal(self.nav.popup.rect().center())
         with patch("app.components.feature_navigation.QCursor.pos", return_value=inside):
-            QTest.qWait(400)
-            self.assertTrue(self.nav.popup.isVisible())
+            self.nav._pointerTimer.timeout.emit()
             self.assertFalse(self.nav._leaveTimer.isActive())
+            self.nav._leaveTimer.timeout.emit()
+            self.assertTrue(self.nav.popup.isVisible())
 
     def test_nonmodal_popup_dismisses_on_outside_click_escape_and_deactivation(self) -> None:
         """非模态浮层仍支持外部点击、Esc 和切换应用关闭，且不吞掉底层点击。"""
