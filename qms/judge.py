@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import requests
@@ -57,7 +58,20 @@ class QMSQuestionnaire:
 
     @property
     def BPJS(self) -> str:
-        return "、".join(self.lecturers)
+        # 外层 lecturers 是整门课的名单；被评教师存放在当前答卷的 target 中。
+        value: Any = self.response
+        for key in ("target", "attributes", "course", "lecturers"):
+            if not isinstance(value, dict):
+                return ""
+            value = value.get(key)
+        if not isinstance(value, list):
+            return ""
+        names: list[str] = []
+        for lecturer in value:
+            name = lecturer.get("name") if isinstance(lecturer, dict) else None
+            if isinstance(name, str) and name.strip() and name.strip() not in names:
+                names.append(name.strip())
+        return "、".join(names)
 
     @property
     def WJMC(self) -> str:
@@ -69,7 +83,7 @@ class QMSQuestionnaire:
 
     @property
     def JSXM(self) -> str:
-        return "、".join(self.lecturers)
+        return self.BPJS
 
     @property
     def JXBID(self) -> str:
@@ -82,6 +96,16 @@ class QMSQuestionnaire:
     @property
     def display_title(self) -> str:
         return f"{self.course_name} {self.BPJS or '未知教师'}"
+
+    @property
+    def deadline(self) -> date | None:
+        value = self.course.get("evaluation_end_at")
+        if not isinstance(value, str):
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
 
     @property
     def display_description(self) -> str:

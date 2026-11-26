@@ -1,8 +1,9 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from schedule.schedule_database import Exam, Term
+from schedule.schedule_database import Course, Exam, Term
 from schedule.schedule_service import ScheduleService
 
 TEST_DOMAIN = "schedule"
@@ -100,6 +101,68 @@ class AddExamFromJsonTest(unittest.TestCase):
         self.service.setTermInfo(TERM, TERM_START)
 
         self.assertEqual(Term.get(Term.term_number == TERM).start_date, TERM_START)
+
+    def test_fullwidth_colon_and_single_digit_hour(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        for text in ("9：00-11：00", "９：００－１１：００", "9:00 — 11:00"):
+            with self.subTest(text=text):
+                payload = _exam_json(time_range=text)
+                payload["exams"][0]["KSSJMS"] = f"2026-01-08  {text}（星期四）"
+                self.assertEqual(self.service.addExamFromJson(payload), 0)
+                exam = Exam.select().get()
+                self.assertEqual(exam.start_exact_time.isoformat(), "09:00:00")
+                self.assertEqual(exam.end_exact_time.isoformat(), "11:00:00")
+                self.assertEqual(exam.day_of_week, 4)
+
+    def test_invalid_later_row_keeps_saved_exams(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        self.service.addExamFromJson(_exam_json())
+        payload = _exam_json(time_range="09:00-11:00")
+        payload["exams"].append({"KCM": "示例课程乙", "KSSJMS": "待定"})
+        with self.assertRaises(ValueError):
+            self.service.addExamFromJson(payload)
+        self.assertEqual(Exam.select().get().start_exact_time.isoformat(), "08:00:00")
+
+    def test_reimport_does_not_remove_same_course_in_other_term(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        self.service.setTermInfo(OTHER_TERM, "2026-09-07")
+        self.service.addExamFromJson(_exam_json())
+        other = _exam_json(term_number=OTHER_TERM)
+        other["exams"][0]["KSSJMS"] = "2027-01-04 09:00-11:00"
+        self.service.addExamFromJson(other)
+        self.service.addExamFromJson(_exam_json())
+        self.assertEqual(Exam.select().count(), 2)
+
+    def test_invalid_later_row_does_not_leave_new_courses(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        payload = _exam_json(name="new course")
+        payload["exams"].append({"KCM": "bad row", "KSSJMS": "pending"})
+        with self.assertRaises(ValueError):
+            self.service.addExamFromJson(payload)
+        self.assertEqual(Course.select().count(), 0)
+        self.assertEqual(Exam.select().count(), 0)
+
+    def test_insert_failure_rolls_back_courses_and_existing_exams(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        self.service.addExamFromJson(_exam_json())
+        existing_id = Exam.select().get().id
+        payload = _exam_json(time_range="09:00-11:00")
+        payload["exams"].extend(_exam_json(name="new course")["exams"])
+        with patch.object(Exam, "bulk_create", side_effect=RuntimeError("synthetic insert failure")):
+            with self.assertRaises(RuntimeError):
+                self.service.addExamFromJson(payload)
+        self.assertEqual(Course.select().count(), 1)
+        self.assertEqual(Exam.select().get().id, existing_id)
+        self.assertEqual(Exam.select().get().start_exact_time.isoformat(), "08:00:00")
+
+    def test_same_course_multiple_exams_in_one_payload_are_preserved(self):
+        self.service.setTermInfo(TERM, TERM_START, current=True)
+        payload = _exam_json()
+        payload["exams"].extend(_exam_json(time_range="14:00-16:00")["exams"])
+        self.service.addExamFromJson(payload)
+        self.service.addExamFromJson(payload)
+        self.assertEqual(Exam.select().count(), 2)
+        self.assertEqual(Course.select().count(), 1)
 
 
 if __name__ == '__main__':

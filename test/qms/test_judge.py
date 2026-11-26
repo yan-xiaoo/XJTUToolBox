@@ -1,7 +1,9 @@
 import unittest
+from datetime import date
 from unittest.mock import Mock
 
 TEST_DOMAIN = "auth-session"
+TEST_REGRESSION = True
 
 from qms.judge import QMSAutoJudge, QMSQuestionnaire
 
@@ -24,6 +26,76 @@ class _FakeSession:
     def request(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs))
         return self.response
+
+
+class QMSQuestionnaireDisplayTest(unittest.TestCase):
+    def questionnaires(self, responses, status="DRAFT", deadline=None):
+        course = {
+            "course_id": 3,
+            "primary_plan_course_name": "测试课程",
+            "lecturers": ["教师甲", "教师乙"],
+            "evaluation_end_at": deadline,
+            "surveys": [{"response": response} for response in responses],
+        }
+        judge = QMSAutoJudge(session=None)
+        judge._request = Mock(side_effect=[
+            {"data": [{"id": 1, "plan_instance": {
+                "id": 2, "plan": {"business_code": "student-evaluation"},
+            }}]},
+            {"data": [course] if status == "DRAFT" else []},
+            {"data": [course] if status == "ENABLED" else []},
+        ])
+        return judge.get_questionnaires()
+
+    def test_deadline_uses_the_course_evaluation_date(self):
+        pending, _ = self.questionnaires([{"id": "response-1"}], deadline="2026-11-29")
+        self.assertEqual(getattr(pending[0], "deadline", None), date(2026, 11, 29))
+
+    def test_missing_or_invalid_deadline_is_omitted(self):
+        for deadline in (None, "", "not-a-date", "2026-02-30", 20261129):
+            with self.subTest(deadline=deadline):
+                pending, _ = self.questionnaires([{"id": "response-1"}], deadline=deadline)
+                self.assertIsNone(getattr(pending[0], "deadline", None))
+
+    def test_each_response_displays_its_own_teacher(self):
+        for status in ("DRAFT", "ENABLED"):
+            with self.subTest(status=status):
+                responses = [
+                    {"id": "response-b", "status": status, "target": {
+                        "attributes": {"course": {"lecturers": [{"name": "教师乙"}]}},
+                    }},
+                    {"id": "response-a", "status": status, "target": {
+                        "attributes": {"course": {"lecturers": [{"name": "教师甲"}]}},
+                    }},
+                ]
+                pending, finished = self.questionnaires(responses, status)
+                items = pending if status == "DRAFT" else finished
+                self.assertEqual(len(items), 2)
+                self.assertEqual(finished if status == "DRAFT" else pending, [])
+                self.assertEqual(
+                    {item.BPR: item.display_title for item in items},
+                    {"response-a": "测试课程 教师甲", "response-b": "测试课程 教师乙"},
+                )
+                for item in items:
+                    self.assertEqual(item.JSXM, item.BPJS)
+                    self.assertEqual(item.lecturers, ["教师甲", "教师乙"])
+
+    def test_unknown_target_does_not_display_all_course_teachers(self):
+        for target in (None, {}, [], {"attributes": None},
+                       {"attributes": {"course": {"lecturers": "教师甲"}}}):
+            with self.subTest(target=target):
+                pending, _ = self.questionnaires([{"id": "response-1", "target": target}])
+                self.assertEqual(pending[0].display_title, "测试课程 未知教师")
+                self.assertEqual(pending[0].JSXM, "")
+
+    def test_target_teacher_names_are_cleaned_without_losing_joint_teachers(self):
+        pending, _ = self.questionnaires([{"id": "response-1", "target": {
+            "attributes": {"course": {"lecturers": [
+                {"name": " 教师乙 "}, {"name": ""}, None, "教师甲", {},
+                {"name": None}, {"name": 123}, {"name": "教师甲"}, {"name": "教师乙"},
+            ]}},
+        }}])
+        self.assertEqual(pending[0].display_title, "测试课程 教师乙、教师甲")
 
 
 class QMSAnswerBuilderTest(unittest.TestCase):
