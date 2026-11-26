@@ -413,9 +413,10 @@ class FeatureNavigationTest(unittest.TestCase):
 
     def test_hover_pointer_bridge_cancels_delayed_close_without_enter_event(self) -> None:
         """鼠标经过间隙进入菜单时，即使未收到 Enter 也取消延迟关闭。"""
+        leave_timeouts = QSignalSpy(self.nav._leaveTimer.timeout)
         with patch("app.components.feature_navigation.QCursor.pos", return_value=QPoint(-10000, -10000)):
             self.nav.showMore()
-            # 指针轮询发现鼠标在外才启动延迟关闭；轮询频繁，不会错过 300ms 的计时窗口
+            # 指针轮询发现鼠标在外才启动延迟关闭。
             self._wait_until(self.nav._leaveTimer.isActive)
         inside = self.nav.popup.mapToGlobal(self.nav.popup.rect().center())
         with patch("app.components.feature_navigation.QCursor.pos", return_value=inside):
@@ -424,6 +425,7 @@ class FeatureNavigationTest(unittest.TestCase):
             QTest.qWait(400)
             self.assertTrue(self.nav.popup.isVisible())
             self.assertFalse(self.nav._leaveTimer.isActive())
+            self.assertEqual(len(leave_timeouts), 0, "进入浮层后不应触发延迟关闭")
 
     def test_nonmodal_popup_dismisses_on_outside_click_escape_and_deactivation(self) -> None:
         """非模态浮层仍支持外部点击、Esc 和切换应用关闭，且不吞掉底层点击。"""
