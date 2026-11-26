@@ -5,7 +5,8 @@ import tempfile
 import threading
 import time
 import unittest
-from pathlib import Path
+from contextlib import nullcontext
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -125,6 +126,41 @@ class ArchiveTest(unittest.TestCase):
         self.assertEqual(data["status"], "partial")
         self.assertTrue(all(r["status"] == "failed" for r in data["files"]))
         self.assertEqual(batch._fail_count, 2)
+
+    def test_hierarchical_archive_keeps_activity_ids_after_truncating_titles(self):
+        if hasattr(os, "pathconf"):
+            byte_limit = os.pathconf(self.root, "PC_NAME_MAX")
+            pathconf = nullcontext()
+        else:
+            byte_limit = 255
+            pathconf = patch.object(os, "pathconf", return_value=byte_limit, create=True)
+        for title in ("A" * 160, "课" * 160, "课" * 160 + ".作业"):
+            with self.subTest(title=title):
+                batch = self.batch()
+                batch._layout_mode = "hierarchical"
+                batch._selected_activities = [
+                    {"id": activity_id, "title": title, "type": "material"}
+                    for activity_id in (101, 102)
+                ]
+                batch._collect_all = LMSBatchDownloadThread._collect_all.__get__(batch)
+                detail = {"uploads": [
+                    {"name": "notes.pdf", "download_url": "https://example.invalid/notes"}
+                ]}
+                batch._util = SimpleNamespace(get_activity_detail=lambda _: detail)
+                with pathconf:
+                    batch.run()
+
+                manifest = json.loads(batch._archive.path.read_text(encoding="utf-8"))
+                self.assertEqual(manifest["status"], "complete")
+                paths = [PurePosixPath(row["path"]) for row in manifest["files"]]
+                self.assertEqual(len(paths), 2)
+                self.assertEqual({path.parent.name.rsplit("_", 1)[-1] for path in paths}, {"101", "102"})
+                for path in paths:
+                    self.assertLessEqual(len(path.parent.name), 160)
+                    if byte_limit > 0:
+                        self.assertLessEqual(len(os.fsencode(path.parent.name)), byte_limit)
+                    self.assertEqual(path.name, "notes.pdf")
+                    self.assertTrue((batch._archive.root / path).is_file())
 
     def test_disabled_option_creates_no_manifest(self):
         batch = self.batch(archive=False)

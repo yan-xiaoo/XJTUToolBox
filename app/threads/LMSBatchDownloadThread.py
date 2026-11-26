@@ -184,6 +184,9 @@ class LMSBatchDownloadThread(ProgressBarThread):
         """遍历选中活动，逐一获取详情并收集附件文件列表。"""
         total = len(self._selected_activities)
         files: list = []
+        title_byte_limit = (
+            _filename_byte_limit(self._target_dir) if self._layout_mode == "hierarchical" else None
+        )
 
         for idx, activity in enumerate(self._selected_activities, start=1):
             if not self.can_run:
@@ -195,7 +198,6 @@ class LMSBatchDownloadThread(ProgressBarThread):
                     self._archive.data["collection_failures"].append({"id": None, "reason": "invalid_activity"})
                 continue
             activity_title = str(activity.get("title") or "-")
-            safe_title = self._sanitize_filename(activity_title)
             act_type = str(activity.get("type") or "")
 
             self.messageChanged.emit(
@@ -215,8 +217,12 @@ class LMSBatchDownloadThread(ProgressBarThread):
                 if self._archive:
                     self._archive.data["collection_failures"].append({"id": activity_id, "reason": "invalid_detail"})
                 continue
-            if self._archive:
-                safe_title = f"{safe_title}_{activity_id}"
+            safe_title = self._sanitize_filename(
+                activity_title,
+                f"_{activity_id}" if self._archive else "",
+                byte_limit=title_byte_limit,
+                keep_extension=not self._archive,
+            )
 
             failures = [] if self._archive else None
             if act_type == ActivityType.HOMEWORK.value:
@@ -241,14 +247,16 @@ class LMSBatchDownloadThread(ProgressBarThread):
         return files
 
     @staticmethod
-    def _sanitize_filename(name: str, suffix: str = "", *, byte_limit: int | None = None) -> str:
+    def _sanitize_filename(
+        name: str, suffix: str = "", *, byte_limit: int | None = None, keep_extension: bool = True
+    ) -> str:
         """清理文件名中的非法字符。"""
         cleaned = re.sub(r'[\x00-\x1f\\/:*?"<>|]+', "_", name)
         cleaned = cleaned.strip(" .") or "file"
         if cleaned.split(".", 1)[0].upper() in {"CON", "PRN", "AUX", "NUL",
                 *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
             cleaned = "_" + cleaned
-        stem, extension = os.path.splitext(cleaned)
+        stem, extension = os.path.splitext(cleaned) if keep_extension else (cleaned, "")
         available = MAX_FILENAME_LENGTH - len(suffix)
         extension = extension[:available - 1]
         if byte_limit is not None:
@@ -264,10 +272,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
     def _output_directory(self, safe_activity_title: str) -> str:
         """获取附件目录，按需创建活动子目录。"""
         if self._layout_mode == "hierarchical":
-            title = self._sanitize_filename(
-                safe_activity_title, byte_limit=_filename_byte_limit(self._target_dir)
-            )
-            sub = os.path.join(self._target_dir, title)
+            sub = os.path.join(self._target_dir, safe_activity_title)
             os.makedirs(sub, exist_ok=True)
             return sub
         return self._target_dir
