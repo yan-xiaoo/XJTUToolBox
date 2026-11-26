@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from notification import Notification, NotificationManager
 from notification import site_search
-from notification.filter import TitleExcludeFilter
+from notification.filter import TagIncludeFilter, TitleExcludeFilter
 from notification.ruleset import Ruleset
 from notification.source import source_registry
 
@@ -96,7 +96,7 @@ class SiteSearchTest(unittest.TestCase):
         )
         # 未订阅栏目 1230 的结果丢掉
         self.assertFalse(any("/1230/" in n.link for n in result.notifications))
-        self.assertEqual(result.notifications[0].tags, {"通知"})
+        self.assertEqual(result.notifications[0].tags, {"通知", "培养工作"})
         key = quote(base64.b64encode("重修".encode("utf-8")).decode("ascii"), safe="")
         self.assertIn(f"https://gs.xjtu.edu.cn/ssjgy.jsp?wbtreeid=1111&searchScope=0&currentnum=1&newskeycode2={key}",
                       self.session.urls)
@@ -116,6 +116,25 @@ class SiteSearchTest(unittest.TestCase):
         manager = NotificationManager([ZSGZ, PYGZ], {PYGZ: [Ruleset(TitleExcludeFilter("报名"))]})
         result = site_search.search(manager.subscription, "重修", pages=1, accept=manager.satisfy_filter)
         self.assertEqual([n.title for n in result.notifications], ["招生复试重修说明"])
+
+    def test_site_results_inherit_channel_tags_before_user_rules(self):
+        manager = NotificationManager([PYGZ], {PYGZ: [Ruleset(TagIncludeFilter("培养工作"))]})
+        result = site_search.search(manager.subscription, "重修", pages=1, accept=manager.satisfy_filter)
+
+        self.assertEqual([n.tags for n in result.notifications], [{"通知", "培养工作"}])
+
+    def test_failing_channel_fallback_preserves_other_channels_on_same_site(self):
+        def create_crawler(source_id, pages):
+            if source_id == PYGZ:
+                raise RuntimeError("offline")
+            return self.crawler(source_id, pages)
+
+        known = [(ZSGZ, "https://gs.xjtu.edu.cn/info/1145/8.htm")]
+        with patch.object(site_search, "create_crawler", side_effect=create_crawler):
+            result = site_search.search([ZSGZ, PYGZ], "重修", pages=1, known=known)
+
+        self.assertEqual([n.source for n in result.notifications], [ZSGZ])
+        self.assertEqual(result.errors, {f"{source_registry.require(PYGZ).site_name} / {PYGZ}": "RuntimeError: offline"})
 
     def test_dates_found_outside_title_div_and_not_read_from_title(self):
         items, _, undated = site_search._search_vsb(
@@ -159,7 +178,7 @@ class SiteSearchTest(unittest.TestCase):
         def fake(group, *args):
             if group[0].id == SECOND:
                 raise RuntimeError("boom")
-            return [good]
+            return site_search.SiteSearchResult([good])
 
         with patch.object(site_search, "_search_site", side_effect=fake):
             result = site_search.search([PYGZ, SECOND], "结果")
@@ -173,7 +192,7 @@ class SiteSearchTest(unittest.TestCase):
 
         def slow(*args):
             release.wait(10)
-            return []
+            return site_search.SiteSearchResult([])
 
         threading.Timer(0.2, cancel.set).start()
         started = time.monotonic()

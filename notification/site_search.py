@@ -187,7 +187,7 @@ def _columns_for(source: SourceDescriptor, known_links: Iterable[str], cancel: t
 
 
 def _search_site(sources: list[SourceDescriptor], keyword: str, pages: int,
-                 known: dict[str, list[str]], cancel: threading.Event) -> list[Notification]:
+                 known: dict[str, list[str]], cancel: threading.Event) -> SiteSearchResult:
     """同一站点的几个频道：站内检索只跑一次，结果按栏目归到频道；归不了的频道退回列表筛。"""
     first = sources[0]
     _check(cancel)
@@ -208,7 +208,7 @@ def _search_site(sources: list[SourceDescriptor], keyword: str, pages: int,
                 break
 
     columns = {s.id: _columns_for(s, known.get(s.id, ()), cancel) for s in sources} if hits is not None else {}
-    results: list[Notification] = []
+    result = SiteSearchResult([])
     for hit in hits or ():
         column = column_of(hit.link)
         owners = [s for s in sources if column in columns[s.id]]
@@ -216,14 +216,22 @@ def _search_site(sources: list[SourceDescriptor], keyword: str, pages: int,
             continue  # 站内其他没订阅的栏目
         # 父栏目和子栏目都能认领时归给更具体（栏目更少）的那个
         owner = min(owners, key=lambda s: len(columns[s.id]))
-        results.append(Notification(hit.title, hit.link, owner.id, tags=hit.tags, date=hit.date))
+        result.notifications.append(Notification(
+            hit.title, hit.link, owner.id, tags=hit.tags.union(owner.tags), date=hit.date,
+        ))
     for source in sources:
         if hits is None or not columns[source.id]:
-            results.extend(_search_list(source, keyword, pages, cancel))
-    return results
+            try:
+                result.notifications.extend(_search_list(source, keyword, pages, cancel))
+            except SearchCancelled:
+                raise
+            except Exception as error:
+                label = f"{source.site_name} / {source.id}" if source.site_name else source.id
+                result.errors[label] = f"{type(error).__name__}: {error}"
+    return result
 
 
-def _run_parallel(tasks: list[tuple[str, Callable[[], list[Notification]]]], cancel: threading.Event):
+def _run_parallel(tasks: list[tuple[str, Callable[[], SiteSearchResult]]], cancel: threading.Event):
     """用守护线程并发跑；取消时立刻返回，在途请求留给守护线程自生自灭，不拖住程序退出。"""
     pending: queue.Queue = queue.Queue()
     for task in tasks:
@@ -237,9 +245,11 @@ def _run_parallel(tasks: list[tuple[str, Callable[[], list[Notification]]]], can
             except queue.Empty:
                 return
             try:
-                done.put((key, job(), None))
+                done.put(job())
+            except SearchCancelled:
+                return
             except Exception as error:  # 单个站点失败不影响其他站点
-                done.put((key, [], error))
+                done.put(SiteSearchResult([], {key: f"{type(error).__name__}: {error}"}))
 
     for _ in range(min(_WORKERS, len(tasks))):
         threading.Thread(target=worker, name="site-search", daemon=True).start()
@@ -250,6 +260,7 @@ def _run_parallel(tasks: list[tuple[str, Callable[[], list[Notification]]]], can
             finished.append(done.get(timeout=0.1))
         except queue.Empty:
             continue
+    _check(cancel)
     return finished
 
 
@@ -258,7 +269,7 @@ def search(source_ids: Iterable[str], keyword: str, pages: int = 2, *,
            accept: Callable[[Notification], bool] | None = None,
            cancel: threading.Event | None = None) -> SiteSearchResult:
     """
-    在订阅的来源里搜 ``keyword``，合并去重、按日期倒序；失败的站点记进 errors。
+    在订阅的来源里搜 ``keyword``，合并去重、按日期倒序；失败的站点或频道记进 errors。
 
     :param known: 本地已有通知的 (来源, 链接)，用来学各频道的栏目 id，省得再抓列表。
     :param accept: 二次过滤，一般传 ``NotificationManager.satisfy_filter``，让用户的规则照样生效。
@@ -283,10 +294,9 @@ def search(source_ids: Iterable[str], keyword: str, pages: int = 2, *,
         for group in sites.values()
     ]
     merged: dict[str, Notification] = {}
-    for name, items, error in _run_parallel(tasks, cancel):
-        if error is not None:
-            result.errors[name] = f"{type(error).__name__}: {error}"
-        for notification in items:
+    for site_result in _run_parallel(tasks, cancel):
+        result.errors.update(site_result.errors)
+        for notification in site_result.notifications:
             if accept is None or accept(notification):
                 merged.setdefault(notification.link, notification)
     result.notifications = sorted(merged.values(), key=lambda n: n.date, reverse=True)

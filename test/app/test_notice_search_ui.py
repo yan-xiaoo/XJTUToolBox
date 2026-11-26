@@ -326,6 +326,38 @@ class NoticeListSearchUITest(unittest.TestCase):
         app.processEvents()
         self.assertTrue(all(not card.isHidden() for card in widget.noticeWidgets))
 
+    def test_site_search_ignores_results_after_keyword_changes(self):
+        manager = NotificationManager(["gs/pygz"])
+        notice = Notification("重修报名", "https://example.test/1", "gs/pygz")
+        for edits in (("",), ("复试",), ("", "重修")):
+            with self.subTest(edits=edits):
+                with patch.object(NoticeInterface, "load_or_create_manager", return_value=manager), \
+                     patch.object(cacheManager, "read_json", return_value=[]):
+                    widget = NoticeInterface(DummyMainWindow())
+                self.addCleanup(widget.close)
+                with patch.object(widget.siteSearchThread, "start") as start:
+                    widget.searchEdit.setText("重修")
+                    widget.onSiteSearchClicked()
+                    start.assert_called_once()
+                    for text in edits:
+                        widget.searchEdit.setText(text)
+                    widget.siteSearchThread.results.emit("重修", [notice])
+                    self.assertTrue(widget.siteResultFrame.isHidden())
+                    self.assertEqual(widget.siteResultWidgets, [])
+
+                    widget.searchEdit.setText("重修")
+                    widget.onSiteSearchClicked()
+                    start.assert_called_once()
+                    widget.siteSearchThread.hasFinished.emit()
+                    widget.siteSearchThread.finished.emit()
+                    widget.onSiteSearchClicked()
+                    self.assertEqual(start.call_count, 2)
+                    widget.siteSearchThread.results.emit("重修", [notice])
+                    widget.siteSearchThread.hasFinished.emit()
+                    widget.siteSearchThread.finished.emit()
+                    self.assertFalse(widget.siteResultFrame.isHidden())
+                    self.assertEqual([card.notice for card in widget.siteResultWidgets], [notice])
+
 
 class NoticeResponsiveGeometryTest(unittest.TestCase):
     @staticmethod

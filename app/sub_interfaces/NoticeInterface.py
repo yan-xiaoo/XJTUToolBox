@@ -133,10 +133,12 @@ class NoticeInterface(ScrollArea):
         self.processWidget.setVisible(False)
 
         # 站内搜索
+        self._siteSearchKeyword: str | None = None
+        self._siteSearchInProgress = False
         self.siteSearchThread = SiteSearchThread(self)
         self.siteSearchThread.results.connect(self.onSiteSearchResults)
-        self.siteSearchThread.error.connect(self.onThreadError)
-        self.siteSearchThread.finished.connect(self.unlock)
+        self.siteSearchThread.error.connect(self.onSiteSearchError)
+        self.siteSearchThread.finished.connect(self.onSiteSearchFinished)
         self.siteSearchProcess = ProcessWidget(self.siteSearchThread, self, stoppable=True)
         self.siteSearchProcess.setMaximumWidth(760)
         self.siteSearchProcess.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -376,6 +378,9 @@ class NoticeInterface(ScrollArea):
 
     @pyqtSlot(str)
     def onNoticeSearchChanged(self, query: str) -> None:
+        self._siteSearchKeyword = None
+        if not self.siteResultFrame.isHidden():
+            self.closeSiteResults()
         ranked = rank_items(self.notices, query, self._noticeSearchValues)
         matched_ids = {id(notice) for notice in ranked}
         for widget in self.noticeWidgets:
@@ -385,9 +390,6 @@ class NoticeInterface(ScrollArea):
             self.searchResultLabel.setVisible(True)
         else:
             self.searchResultLabel.setVisible(False)
-            # 清空搜索框即回到已获取的通知
-            if self.siteResultFrame.isVisible():
-                self.closeSiteResults()
 
     @pyqtSlot()
     def onSiteSearchClicked(self):
@@ -402,8 +404,10 @@ class NoticeInterface(ScrollArea):
         if not self.noticeManager.subscription:
             self.error(self.tr("没有可搜索的网站"), self.tr("请先添加通知配置"), parent=self)
             return
-        if self.siteSearchThread.isRunning() or self.noticeThread.isRunning():
+        if self._siteSearchInProgress or self.noticeThread.isRunning():
             return
+        self._siteSearchInProgress = True
+        self._siteSearchKeyword = keyword
         self.siteSearchThread.keyword = keyword
         self.siteSearchThread.source_ids = list(self.noticeManager.subscription)
         self.siteSearchThread.known = [(notice.source, notice.link) for notice in self.notices]
@@ -412,8 +416,22 @@ class NoticeInterface(ScrollArea):
         self.lock()
         self.siteSearchThread.start()
 
+    @pyqtSlot()
+    def onSiteSearchFinished(self):
+        self._siteSearchKeyword = None
+        self._siteSearchInProgress = False
+        self.unlock()
+
+    @pyqtSlot(str, str)
+    def onSiteSearchError(self, title, message):
+        if self._siteSearchKeyword is not None:
+            self.onThreadError(title, message)
+
     @pyqtSlot(str, list)
     def onSiteSearchResults(self, keyword, notices):
+        if keyword != self._siteSearchKeyword:
+            return
+        self._siteSearchKeyword = None
         for widget in self.siteResultWidgets:
             self.siteResultLayout.removeWidget(widget)
             widget.deleteLater()
@@ -440,6 +458,7 @@ class NoticeInterface(ScrollArea):
 
     @pyqtSlot()
     def closeSiteResults(self):
+        self._siteSearchKeyword = None
         self.siteResultFrame.setVisible(False)
         if not self.noticeManager.subscription:
             self.switchTo(self.startFrame)

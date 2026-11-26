@@ -50,7 +50,7 @@ class SiteSearchThread(ProcessThread):
             failed = list(result.errors.items())
             details = "\n".join(f"{source}: {error}" for source, error in failed[:3])
             if len(failed) > 3:
-                details += self.tr("\n另有 {count} 个网站失败").format(count=len(failed) - 3)
-            self.error.emit(self.tr("部分网站搜索失败"), details)
+                details += self.tr("\n另有 {count} 个来源失败").format(count=len(failed) - 3)
+            self.error.emit(self.tr("部分来源搜索失败"), details)
         self.results.emit(keyword, result.notifications)
         self.hasFinished.emit()
