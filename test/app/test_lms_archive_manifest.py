@@ -200,6 +200,20 @@ class ArchiveTest(unittest.TestCase):
             self.assertFalse(any(ord(c) < 32 for c in cleaned))
             self.assertTrue(cleaned.endswith(".pdf"))
 
+    def test_plain_batch_keeps_long_filename_extension_and_duplicate_suffix(self):
+        batch = self.batch(archive=False)
+        name = "a" * 160 + ".pdf"
+        batch._collect_all = lambda: [
+            ("https://example.invalid/one", name, "A", "activity"),
+            ("https://example.invalid/two", name, "B", "activity"),
+        ]
+        batch.run()
+        self.assertEqual(batch._success_count, 2)
+        self.assertEqual({path.name for path in self.root.iterdir()}, {
+            "a" * 156 + ".pdf",
+            "a" * 154 + "_2.pdf",
+        })
+
     def test_missing_attachment_url_is_partial_not_complete(self):
         batch = self.batch()
         batch._collect_all = lambda: LMSBatchDownloadThread._collect_all(batch)

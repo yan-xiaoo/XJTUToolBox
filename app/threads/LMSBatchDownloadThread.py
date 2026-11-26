@@ -18,6 +18,7 @@ from lms.archive_manifest import ArchiveManifest
 
 
 logger = logging.getLogger("default")
+MAX_FILENAME_LENGTH = 160
 
 
 class _DownloadJob:
@@ -224,15 +225,18 @@ class LMSBatchDownloadThread(ProgressBarThread):
         return files
 
     @staticmethod
-    def _sanitize_filename(name: str) -> str:
+    def _sanitize_filename(name: str, suffix: str = "") -> str:
         """清理文件名中的非法字符。"""
         cleaned = re.sub(r'[\x00-\x1f\\/:*?"<>|]+', "_", name)
-        cleaned = cleaned.strip().strip(".")
-        cleaned = cleaned[:160].rstrip(". ") or "file"
+        cleaned = cleaned.strip(" .") or "file"
         if cleaned.split(".", 1)[0].upper() in {"CON", "PRN", "AUX", "NUL",
                 *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
             cleaned = "_" + cleaned
-        return cleaned
+        stem, extension = os.path.splitext(cleaned)
+        available = MAX_FILENAME_LENGTH - len(suffix)
+        extension = extension[:available - 1].rstrip(". ")
+        stem = stem[:available - len(extension)].rstrip(". ") or "_"
+        return stem + suffix + extension
 
     def _output_path(self, file_name: str, safe_activity_title: str) -> str:
         """根据布局模式构建输出路径。
@@ -364,11 +368,11 @@ class LMSBatchDownloadThread(ProgressBarThread):
         reserved = set()
         for url, fn, label, safe_title in files:
             path = self._output_path(fn, safe_title)
-            original, ext = os.path.splitext(path)
+            directory, name = os.path.split(path)
             suffix = 1
             while os.path.normcase(path).casefold() in reserved or (self._archive and os.path.exists(path)):
                 suffix += 1
-                path = f"{original}_{suffix}{ext}"
+                path = os.path.join(directory, self._sanitize_filename(name, f"_{suffix}"))
             reserved.add(os.path.normcase(path).casefold())
             job = _DownloadJob(url, path, label, self._session)
             if self._archive:
