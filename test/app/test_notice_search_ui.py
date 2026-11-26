@@ -8,7 +8,9 @@ import sys
 import tempfile
 import time
 import unittest
+from importlib import import_module
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -357,6 +359,45 @@ class NoticeListSearchUITest(unittest.TestCase):
                     widget.siteSearchThread.finished.emit()
                     self.assertFalse(widget.siteResultFrame.isHidden())
                     self.assertEqual([card.notice for card in widget.siteResultWidgets], [notice])
+
+    def test_cancel_discards_results_queued_by_finished_site_search(self):
+        from notification.site_search import SiteSearchResult
+
+        entered, release = Event(), Event()
+        notice = Notification("重修报名", "https://example.test/1", "gs/pygz")
+        thread_module = import_module("app.threads.SiteSearchThread")
+
+        def search(*args, **kwargs):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("test did not release the worker")
+            return SiteSearchResult([notice])
+
+        with (patch.object(NoticeInterface, "load_or_create_manager",
+                           return_value=NotificationManager(["gs/pygz"])),
+              patch.object(cacheManager, "read_json", return_value=[]),
+              patch.object(thread_module, "search", side_effect=search)):
+            widget = NoticeInterface(DummyMainWindow())
+            self.addCleanup(widget.close)
+            widget.show()
+            widget.searchEdit.setText("重修")
+            widget.onSiteSearchClicked()
+            try:
+                self.assertTrue(entered.wait(3))
+                app.processEvents()
+                release.set()
+                self.assertTrue(widget.siteSearchThread.wait(3000))
+                self.assertTrue(widget.siteResultFrame.isHidden())
+                self.assertTrue(widget.siteSearchProcess.stopButton.isEnabled())
+                widget.siteSearchProcess.stopButton.click()
+                self.assertTrue(widget.siteSearchProcess.stopped)
+                app.processEvents()
+                self.assertTrue(widget.siteResultFrame.isHidden(), widget.siteResultLabel.text())
+                self.assertEqual(widget.siteResultWidgets, [])
+                self.assertTrue(widget.siteSearchAction.isEnabled())
+            finally:
+                release.set()
+                widget.siteSearchThread.wait(5000)
 
 
 class NoticeResponsiveGeometryTest(unittest.TestCase):

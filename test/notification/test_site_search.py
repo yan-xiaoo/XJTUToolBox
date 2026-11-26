@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import quote
 
+from requests import Timeout
+
 from notification import Notification, NotificationManager
 from notification import site_search
 from notification.filter import TagIncludeFilter, TitleExcludeFilter
@@ -171,6 +173,25 @@ class SiteSearchTest(unittest.TestCase):
         self.session.results = "<ul><li><a href='info/1146/1.htm'>没有日期的重修通知</a></li></ul>"
         result = site_search.search([PYGZ], "重修", pages=1)
         self.assertEqual([n.title for n in result.notifications], ["重修列表里的通知"])
+
+    def test_second_page_timeout_keeps_first_page_results(self):
+        class SecondPageTimeout(FakeSession):
+            def get(self, url, timeout=None):
+                if "currentnum=2" in url:
+                    raise Timeout("second page timed out")
+                return super().get(url, timeout)
+
+        first_page = RESULTS.replace("</body>", '<a href="?currentnum=2">next</a></body>')
+        known = [(PYGZ, "https://gs.xjtu.edu.cn/info/1146/8.htm")]
+        manager = NotificationManager([PYGZ], {PYGZ: [Ruleset(TagIncludeFilter("培养工作"))]})
+        with patch.object(site_search, "_session_for", return_value=SecondPageTimeout(results=first_page)):
+            result = site_search.search(manager.subscription, "重修", pages=2, known=known,
+                                        accept=manager.satisfy_filter)
+
+        self.assertEqual([(n.source, n.link) for n in result.notifications],
+                         [(PYGZ, "https://gs.xjtu.edu.cn/info/1146/2.htm")])
+        label = f"{source_registry.require(PYGZ).site_name} / 第 2 页"
+        self.assertEqual(result.errors, {label: "Timeout: second page timed out"})
 
     def test_one_failing_site_does_not_hide_others(self):
         good = _notice(PYGZ, "https://gs.xjtu.edu.cn/info/1146/1.htm")

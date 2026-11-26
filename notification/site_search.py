@@ -193,12 +193,22 @@ def _search_site(sources: list[SourceDescriptor], keyword: str, pages: int,
     _check(cancel)
     session = _session_for(first) if first.crawler == "generic" else None
     action = _action_for(session, first, cancel) if session is not None else None
+    result = SiteSearchResult([])
     hits: list[Notification] | None = None
     if action is not None:
         hits = []
         for page in range(1, max(1, pages) + 1):
             _check(cancel)
-            items, has_more, undated = _search_vsb(session, first, action, keyword, page)
+            try:
+                items, has_more, undated = _search_vsb(session, first, action, keyword, page)
+            except SearchCancelled:
+                raise
+            except Exception as error:
+                if page == 1:
+                    raise
+                label = f"{first.site_name or first.id} / 第 {page} 页"
+                result.errors[label] = f"{type(error).__name__}: {error}"
+                break
             # 这个站的检索结果不带完整日期：没法按时间排，改用列表本地筛
             if page == 1 and not items and undated > 0:
                 hits = None
@@ -208,7 +218,6 @@ def _search_site(sources: list[SourceDescriptor], keyword: str, pages: int,
                 break
 
     columns = {s.id: _columns_for(s, known.get(s.id, ()), cancel) for s in sources} if hits is not None else {}
-    result = SiteSearchResult([])
     for hit in hits or ():
         column = column_of(hit.link)
         owners = [s for s in sources if column in columns[s.id]]

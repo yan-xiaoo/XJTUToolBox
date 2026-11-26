@@ -140,6 +140,7 @@ class NoticeInterface(ScrollArea):
         self.siteSearchThread.error.connect(self.onSiteSearchError)
         self.siteSearchThread.finished.connect(self.onSiteSearchFinished)
         self.siteSearchProcess = ProcessWidget(self.siteSearchThread, self, stoppable=True)
+        self.siteSearchProcess.stop.connect(self.onSiteSearchCanceled)
         self.siteSearchProcess.setMaximumWidth(760)
         self.siteSearchProcess.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.vBoxLayout.addWidget(self.siteSearchProcess, alignment=Qt.AlignTop)
@@ -415,6 +416,10 @@ class NoticeInterface(ScrollArea):
         self.siteSearchProcess.setVisible(True)
         self.lock()
         self.siteSearchThread.start()
+
+    @pyqtSlot()
+    def onSiteSearchCanceled(self):
+        self._siteSearchKeyword = None
 
     @pyqtSlot()
     def onSiteSearchFinished(self):
