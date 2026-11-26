@@ -214,6 +214,24 @@ class ArchiveTest(unittest.TestCase):
             "a" * 154 + "_2.pdf",
         })
 
+    def test_plain_batch_fits_multibyte_duplicate_in_directory_byte_limit(self):
+        batch = self.batch(archive=False)
+        name = "课" * 83 + "ab.pdf"
+        self.assertEqual(len(os.fsencode(name)), 255)
+        batch._collect_all = lambda: [
+            ("https://example.invalid/one", name, "A", "activity"),
+            ("https://example.invalid/two", name, "B", "activity"),
+        ]
+        with patch.object(os, "pathconf", return_value=255, create=True) as pathconf:
+            batch.run()
+
+        pathconf.assert_called_with(str(self.root), "PC_NAME_MAX")
+        self.assertEqual((batch._success_count, batch._fail_count), (2, 0))
+        self.assertEqual({path.name for path in self.root.iterdir()}, {
+            name,
+            "课" * 83 + "_2.pdf",
+        })
+
     def test_missing_attachment_url_is_partial_not_complete(self):
         batch = self.batch()
         batch._collect_all = lambda: LMSBatchDownloadThread._collect_all(batch)

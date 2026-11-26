@@ -21,6 +21,22 @@ logger = logging.getLogger("default")
 MAX_FILENAME_LENGTH = 160
 
 
+def _filename_byte_limit(directory: str) -> int | None:
+    if not hasattr(os, "pathconf"):
+        return None
+    try:
+        limit = os.pathconf(directory, "PC_NAME_MAX")
+    except (OSError, ValueError):
+        return 255
+    return limit if limit > 0 else None
+
+
+def _truncate_to_bytes(name: str, limit: int) -> str:
+    while name and len(os.fsencode(name)) > limit:
+        name = name[:-1]
+    return name
+
+
 class _DownloadJob:
     """单个下载任务的描述。"""
     def __init__(self, url: str, output_path: str, file_label: str, session):
@@ -225,7 +241,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
         return files
 
     @staticmethod
-    def _sanitize_filename(name: str, suffix: str = "") -> str:
+    def _sanitize_filename(name: str, suffix: str = "", *, byte_limit: int | None = None) -> str:
         """清理文件名中的非法字符。"""
         cleaned = re.sub(r'[\x00-\x1f\\/:*?"<>|]+', "_", name)
         cleaned = cleaned.strip(" .") or "file"
@@ -234,23 +250,27 @@ class LMSBatchDownloadThread(ProgressBarThread):
             cleaned = "_" + cleaned
         stem, extension = os.path.splitext(cleaned)
         available = MAX_FILENAME_LENGTH - len(suffix)
-        extension = extension[:available - 1].rstrip(". ")
-        stem = stem[:available - len(extension)].rstrip(". ") or "_"
+        extension = extension[:available - 1]
+        if byte_limit is not None:
+            byte_budget = byte_limit - len(os.fsencode(suffix))
+            extension = _truncate_to_bytes(extension, byte_budget - 1)
+        extension = extension.rstrip(". ")
+        stem = stem[:available - len(extension)]
+        if byte_limit is not None:
+            stem = _truncate_to_bytes(stem, byte_budget - len(os.fsencode(extension)))
+        stem = stem.rstrip(". ") or "_"
         return stem + suffix + extension
 
-    def _output_path(self, file_name: str, safe_activity_title: str) -> str:
-        """根据布局模式构建输出路径。
-
-        :param file_name: 文件名。
-        :param safe_activity_title: 已清理非法字符的活动标题。
-        :return: 完整的输出文件绝对路径。
-        """
-        safe = self._sanitize_filename(file_name)
+    def _output_directory(self, safe_activity_title: str) -> str:
+        """获取附件目录，按需创建活动子目录。"""
         if self._layout_mode == "hierarchical":
-            sub = os.path.join(self._target_dir, safe_activity_title)
+            title = self._sanitize_filename(
+                safe_activity_title, byte_limit=_filename_byte_limit(self._target_dir)
+            )
+            sub = os.path.join(self._target_dir, title)
             os.makedirs(sub, exist_ok=True)
-            return os.path.join(sub, safe)
-        return os.path.join(self._target_dir, safe)
+            return sub
+        return self._target_dir
 
     @staticmethod
     def _collection_failure(failures, source, reason):
@@ -367,12 +387,14 @@ class LMSBatchDownloadThread(ProgressBarThread):
 
         reserved = set()
         for url, fn, label, safe_title in files:
-            path = self._output_path(fn, safe_title)
-            directory, name = os.path.split(path)
+            directory = self._output_directory(safe_title)
+            byte_limit = _filename_byte_limit(directory)
+            path = os.path.join(directory, self._sanitize_filename(fn, byte_limit=byte_limit))
             suffix = 1
             while os.path.normcase(path).casefold() in reserved or (self._archive and os.path.exists(path)):
                 suffix += 1
-                path = os.path.join(directory, self._sanitize_filename(name, f"_{suffix}"))
+                name = self._sanitize_filename(fn, f"_{suffix}", byte_limit=byte_limit)
+                path = os.path.join(directory, name)
             reserved.add(os.path.normcase(path).casefold())
             job = _DownloadJob(url, path, label, self._session)
             if self._archive:
