@@ -136,8 +136,13 @@ SMOKE = textwrap.dedent(r"""
         color = frame.pixelColor(frame.rect().center())
         return color.blue() > 100 and color.blue() > max(color.red(), color.green()) + 50
 
-    def check_playing(label):
+    def check_playing(label, previous_position=None):
         start = player.position()
+        # Allow one frame of backend rounding, but catch a reset during reparenting.
+        if previous_position is not None:
+            assert start >= previous_position - 50, (
+                f'{label}: playback moved backwards from {previous_position} to {start} ms'
+            )
         deadline = monotonic() + 5
         while monotonic() < deadline:
             if player.position() > start + 75 and blue_frame_is_visible():
@@ -153,16 +158,18 @@ SMOKE = textwrap.dedent(r"""
         page.setReplayVideo({'download_url': QUrl.fromLocalFile(sys.argv[1]).toString(),
                              'label': 'control'}, 'local test')
         check_playing('embedded')
+        before_full_screen = player.position()
         page.toggleFullScreen()
         dialog = page.fullScreenDialog
         transition = dialog.transitionAnimation
         transition.setCurrentTime(transition.duration())
         assert dialog.isFullScreen() and view.player is player
-        check_playing('full_screen')
+        check_playing('full_screen', before_full_screen)
+        before_restore = player.position()
         dialog.reject()
         transition.setCurrentTime(transition.duration())
         assert page.fullScreenDialog is None and view.player is player
-        check_playing('embedded_again')
+        check_playing('embedded_again', before_restore)
         print('PLAYBACK_SMOKE_RESULT=' + json.dumps({
             'platform': app.platformName(), 'stages': stages,
         }), flush=True)
