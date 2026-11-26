@@ -1008,7 +1008,7 @@ class AIInterfaceSmokeTest(unittest.TestCase):
             app.processEvents()
 
     def test_all_selected_cache_context_reaches_final_provider_messages(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(prefix='cache-#-') as directory:
             root = Path(directory)
             notice = root / "notification.json"
             notice.write_text(json.dumps([{
