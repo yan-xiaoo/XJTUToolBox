@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import unittest
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -56,7 +57,57 @@ class ControlledJudgeThread(JudgeThread):
 
 
 def questionnaire(name):
-    return SimpleNamespace(display_title=name, display_description="测试问卷")
+    return SimpleNamespace(display_title=name, display_description="测试问卷", deadline=None)
+
+
+class JudgeCardDeadlineTest(unittest.TestCase):
+    def card(self, days=None, finished=False):
+        today = date(2026, 11, 24)
+        clock = Mock()
+        clock.today.return_value = today
+        with patch.object(auto_judge, "date", clock, create=True):
+            card = auto_judge.JudgeCard(
+                SimpleNamespace(deadline=today + timedelta(days=days) if days is not None else None),
+                "课程 教师", "计划 · CODE · 学院", SimpleNamespace(thread_=None), finished,
+            )
+        self.addCleanup(card.deleteLater)
+        return card
+
+    def test_deadline_is_appended_beside_the_existing_description(self):
+        card = self.card(5)
+        self.assertIsNotNone(getattr(card, "deadlineLabel", None))
+        self.assertEqual(card.deadlineLabel.text(), "2026-11-29截止 · 剩余5天")
+        self.assertFalse(card.deadlineLabel.isHidden())
+        self.assertEqual(card.contentLabel.text(), "计划 · CODE · 学院")
+
+    def test_only_deadlines_within_seven_days_are_red(self):
+        for days, urgent in ((0, True), (6, True), (7, False), (8, False), (-1, False)):
+            with self.subTest(days=days):
+                card = self.card(days)
+                self.assertIsNotNone(getattr(card, "deadlineLabel", None))
+                remaining = f"剩余{days}天" if days >= 0 else "已截止"
+                self.assertTrue(card.deadlineLabel.text().endswith(f"截止 · {remaining}"))
+                for color in (card.deadlineLabel.lightColor, card.deadlineLabel.darkColor):
+                    self.assertEqual(color.red() > color.green(), urgent)
+                    self.assertEqual(color.red() > color.blue(), urgent)
+
+    def test_no_deadline_has_no_extra_label(self):
+        card = self.card()
+        self.assertIsNotNone(getattr(card, "deadlineLabel", None))
+        self.assertTrue(card.deadlineLabel.isHidden())
+
+    def test_finished_questionnaire_has_no_deadline_warning(self):
+        card = self.card(5, finished=True)
+        self.assertIsNotNone(getattr(card, "deadlineLabel", None))
+        self.assertEqual(card.deadlineLabel.lightColor.red(), card.deadlineLabel.lightColor.green())
+
+    def test_completing_questionnaire_clears_the_warning(self):
+        card = self.card(5)
+        self.assertIsNotNone(getattr(card, "deadlineLabel", None))
+        with patch.object(auto_judge, "date") as clock:
+            clock.today.return_value = date(2026, 11, 24)
+            card.setFinished(True)
+        self.assertEqual(card.deadlineLabel.lightColor.red(), card.deadlineLabel.lightColor.green())
 
 
 class AutoJudgeRefreshTest(unittest.TestCase):
