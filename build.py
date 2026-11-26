@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+import os
 import sys
 from PyInstaller.__main__ import run
 
-def main():
+def main() -> None:
+    """按平台打包应用，并为 macOS 配置 Sparkle 与最终签名。"""
     # 确定当前操作系统
     system = sys.platform
     # Windows 使用分号 ; 作为路径分隔符，Unix/Linux/macOS 使用冒号 :
@@ -29,11 +33,20 @@ def main():
         app_args.append('--hidden-import=plyer.platforms.win.notification')
     elif system == 'darwin':
         app_args.append('--hidden-import=plyer.platforms.macosx.notification')
+        app_args.extend(['--hidden-import=objc', '--hidden-import=Foundation', '--hidden-import=AppKit'])
+        # 提前失败，避免产出没有公钥、无法更新的发行包。
+        from scripts.sparkle_common import validate_public_key
+        validate_public_key(os.environ['SPARKLE_PUBLIC_KEY'])
+        if not os.environ.get('MACOS_BUILD_NUMBER', '').isdecimal():
+            raise ValueError('Set MACOS_BUILD_NUMBER to a positive, increasing integer')
     elif system == 'linux':
         app_args.append('--hidden-import=plyer.platforms.linux.notification')
 
     print(">>> 开始打包主程序...")
     run(app_args)
+    if system == 'darwin':
+        from scripts.sparkle_build import configure_bundle
+        configure_bundle()
 
     # 2. (仅 Windows) 打包更新程序 updater.py
     # 对应命令: pyinstaller -F --distpath ./dist/XJTUToolbox ... updater.py

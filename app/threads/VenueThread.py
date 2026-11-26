@@ -41,10 +41,12 @@ class VenueThread(ProcessThread):
         self.date_str: str = ""
         self._selections: list[tuple[int, int]] = []  # [(area_id, stock_id)]
         self._order_id: str = ""
+        # 本次任务使用的账户快照，由 run() 在任务开始时设置
+        self.account = None
 
     @property
     def session(self):
-        return accounts.current.session_manager.get_session("venue")
+        return self.account.session_manager.get_session("venue")
 
     def _ensure_idle(self) -> bool:
         """线程空闲才允许启动新任务，避免 QThread 重入崩溃。"""
@@ -92,8 +94,9 @@ class VenueThread(ProcessThread):
 
     def run(self):
         self.can_run = True
-        acc = accounts.current
-        if acc is None:
+        # 任务开始时快照账户，后续 session/登录统一使用它，避免中途被移除或切换后混用
+        self.account = accounts.current
+        if self.account is None:
             self.error.emit(self.tr("未登录"), self.tr("请先添加一个账户"))
             self.canceled.emit()
             return
@@ -109,9 +112,9 @@ class VenueThread(ProcessThread):
                 # 查询类操作需要登录
                 self.messageChanged.emit(self.tr("正在登录…"))
                 self.session.ensure_login(
-                    acc.username, acc.password,
-                    account=acc,
-                    mfa_provider=acc.session_manager.mfa_provider,
+                    self.account.username, self.account.password,
+                    account=self.account,
+                    mfa_provider=self.account.session_manager.mfa_provider,
                 )
                 if aborted():
                     self.canceled.emit()

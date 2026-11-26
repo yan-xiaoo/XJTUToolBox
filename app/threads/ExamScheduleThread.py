@@ -6,7 +6,7 @@ from jwxt.schedule import Schedule
 from .ProcessWidget import ProcessThread
 from ..sessions.jwxt_session import JWXTSession
 from ..utils import logger
-from ..utils.account import accounts
+from ..utils.account import accounts, request_mfa
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
 from ..utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 
@@ -28,13 +28,15 @@ class ExamScheduleThread(ProcessThread):
         super().__init__(parent)
         self.util = None
         self.term_number = term_number
+        # 本次任务使用的账户快照，由 run() 在任务开始时设置
+        self.account = None
 
     @property
     def session(self) -> JWXTSession:
         """
-        获取当前账户用于访问教务系统的 session
+        获取任务账户用于访问教务系统的 session
         """
-        return accounts.current.session_manager.get_session("jwxt")
+        return self.account.session_manager.get_session("jwxt")
 
     def login(self):
         """
@@ -43,10 +45,10 @@ class ExamScheduleThread(ProcessThread):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录教务系统..."))
         self.session.ensure_login(
-            accounts.current.username,
-            accounts.current.password,
-            account=accounts.current,
-            mfa_provider=accounts.current.session_manager.mfa_provider,
+            self.account.username,
+            self.account.password,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
         )
 
         if not self.can_run:
@@ -61,8 +63,10 @@ class ExamScheduleThread(ProcessThread):
     def run(self):
         # 强制重置可运行状态
         self.can_run = True
+        # 任务开始时快照账户，后续 session/登录/错误处理统一使用它，避免中途被移除或切换后混用
+        self.account = accounts.current
         # 判断当前是否存在账户
-        if accounts.current is None:
+        if self.account is None:
             self.error.emit(self.tr("未登录"), self.tr("请先添加一个账户"))
             self.canceled.emit()
             return
@@ -99,7 +103,7 @@ class ExamScheduleThread(ProcessThread):
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:
                 self.error.emit(self.tr("登录问题"), self.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"))
-                accounts.current.MFASignal.emit(True)
+                request_mfa(self.account)
             else:
                 self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()

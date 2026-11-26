@@ -6,7 +6,7 @@ from PyQt5.QtCore import pyqtSignal
 from auth import ServerError
 from lms import LMSUtil
 from .ProcessWidget import ProcessThread
-from ..utils import accounts, logger
+from ..utils import accounts, logger, request_mfa
 from ..utils.mfa import MFACancelledError, MFAUnavailableError
 from ..utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 
@@ -33,19 +33,21 @@ class LMSThread(ProcessThread):
         self.action = LMSAction.LOAD_COURSES
         self.course_id: int | None = None
         self.activity_id: int | None = None
+        # 本次任务使用的账户快照，由 run() 在任务开始时设置
+        self.account = None
 
     @property
     def session(self):
-        return accounts.current.session_manager.get_session("lms")
+        return self.account.session_manager.get_session("lms")
 
     def login(self):
         self.setIndeterminate.emit(True)
         self.messageChanged.emit(self.tr("正在登录思源学堂..."))
         self.session.ensure_login(
-            accounts.current.username,
-            accounts.current.password,
-            account=accounts.current,
-            mfa_provider=accounts.current.session_manager.mfa_provider,
+            self.account.username,
+            self.account.password,
+            account=self.account,
+            mfa_provider=self.account.session_manager.mfa_provider,
         )
         if not self.can_run:
             return False
@@ -65,7 +67,9 @@ class LMSThread(ProcessThread):
         :return: 无返回值。结果通过 Qt 信号异步发回 UI 层。
         """
         self.can_run = True
-        if accounts.current is None:
+        # 任务开始时快照账户，后续 session/登录/错误处理统一使用它，避免中途被移除或切换后混用
+        self.account = accounts.current
+        if self.account is None:
             self.error.emit(self.tr("未登录"), self.tr("请先添加一个账户"))
             self.canceled.emit()
             return
@@ -134,7 +138,7 @@ class LMSThread(ProcessThread):
             logger.error("服务器错误", exc_info=True)
             if e.code == 102:
                 self.error.emit(self.tr("登录问题"), self.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"))
-                accounts.current.MFASignal.emit(True)
+                request_mfa(self.account)
             else:
                 self.error.emit(self.tr("服务器错误"), e.message)
             self.canceled.emit()

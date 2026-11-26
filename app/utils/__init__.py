@@ -1,6 +1,6 @@
 from .config import cfg, DEFAULT_CONFIG_PATH
 from .session_manager import SessionManager
-from .account import accounts, Account, AccountManager, DEFAULT_ACCOUNT_PATH
+from .account import accounts, Account, AccountManager, DEFAULT_ACCOUNT_PATH, request_mfa
 from .cache import DataManager, AccountDataManager
 from .style_sheet import StyleSheet, Color
 from .icons import MyFluentIcon

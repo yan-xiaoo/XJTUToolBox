@@ -9,7 +9,7 @@ import requests
 
 from auth import ServerError
 from app.threads.ProcessWidget import ProcessThread
-from app.utils import accounts, logger
+from app.utils import accounts, logger, request_mfa
 from app.utils.mfa import MFACancelledError, MFAUnavailableError
 from app.utils.qrcode_login import QRCodeLoginCancelledError, QRCodeLoginUnavailableError
 
@@ -82,8 +82,7 @@ def run_campus_job(
                 thread.tr("登录问题"),
                 thread.tr("需要进行两步验证，请前往账户界面，选择对应账户进行验证。"),
             )
-            if account is not None:
-                account.MFASignal.emit(True)
+            request_mfa(account)
         else:
             thread.error.emit(thread.tr("服务器错误"), e.message)
         thread.canceled.emit()
