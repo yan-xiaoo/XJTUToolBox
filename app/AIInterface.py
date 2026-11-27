@@ -66,6 +66,7 @@ from ai_assistant import (
     collect_local_context,
 )
 from ai_assistant.markdown_render import render_markdown_fragment
+from ai_assistant.ss_tool import ACTIVITY_TOOL, make_activity_runner
 from ai_assistant.web_search import format_search_context
 
 
@@ -88,6 +89,7 @@ class _AIRequestThread(QThread):
     webSearchDisabled = pyqtSignal(object)
     cancelled = pyqtSignal()
     stageChanged = pyqtSignal(str)
+    MAX_TOOL_ROUNDS = 6
 
     def __init__(
         self,
@@ -98,6 +100,7 @@ class _AIRequestThread(QThread):
         search_settings=None,
         local_context="",
         session_id="",
+        tool_runner=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -107,6 +110,7 @@ class _AIRequestThread(QThread):
         self.search_settings = search_settings
         self.local_context = local_context
         self.session_id = session_id
+        self.tool_runner = tool_runner
         self.cancel_event = threading.Event()
         self.ai_client = AIClient(timeout=(15, 120))
         self.search_client = WebSearchClient(timeout=(10, 20))
@@ -137,7 +141,7 @@ class _AIRequestThread(QThread):
             self.stageChanged.emit("thinking")
             insertion = 1 if messages and messages[0].role == "system" else 0
             messages[insertion:insertion] = context_messages
-            result = self.ai_client.complete(messages, self.config)
+            result = self._complete(messages)
             if self.cancel_event.is_set():
                 self.cancelled.emit()
                 return
@@ -158,6 +162,23 @@ class _AIRequestThread(QThread):
                 self.failed.emit(_AIRequestFailure(str(error) or type(error).__name__, self.session_id))
         else:
             self.succeeded.emit(_AIRequestOutcome(result, search_count, self.session_id))
+
+    def _complete(self, messages):
+        """有工具时循环：模型调工具 → 回填结果 → 再问，直到给出文字回答。工具往返只留在本次请求里。"""
+        if self.tool_runner is None:
+            return self.ai_client.complete(messages, self.config)
+        for _ in range(self.MAX_TOOL_ROUNDS):
+            result = self.ai_client.complete(messages, self.config, tools=(ACTIVITY_TOOL,))
+            if not result.tool_calls or self.cancel_event.is_set():
+                return result
+            self.stageChanged.emit("tools")
+            messages.append(ChatMessage("assistant", result.text, tool_calls=result.tool_calls))
+            for call in result.tool_calls:
+                if self.cancel_event.is_set():
+                    return result
+                messages.append(ChatMessage("tool", self.tool_runner(call) or "（无结果）", tool_call_id=call.id))
+            self.stageChanged.emit("thinking")
+        return replace(result, text=result.text or "工具调用轮数已达上限，请把问题说得更具体后重试。")
 
 
 class _ModelListThread(QThread):
@@ -1005,6 +1026,26 @@ class AIInterface(QFrame):
             account_directory=account_directory,
         )
 
+    @staticmethod
+    def _ssSessionFactory():
+        """发送时快照当前账户，工作线程里按需登录智慧社区。"""
+        from app.utils import accounts
+        account = accounts.current
+
+        def factory():
+            if account is None:
+                raise RuntimeError("还没有添加账户，请先在「账户」页登录")
+            session = account.session_manager.get_session("ss")
+            session.ensure_login(
+                account.username,
+                account.password,
+                account=account,
+                mfa_provider=account.session_manager.mfa_provider,
+            )
+            return session
+
+        return factory
+
     @pyqtSlot()
     def sendMessage(self) -> None:
         self._sendMessageFrom(self.inputEdit)
@@ -1079,13 +1120,22 @@ class AIInterface(QFrame):
                 "endpoint": self.profile.search_endpoint,
                 "limit": self.profile.search_result_limit,
             }
+        context_text, tool_runner = local_context.text, None
+        if "ss_activity" in self.profile.capability_ids:
+            if config.protocol in {"openai", "anthropic"}:
+                tool_runner = make_activity_runner(self._ssSessionFactory())
+                note = "可调用 activity 工具查询智慧社区活动；报名、取消报名前必须先 detail 核对，并得到用户明确同意。"
+            else:
+                note = "用户开启了「活动报名」，但当前协议不支持工具调用；请告诉用户切换到 OpenAI 或 Anthropic 协议后再查。"
+            context_text = f"{context_text}\n\n{note}".strip()
         thread = _AIRequestThread(
             request_messages,
             config,
             search_query=content,
             search_settings=search_settings,
-            local_context=local_context.text,
+            local_context=context_text,
             session_id=session.id,
+            tool_runner=tool_runner,
             parent=self,
         )
         self.requestThread = thread
@@ -1130,6 +1180,7 @@ class AIInterface(QFrame):
         labels = {
             "searching": "正在联网搜索",
             "thinking": "模型正在思考",
+            "tools": "正在查询智慧社区",
             "stuck": "等待较久，模型可能繁忙或连接受阻",
             "cancelling": "正在取消",
         }
@@ -1310,10 +1361,11 @@ class AIInterface(QFrame):
                 f'<div class="message {role_class}"><div class="speaker">{speaker}</div>'
                 f'{render_markdown_fragment(message.content, dark=dark)}{meta}</div>'
             )
-        if self._requestState in {"searching", "thinking", "stuck", "cancelling"}:
+        if self._requestState in {"searching", "thinking", "tools", "stuck", "cancelling"}:
             labels = {
                 "searching": "正在联网搜索",
                 "thinking": "模型正在思考",
+                "tools": "正在查询智慧社区",
                 "stuck": "等待较久，可能是模型繁忙、网络受阻或服务卡住",
                 "cancelling": "正在取消请求",
             }
