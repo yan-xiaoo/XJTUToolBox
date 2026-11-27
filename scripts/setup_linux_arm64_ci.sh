@@ -3,8 +3,9 @@ set -euo pipefail
 
 test "$(uname -m)" = "aarch64"
 bash scripts/apt_install.sh build-essential qtbase5-dev qt5-qmake \
-  qtmultimedia5-dev libqt5svg5-dev libqt5x11extras5-dev \
-  libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0
+  qtmultimedia5-dev libqt5multimedia5-plugins libqt5svg5-dev libqt5x11extras5-dev \
+  libegl1 libgl1 libpulse-mainloop-glib0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 \
+  libgstreamer-gl1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
 
 uv sync --locked --python 3.12 --group dev
 # 在 Ubuntu 22.04 上针对 Python 3.12 编译 PyQt5，链接系统 Qt。

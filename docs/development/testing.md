@@ -73,7 +73,7 @@ uv run --frozen python -m unittest discover -s test -t . -p "*.py" -v
 `-t .` 明确项目根目录为顶层导入目录，`*.py` 也会收录 `test/auth/login.py`、
 `test/auth/util.py` 和 `test/sessions/session_manager.py` 等非 `test*.py` 文件。
 
-GUI 测试使用 Qt 离屏和软件渲染：
+GUI 测试通常使用 Qt 离屏和软件渲染：
 
 ```bash
 QT_QPA_PLATFORM=offscreen QT_OPENGL=software \
@@ -82,6 +82,9 @@ QT_QPA_PLATFORM=offscreen QT_OPENGL=software \
 
 其中 `<module>` 是需要单独检查的测试模块导入名；若要运行完整的 Qt/UI 域，请使用上面的
 `test.ci.run_test_shard --domain <domain-id>` 并传入 `qt-ui`。
+
+播放器实播冒烟检查在独立进程中播放本地 H.264 夹具，检查嵌入、全屏及恢复后的画面和进度。
+该进程在 macOS 使用 Cocoa 验证 AVFoundation 输出，其他平台使用离屏模式；Linux CI 安装 GStreamer 解码依赖。
 
 认证/会话和 UI 测试会创建日志、临时配置以及应用数据/缓存。CI 将
 `XDG_STATE_HOME`、`XDG_CONFIG_HOME`、`XDG_DATA_HOME` 和 `XDG_CACHE_HOME` 指向 runner
