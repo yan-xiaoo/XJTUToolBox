@@ -1,5 +1,6 @@
-import json
 import os
+
+from PyQt5.QtCore import QIODevice, QSaveFile
 
 from ..components.ProgressInfoBar import ProgressBarThread
 
@@ -16,19 +17,9 @@ class LMSFileDownloadThread(ProgressBarThread):
         self.output_path = output_path
         self.file_label = file_label
 
-    def _remove_partial_file(self):
-        """删除下载过程中残留的部分文件。"""
-        if not self.output_path:
-            return
-        if not os.path.exists(self.output_path):
-            return
-        try:
-            os.remove(self.output_path)
-        except OSError:
-            pass
-
     def run(self):
         response = None
+        output = None
         try:
             # 检查路径合法性
             if not self.output_path or not self.output_path.strip():
@@ -52,37 +43,44 @@ class LMSFileDownloadThread(ProgressBarThread):
             else:
                 self.progressPaused.emit(False)
 
-            with open(self.output_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if not self.can_run:
-                        raise _DownloadCanceledError()
-                    if not chunk:
-                        continue
-                    f.write(chunk)
-                    downloaded += len(chunk)
+            # QSaveFile 在目标目录内暂存，只有 commit 成功才替换原文件。
+            output = QSaveFile(self.output_path)
+            if not output.open(QIODevice.WriteOnly):
+                raise OSError(output.errorString())
+            for chunk in response.iter_content(chunk_size=8192):
+                if not self.can_run:
+                    raise _DownloadCanceledError()
+                if not chunk:
+                    continue
+                if output.write(chunk) != len(chunk):
+                    raise OSError(output.errorString())
+                downloaded += len(chunk)
 
-                    from ..LMSInterface import LMSInterface
+                from ..LMSInterface import LMSInterface
 
-                    if total and total > 0:
-                        progress = int(downloaded * 100 / total)
-                        self.progressChanged.emit(min(progress, 100))
-                        self.messageChanged.emit(
-                            self.tr("{0} / {1}").format(
-                                LMSInterface.format_size(downloaded),
-                                LMSInterface.format_size(total)
-                            )
+                if total and total > 0:
+                    progress = int(downloaded * 100 / total)
+                    self.progressChanged.emit(min(progress, 100))
+                    self.messageChanged.emit(
+                        self.tr("{0} / {1}").format(
+                            LMSInterface.format_size(downloaded),
+                            LMSInterface.format_size(total)
                         )
-                    else:
-                        self.messageChanged.emit(self.tr("已下载 {0}").format(LMSInterface.format_size(downloaded)))
+                    )
+                else:
+                    self.messageChanged.emit(self.tr("已下载 {0}").format(LMSInterface.format_size(downloaded)))
+
+            if not self.can_run:
+                raise _DownloadCanceledError()
+            if not output.commit():
+                raise OSError(output.errorString())
 
             self.progressChanged.emit(100)
             self.messageChanged.emit(self.tr("下载完成"))
             self.hasFinished.emit()
         except _DownloadCanceledError:
-            self._remove_partial_file()
             self.canceled.emit()
         except Exception as e:
-            self._remove_partial_file()
             msg = str(e)
             if hasattr(e, "response") and e.response is not None:
                 try:
@@ -95,5 +93,8 @@ class LMSFileDownloadThread(ProgressBarThread):
             self.error.emit(self.tr("下载失败"), msg)
             self.canceled.emit()
         finally:
+            if output is not None and output.isOpen():
+                output.cancelWriting()
+                output.commit()  # 丢弃未完成的下载并关闭临时文件
             if response is not None:
                 response.close()
