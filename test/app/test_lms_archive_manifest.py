@@ -4,6 +4,7 @@ import os
 import tempfile
 import threading
 import time
+import unicodedata
 import unittest
 from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
@@ -127,6 +128,38 @@ class ArchiveTest(unittest.TestCase):
         self.assertTrue(all(r["status"] == "failed" for r in data["files"]))
         self.assertEqual(batch._fail_count, 2)
 
+    def test_archive_keeps_canonically_equivalent_attachments(self):
+        composed = "caf\N{LATIN SMALL LETTER E WITH ACUTE}.pdf"
+        decomposed = unicodedata.normalize("NFD", composed)
+        batch = self.batch()
+        batch._collect_all = lambda: [
+            ("https://example.invalid/one", composed, "A", "activity"),
+            ("https://example.invalid/two", decomposed, "B", "activity"),
+        ]
+        payloads = {"A": b"first PDF", "B": b"second PDF"}
+        responses = {"https://example.invalid/one": payloads["A"],
+                     "https://example.invalid/two": payloads["B"]}
+        batch._session.get = lambda url, **_: Response(responses[url])
+
+        def normalized_path(path):
+            path = Path(path)
+            return path.with_name(unicodedata.normalize("NFC", path.name))
+
+        replace = os.replace
+        with patch.object(os, "replace", side_effect=lambda src, dst: replace(src, normalized_path(dst))):
+            batch.run()
+
+        archive = batch._archive
+        manifest = json.loads(archive.path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["status"], "complete")
+        self.assertEqual(len(list(archive.root.glob("*.pdf"))), 2)
+        self.assertEqual(len(manifest["files"]), 2)
+        for row in manifest["files"]:
+            self.assertEqual(row["status"], "complete")
+            content = normalized_path(archive.root / row["path"]).read_bytes()
+            self.assertEqual(content, payloads[row["label"]])
+            self.assertEqual(row["sha256"], hashlib.sha256(content).hexdigest())
+
     def test_hierarchical_archive_keeps_activity_ids_after_truncating_titles(self):
         if hasattr(os, "pathconf"):
             byte_limit = os.pathconf(self.root, "PC_NAME_MAX")
@@ -167,6 +200,41 @@ class ArchiveTest(unittest.TestCase):
         batch.run()
         self.assertIsNone(batch._archive)
         self.assertEqual(len(list(self.root.iterdir())), 2)
+
+    def test_plain_hierarchical_batch_keeps_distinct_activity_directories(self):
+        batch = self.batch(archive=False)
+        batch._layout_mode = "hierarchical"
+        titles = {
+            101: "A" * 160 + "-one",
+            102: "A" * 160 + "-two",
+            103: "Short.title",
+            104: "short.title",
+            105: "\N{CJK UNIFIED IDEOGRAPH-8BFE}" * 90 + ".one",
+            106: "\N{CJK UNIFIED IDEOGRAPH-8BFE}" * 90 + ".two",
+        }
+        batch._selected_activities = [
+            {"id": activity_id, "title": title, "type": "material"}
+            for activity_id, title in titles.items()
+        ]
+        batch._collect_all = LMSBatchDownloadThread._collect_all.__get__(batch)
+        batch._util = SimpleNamespace(get_activity_detail=lambda activity_id: {"uploads": [{
+            "name": "notes.pdf", "download_url": f"https://example.invalid/{activity_id}"
+        }]})
+        batch._session.get = lambda url, **_: Response(url.rsplit("/", 1)[-1].encode("ascii"))
+        with patch.object(os, "pathconf", return_value=255, create=True):
+            batch.run()
+
+        self.assertEqual((batch._success_count, batch._fail_count), (len(titles), 0))
+        files = list(self.root.glob("*/*.pdf"))
+        self.assertEqual(len({path.parent for path in files}), len(titles))
+        for path in files:
+            activity_id = int(path.read_bytes())
+            self.assertEqual(path.name, "notes.pdf")
+            self.assertLessEqual(len(os.fsencode(path.parent.name)), 255)
+            if activity_id == 103:
+                self.assertEqual(path.parent.name, titles[103])
+            else:
+                self.assertTrue(path.parent.name.endswith(f"_{activity_id}"))
 
     def test_cancel_sets_coordinator_flag_and_marks_pending(self):
         batch = self.batch()

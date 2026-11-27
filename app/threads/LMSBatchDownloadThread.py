@@ -5,6 +5,7 @@ import re
 import threading
 import hashlib
 import tempfile
+import unicodedata
 from collections import deque
 
 from PyQt5.QtCore import pyqtSignal, QThread
@@ -35,6 +36,23 @@ def _truncate_to_bytes(name: str, limit: int) -> str:
     while name and len(os.fsencode(name)) > limit:
         name = name[:-1]
     return name
+
+
+def _path_key(path: str) -> str:
+    normalized = unicodedata.normalize("NFD", os.path.normcase(path))
+    return unicodedata.normalize("NFC", normalized.casefold())
+
+
+def _directory_contains_path(directory: str, path: str) -> bool:
+    """Return whether a directory already contains a canonically equivalent path."""
+    try:
+        target_key = _path_key(path)
+        return any(
+            _path_key(os.path.join(directory, entry.name)) == target_key
+            for entry in os.scandir(directory)
+        )
+    except OSError:
+        return os.path.exists(path)
 
 
 class _DownloadJob:
@@ -187,6 +205,7 @@ class LMSBatchDownloadThread(ProgressBarThread):
         title_byte_limit = (
             _filename_byte_limit(self._target_dir) if self._layout_mode == "hierarchical" else None
         )
+        activity_directories: dict[str, int] = {}
 
         for idx, activity in enumerate(self._selected_activities, start=1):
             if not self.can_run:
@@ -217,12 +236,29 @@ class LMSBatchDownloadThread(ProgressBarThread):
                 if self._archive:
                     self._archive.data["collection_failures"].append({"id": activity_id, "reason": "invalid_detail"})
                 continue
+            needs_activity_suffix = self._archive is not None or (
+                self._layout_mode == "hierarchical" and (
+                    len(activity_title) > MAX_FILENAME_LENGTH or (
+                        title_byte_limit is not None and len(os.fsencode(activity_title)) > title_byte_limit
+                    )
+                )
+            )
             safe_title = self._sanitize_filename(
                 activity_title,
-                f"_{activity_id}" if self._archive else "",
+                f"_{activity_id}" if needs_activity_suffix else "",
                 byte_limit=title_byte_limit,
-                keep_extension=not self._archive,
+                keep_extension=not needs_activity_suffix,
             )
+            if self._layout_mode == "hierarchical" and self._archive is None:
+                suffix = f"_{activity_id}"
+                counter = 1
+                while activity_directories.get(_path_key(safe_title), activity_id) != activity_id:
+                    safe_title = self._sanitize_filename(
+                        activity_title, suffix, byte_limit=title_byte_limit, keep_extension=False,
+                    )
+                    counter += 1
+                    suffix = f"_{activity_id}_{counter}"
+                activity_directories[_path_key(safe_title)] = activity_id
 
             failures = [] if self._archive else None
             if act_type == ActivityType.HOMEWORK.value:
@@ -396,11 +432,13 @@ class LMSBatchDownloadThread(ProgressBarThread):
             byte_limit = _filename_byte_limit(directory)
             path = os.path.join(directory, self._sanitize_filename(fn, byte_limit=byte_limit))
             suffix = 1
-            while os.path.normcase(path).casefold() in reserved or (self._archive and os.path.exists(path)):
+            while _path_key(path) in reserved or (
+                self._archive and _directory_contains_path(directory, path)
+            ):
                 suffix += 1
                 name = self._sanitize_filename(fn, f"_{suffix}", byte_limit=byte_limit)
                 path = os.path.join(directory, name)
-            reserved.add(os.path.normcase(path).casefold())
+            reserved.add(_path_key(path))
             job = _DownloadJob(url, path, label, self._session)
             if self._archive:
                 job.archive_row = self._archive.add(path, label)
