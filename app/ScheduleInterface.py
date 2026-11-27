@@ -180,7 +180,7 @@ class ScheduleInterface(ScrollArea):
         self.clearAction.triggered.connect(self.onClearClicked)
 
         self.stateToolTip = None
-        self._export_path = None
+        self._pending_holiday_exports = []
 
         self.table_widget = TableWidget(self)
         self.table_widget.setColumnCount(7)
@@ -907,7 +907,6 @@ class ScheduleInterface(ScrollArea):
         :param ignore_holiday: 是否忽略节假日
         :param set_alarm: 是否在课程和考试事件中设置提醒
         """
-        self._export_path = path
         if ignore_holiday:
             ignore_data = cacheManager.read_expire_json(
                 "ignore_holiday.json", 7)
@@ -916,6 +915,10 @@ class ScheduleInterface(ScrollArea):
                     ignore_data[i] = datetime.datetime.strptime(
                         ignore_data[i], "%Y-%m-%d").date()
             else:
+                service = self.schedule_service
+                self._pending_holiday_exports.append((path, set_alarm, service, service.getCurrentTerm()))
+                if len(self._pending_holiday_exports) > 1:
+                    return
                 self.stateToolTip = StateToolTip(self.tr("正在获取节假日信息..."),
                                                  self.tr("请稍等..."), self)
                 self.stateToolTip.move(self.stateToolTip.getSuitablePos())
@@ -930,6 +933,7 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot(str, str)
     def onHolidayError(self, title, msg):
+        self._pending_holiday_exports.clear()
         if self.stateToolTip is not None:
             self.stateToolTip.setState(False)
             self.stateToolTip.setContent(msg)
@@ -937,6 +941,8 @@ class ScheduleInterface(ScrollArea):
 
     @pyqtSlot(list)
     def onReceiveHoliday(self, data: list):
+        pending = self._pending_holiday_exports
+        self._pending_holiday_exports = []
         if self.stateToolTip is not None:
             self.stateToolTip.setState(True)
             self.stateToolTip.setContent(self.tr("获取节假日成功"))
@@ -946,7 +952,14 @@ class ScheduleInterface(ScrollArea):
         for one_date in data:
             write_data.append(one_date.strftime("%Y-%m-%d"))
         cacheManager.write_expire_json("ignore_holiday.json", write_data, True)
-        self.export(self._export_path, data)
+        for path, set_alarm, service, term in pending:
+            if self.schedule_service is not service or service.getCurrentTerm() != term:
+                self.error(self.tr("课表已切换"), self.tr("账户或学期已切换，请重新导出课表"), parent=self)
+                continue
+            try:
+                self.export(path, data, set_alarm)
+            except OSError as error:
+                self.error(self.tr("导出失败"), str(error), parent=self)
 
     def export(self, path, ignore_holidays: list[datetime.date], set_alarm: bool = True):
         """
