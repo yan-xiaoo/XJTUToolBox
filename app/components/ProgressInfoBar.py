@@ -352,7 +352,7 @@ class ProgressInfoBar(QFrame):
     def onCloseButtonClicked(self):
         self.closeButton.setEnabled(False)
         if self.thread_ is not None:
-            self.contentLabel.setText(self.tr("正在停止..."))
+            self.onMessageChange(self.tr("正在停止..."))
             if not self.stopped:
                 self.dead_time_start = time.time()
                 self.closedSignal.emit()
@@ -376,10 +376,12 @@ class ProgressInfoBar(QFrame):
 
     @pyqtSlot(str)
     def onTitleChange(self, text: str):
+        self.title = text
         self.titleLabel.setText(text)
 
     @pyqtSlot(str)
     def onMessageChange(self, text: str):
+        self.content = text
         self.contentLabel.setText(text)
 
     @pyqtSlot(int)
