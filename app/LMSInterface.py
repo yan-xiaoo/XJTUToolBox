@@ -1023,7 +1023,12 @@ class LMSInterface(ScrollArea):
                 return
             bar = ProgressInfoBar(title=self.tr("附件下载"), content=self.tr("准备下载"), parent=self,
                                   position=InfoBarPosition.BOTTOM_RIGHT)
-            thread = LMSFileDownloadThread(session, url, path, os.path.basename(path), parent=self)
+            replay_file_key = file_info.get("file_key")
+            thread = LMSFileDownloadThread(
+                session, url, path, os.path.basename(path), parent=self,
+                account_id=current_account.uuid,
+                replay_file_key=replay_file_key if isinstance(replay_file_key, str) else None,
+            )
             bar.connectToThread(thread)
             thread.error.connect(lambda title, msg: self.error(title, msg, parent=self))
             thread.hasFinished.connect(lambda: self.success(self.tr("下载成功"), self.tr("已保存到：{0}").format(path), parent=self))

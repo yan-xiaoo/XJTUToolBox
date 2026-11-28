@@ -29,6 +29,7 @@ class LMSFileDownloadTest(unittest.TestCase):
         self.path.write_bytes(self.original)
         self.session = Mock()
         self.response = self.session.get.return_value
+        self.response.status_code = 200
         self.response.headers = {}
         self.worker = LMSFileDownloadThread(self.session, "https://example.invalid/lecture", str(self.path), self.path.name)
         self.finished = Mock()

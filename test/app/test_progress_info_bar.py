@@ -20,6 +20,7 @@ if QApplication.instance() is None:
 from qfluentwidgets import InfoBarPosition
 
 from app.components.ProgressInfoBar import ProgressBarThread, ProgressInfoBar
+from app.threads.LMSFileDownloadThread import LMSFileDownloadThread
 
 APP = QApplication.instance() or QApplication([])
 
@@ -197,6 +198,28 @@ class ProgressInfoBarTest(unittest.TestCase):
 
         bar.onThreadExited()  # 二次调用（此时 sender() 为 None）
         bar.onThreadExited()
+        self.assertEqual(events, ["canceled"])
+
+    def test_cooperative_download_is_not_terminated_while_canceling(self):
+        release = threading.Event()
+        thread = SilentExitThread(release)
+        thread.cooperative_stop_only = LMSFileDownloadThread.cooperative_stop_only
+        bar, events = self.make_bar(thread)
+        thread.start()
+        self.wait_entered(thread)
+        APP.processEvents()
+
+        bar.onCloseButtonClicked()
+        bar.dead_time_start = 0
+        with patch.object(thread, "terminate") as terminate, patch.object(thread, "wait"):
+            bar.checkProcess()
+            terminate.assert_not_called()
+        self.assertFalse(thread.can_run)
+        self.assertEqual(events, [])
+
+        release.set()
+        self.assertTrue(thread.wait(5000))
+        APP.processEvents()
         self.assertEqual(events, ["canceled"])
 
     # 旧线程的任何信号都不再影响组件
