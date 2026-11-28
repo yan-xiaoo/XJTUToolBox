@@ -124,6 +124,29 @@ class ProgressInfoBarTest(unittest.TestCase):
     def wait_entered(self, thread):  # 保证 started 已入队后再 processEvents
         self.assertTrue(thread.entered.wait(5))
 
+    def test_resizing_parent_preserves_download_status(self):
+        parent = QWidget()
+        parent.resize(800, 400)
+        thread = ProgressBarThread()
+        bar = ProgressInfoBar("附件下载", "准备下载", position=InfoBarPosition.NONE, parent=parent)
+        bar.connectToThread(thread)
+        self.addCleanup(parent.close)
+        self.addCleanup(self._teardown, bar, thread)
+        parent.show()
+        bar.show()
+
+        thread.titleChanged.emit("正在下载附件")
+        thread.messageChanged.emit("8.00 KB / 16.00 KB")
+        parent.resize(650, 400)
+        APP.processEvents()
+        self.assertEqual(bar.titleLabel.text(), "正在下载附件")
+        self.assertEqual(bar.contentLabel.text(), "8.00 KB / 16.00 KB")
+
+        bar.closeButton.click()
+        parent.resize(800, 400)
+        APP.processEvents()
+        self.assertEqual(bar.contentLabel.text(), bar.tr("正在停止..."))
+
     # 原实现这里 events == []
     def test_silent_exit_reports_canceled_exactly_once(self):
         thread = SilentExitThread()
