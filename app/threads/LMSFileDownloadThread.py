@@ -96,21 +96,26 @@ class LMSFileDownloadThread(ProgressBarThread):
             checkpoint = None
         headers = {"Accept-Encoding": "identity"}
         try:
-            self._check_canceled()
-            if checkpoint:
+            while checkpoint:
+                self._check_canceled()
                 resume_headers = headers | {
                     "Range": f"bytes={checkpoint.offset}-",
                     "If-Range": checkpoint.etag,
                 }
                 with closing(self.session.get(self.url, headers=resume_headers, stream=True, timeout=60)) as response:
                     self._check_canceled()
-                    if response.status_code == 206 and self._range_matches(response, checkpoint):
-                        self._write_partial(response, destination, partial, checkpoint)
-                        return
+                    if response.status_code == 206:
+                        stop = self._range_stop(response, checkpoint)
+                        if stop is not None:
+                            checkpoint = self._write_partial(response, destination, partial, checkpoint, stop)
+                            if checkpoint is None:
+                                return
+                            continue
                     partial_response = response.status_code == 200 and "Content-Range" in response.headers
                     if response.status_code not in (206, 416) and not partial_response:
                         self._download_full(response, destination, partial, checkpoint)
                         return
+                break
 
             self._check_canceled()
             with closing(self.session.get(self.url, headers=headers, stream=True, timeout=60)) as response:
@@ -126,23 +131,26 @@ class LMSFileDownloadThread(ProgressBarThread):
     def _response_identity(self, response):
         return download_identity(response.url, self.replay_file_key)
 
-    def _range_matches(self, response, checkpoint: DownloadCheckpoint):
+    def _range_stop(self, response, checkpoint: DownloadCheckpoint) -> int | None:
         if (
             not _identity_encoding(response)
             or response.headers.get("ETag") != checkpoint.etag
             or self._response_identity(response) != checkpoint.response_url
             or response.headers.get("Content-Type", "").lower().startswith("multipart/byteranges")
         ):
-            return False
+            return None
         match = _CONTENT_RANGE.fullmatch(response.headers.get("Content-Range", ""))
         if not match:
-            return False
-        start, end, size = map(int, match.groups())
+            return None
+        try:
+            start, end, size = map(int, match.groups())
+        except ValueError:
+            return None
+        if size != checkpoint.size or start != checkpoint.offset or not start <= end < size:
+            return None
+        stop = end + 1
         length = _body_size(response)
-        return (
-            (start, end, size) == (checkpoint.offset, checkpoint.size - 1, checkpoint.size)
-            and (length is None or length == size - start)
-        )
+        return stop if length is None or length == stop - start else None
 
     def _download_full(self, response, destination: Path, partial: PartialDownload,
                        previous: DownloadCheckpoint | None):
@@ -173,7 +181,7 @@ class LMSFileDownloadThread(ProgressBarThread):
         partial.discard()
         if size and response_url and partial.claim():
             checkpoint = DownloadCheckpoint(partial.source, response_url, etag, size, 0)
-            self._write_partial(response, destination, partial, checkpoint)
+            self._write_partial(response, destination, partial, checkpoint, size)
         else:
             self._write_full(response, destination, size)
 
@@ -194,24 +202,30 @@ class LMSFileDownloadThread(ProgressBarThread):
                 output.commit()
 
     def _write_partial(self, response, destination: Path, partial: PartialDownload,
-                       checkpoint: DownloadCheckpoint):
+                       checkpoint: DownloadCheckpoint, stop: int) -> DownloadCheckpoint | None:
         keep_partial = False
         try:
             write_error = None
             with partial.open(checkpoint.offset) as output:
                 try:
-                    self._write_chunks(response, output, checkpoint.size, checkpoint.offset)
+                    self._write_chunks(response, output, checkpoint.size, checkpoint.offset, stop=stop)
                 except _INTERRUPTED as error:
                     write_error = error
                 output.flush()
                 os.fsync(output.fileno())
 
             self._check_canceled()
-            if write_error is not None:
-                keep_partial = partial.record(checkpoint.response_url, checkpoint.etag, checkpoint.size)
-                if keep_partial:
-                    raise _IncompleteDownload(self.tr("连接中断。重新保存到同一路径可继续下载。")) from write_error
-                raise write_error
+            if write_error is not None or stop < checkpoint.size:
+                saved = partial.record(checkpoint)
+                if write_error is not None:
+                    if saved is not None:
+                        keep_partial = True
+                        raise _IncompleteDownload(self.tr("连接中断。重新保存到同一路径可继续下载。")) from write_error
+                    raise write_error
+                if saved is None or saved.offset != stop:
+                    raise OSError(self.tr("未能保存下载进度"))
+                keep_partial = True
+                return saved
 
             if destination.exists():
                 if not destination.is_file() or not os.access(destination, os.W_OK):
@@ -219,13 +233,16 @@ class LMSFileDownloadThread(ProgressBarThread):
                 partial.data_path.chmod(destination.stat().st_mode & 0o777)
             self._check_canceled()
             os.replace(partial.data_path, destination)
+            return None
         finally:
             if not keep_partial:
                 with suppress(OSError):
                     partial.discard()
 
-    def _write_chunks(self, response, output, size: int | None, offset: int):
+    def _write_chunks(self, response, output, size: int | None, offset: int, *, stop: int | None = None):
         downloaded = offset
+        if stop is None:
+            stop = size
         self.progressPaused.emit(not size)
         if offset:
             self._show_progress(downloaded, size)
@@ -234,14 +251,14 @@ class LMSFileDownloadThread(ProgressBarThread):
             if not chunk:
                 continue
             downloaded += len(chunk)
-            if size is not None and downloaded > size:
-                raise OSError(self.tr("收到的数据超过文件大小"))
+            if stop is not None and downloaded > stop:
+                raise OSError(self.tr("收到的数据超出预期范围"))
             if output.write(chunk) != len(chunk):
                 raise OSError(self.tr("未能完整写入下载文件"))
             self._show_progress(downloaded, size)
 
         self._check_canceled()
-        if size is not None and downloaded != size:
+        if stop is not None and downloaded != stop:
             raise _IncompleteDownload(self.tr("下载中断，文件未接收完整"))
 
     def _show_progress(self, downloaded: int, size: int | None):

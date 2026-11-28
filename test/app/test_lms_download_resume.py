@@ -141,7 +141,7 @@ class LMSDownloadResumeTest(unittest.TestCase):
             (416, self.etag, {"Content-Range": f"bytes */{total}"}, b""),
             (200, self.etag, {"Content-Range": f"bytes {start}-{total - 1}/{total}"}, remaining),
             (206, self.etag, {"Content-Range": f"bytes {start - 1}-{total - 1}/{total}"}, remaining),
-            (206, self.etag, {"Content-Range": f"bytes {start}-{total - 2}/{total}"}, remaining[:-1]),
+            (206, self.etag, {"Content-Range": f"bytes {start}-{total - 2}/{total}"}, remaining),
             (206, self.etag, {"Content-Range": f"bytes {start}-{total}/{total + 1}"}, remaining + b"C"),
             (206, '"changed"', {"Content-Range": f"bytes {start}-{total - 1}/{total}"}, remaining),
             (206, self.etag, {"Content-Range": f"bytes {start}-{total - 1}/{total}",
@@ -170,6 +170,60 @@ class LMSDownloadResumeTest(unittest.TestCase):
         done.assert_not_called()
         error.assert_called_once()
         canceled.assert_called_once()
+
+    def test_server_can_return_multiple_contiguous_ranges_in_one_attempt(self):
+        self.interrupt()
+        start = len(self.prefix)
+        middle = start + 4096
+        total = len(self.payload)
+        self.queue_response(
+            206, self.payload[start:middle],
+            **{"Content-Range": f"bytes {start}-{middle - 1}/{total}"},
+        )
+        self.queue_response(
+            206, self.payload[middle:],
+            **{"Content-Range": f"bytes {middle}-{total - 1}/{total}"},
+        )
+        worker, done, error, canceled = self.make_worker()
+        original_get = self.session.get
+
+        def check_destination(url, **options):
+            self.assertEqual(self.path.read_bytes(), self.original)
+            return original_get(url, **options)
+
+        with patch.object(self.session, "get", side_effect=check_destination):
+            worker.run()
+
+        self.assertEqual([request.get("Range") for request in self.requests],
+                         [None, f"bytes={start}-", f"bytes={middle}-"])
+        self.assert_saved(self.payload, done, error, canceled)
+
+    def test_completed_range_is_retained_if_the_next_request_fails(self):
+        self.interrupt()
+        start = len(self.prefix)
+        middle = start + 4096
+        total = len(self.payload)
+        self.queue_response(
+            206, self.payload[start:middle],
+            **{"Content-Range": f"bytes {start}-{middle - 1}/{total}"},
+        )
+        self.queue_response(503, b"try again")
+        worker, done, error, canceled = self.make_worker()
+        worker.run()
+        self.assertEqual(self.path.read_bytes(), self.original)
+        done.assert_not_called()
+        error.assert_called_once()
+        canceled.assert_called_once()
+
+        self.queue_response(
+            206, self.payload[middle:],
+            **{"Content-Range": f"bytes {middle}-{total - 1}/{total}"},
+        )
+        worker, done, error, canceled = self.make_worker()
+        worker.run()
+        self.assertEqual([request.get("Range") for request in self.requests],
+                         [None, f"bytes={start}-", f"bytes={middle}-", f"bytes={middle}-"])
+        self.assert_saved(self.payload, done, error, canceled)
 
     def test_second_interruption_updates_the_checkpoint(self):
         payload = self.prefix + b"B" * 8192 + b"C" * 8192

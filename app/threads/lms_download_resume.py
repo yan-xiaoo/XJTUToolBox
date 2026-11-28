@@ -5,7 +5,7 @@ import json
 import os
 import stat
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import BinaryIO
 from unicodedata import normalize
@@ -126,18 +126,18 @@ class PartialDownload:
             return output
         return self.data_path.open("xb")
 
-    def record(self, response_url: str, etag: str, size: int) -> bool:
+    def record(self, checkpoint: DownloadCheckpoint) -> DownloadCheckpoint | None:
         offset = self.data_path.stat().st_size
-        if not 0 < offset < size:
-            return False
-        checkpoint = DownloadCheckpoint(self.source, response_url, etag, size, offset)
+        if not 0 < offset < checkpoint.size:
+            return None
+        saved = replace(checkpoint, offset=offset)
         self.metadata_temp.unlink(missing_ok=True)
         with self.metadata_temp.open("x", encoding="utf-8") as output:
-            json.dump(asdict(checkpoint), output)
+            json.dump(asdict(saved), output)
             output.flush()
             os.fsync(output.fileno())
         os.replace(self.metadata_temp, self.metadata_path)
-        return True
+        return saved
 
     def discard(self):
         if not self._owned:
