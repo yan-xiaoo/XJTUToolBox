@@ -2,13 +2,14 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 TEST_DOMAIN = "qt-ui"
 TEST_REGRESSION = True
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt5.QtCore import QSaveFile
 from PyQt5.QtWidgets import QApplication
 from requests import ConnectionError, HTTPError
 
@@ -63,6 +64,25 @@ class LMSFileDownloadTest(unittest.TestCase):
 
         self.response.iter_content.return_value = chunks()
         self.worker.run()
+        self.assert_existing_file_preserved()
+
+    def test_flush_error_preserves_existing_destination(self):
+        self.response.iter_content.return_value = [b"replacement contents"]
+        error = Mock()
+        self.worker.error.connect(error)
+        with patch.object(QSaveFile, "flush", return_value=False):
+            self.worker.run()
+        self.assert_existing_file_preserved()
+        error.assert_called_once()
+
+    def test_cancel_while_flushing_preserves_existing_destination(self):
+        def cancel_during_flush():
+            self.worker.onStopSignal()
+            return True
+
+        self.response.iter_content.return_value = [b"replacement contents"]
+        with patch.object(QSaveFile, "flush", side_effect=cancel_during_flush):
+            self.worker.run()
         self.assert_existing_file_preserved()
 
     def test_complete_stream_replaces_existing_destination(self):

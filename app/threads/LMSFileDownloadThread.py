@@ -70,6 +70,9 @@ class LMSFileDownloadThread(ProgressBarThread):
                 else:
                     self.messageChanged.emit(self.tr("已下载 {0}").format(LMSInterface.format_size(downloaded)))
 
+            # Qt 5 的 write() 可能只写入缓冲区，替换原文件前确认最后一块已写出。
+            if not output.flush():
+                raise OSError(self.tr("未能完整写入下载文件：{0}").format(output.errorString()))
             if not self.can_run:
                 raise _DownloadCanceledError()
             if not output.commit():
