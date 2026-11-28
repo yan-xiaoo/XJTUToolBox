@@ -5,13 +5,13 @@ import hashlib
 from enum import Enum
 from uuid import uuid4
 
-import keyring
-import keyring.errors
 from Crypto.Cipher import AES
 from PyQt5.QtCore import pyqtSignal, QObject
 
+from .account_storage import AccountStorage, AccountStorageError, StoredAccounts
 from .session_manager import SessionManager
 from .config import cfg
+from .log import logger
 from .migrate_data import DATA_DIRECTORY
 
 # Linux Keyring 崩溃保护层
@@ -125,8 +125,10 @@ def request_mfa(account: Account | None) -> None:
 
 # 默认账户信息的存储位置
 DEFAULT_ACCOUNT_PATH = os.path.join(DATA_DIRECTORY, "accounts.json")
-# 钥匙串的服务名称
-KEYRING_SERVICE_NAME = "XJTUToolBox"
+
+
+class IncorrectAccountPassword(ValueError):
+    """The user-supplied password did not unlock the legacy account document."""
 
 
 class AccountManager(QObject):
@@ -143,12 +145,14 @@ class AccountManager(QObject):
     # 如果清除时账户数据受密码保护但已经被解密/未受密码保护，会同时触发 accountDeleted 信号（因为已经存在的账户数据被删除了）
     accountCleared = pyqtSignal()
 
-    def __init__(self, *args):
+    def __init__(self, *args, storage: AccountStorage | None = None):
         super().__init__()
-        self.key = None
-        # 是否是加密的（即用户设置了需要加密）
-        # 此标志位为真时，实际的账户数据不一定是被加密的。
-        self.encrypted = self.is_encrypted()
+        self.key: bytes | None = None
+        self.encrypted = False
+        self.storage = storage if storage is not None else AccountStorage(DEFAULT_ACCOUNT_PATH)
+        self.storage_error: AccountStorageError | None = None
+        self._locked_document: StoredAccounts | None = None
+        self._legacy_to_remove: str | None = None
         if len(args) == 1:
             self.accounts = list(args[0])
         else:
@@ -175,222 +179,238 @@ class AccountManager(QObject):
     def __len__(self):
         return len(self.accounts)
 
-    def append(self, account: Account):
-        self.accounts.append(account)
-        data_dir = os.path.join(DATA_DIRECTORY, "data", account.uuid)
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-        self.accountAdded.emit()
-
-    def remove(self, account: Account):
-        self.accounts.remove(account)
-        if self.current not in self.accounts:
-            self.current = None
-        self.accountDeleted.emit()
-
     def __getitem__(self, item):
         return self.accounts[item]
 
-    def save(self) -> str:
-        list_ = [one.to_diction() for one in self]
-        if self.current is None:
-            current = -1
-        else:
-            current = self.accounts.index(self.current)
-        return json.dumps({"data": list_, "encrypted": False, "current": current}, indent=4)
+    @property
+    def locked(self) -> bool:
+        return self._locked_document is not None
 
-    def save_to(self, file=DEFAULT_ACCOUNT_PATH):
-        with open(file, "w", encoding="utf-8") as f:
-            f.write(self.save())
+    def empty(self) -> bool:
+        return not (self.accounts or self.locked or self.storage_error)
 
-    def save_suitable(self, file=DEFAULT_ACCOUNT_PATH):
-        """如果当前账户是加密状态，加密的保存账户；否则，直接保存账户"""
-        if self.encrypted:
-            self.encrypted_save_to(file=file)
-        else:
-            self.save_to(file)
+    def initialize_storage(self) -> AccountStorageError | None:
+        """Load accounts after the single-instance lock has been acquired."""
+        try:
+            stored = self.storage.read()
+            if stored is None:
+                return None
+            document = self._parse_document(stored.text)
+            if document["encrypted"]:
+                self.encrypted = True
+                self._locked_document = stored
+            else:
+                self.accounts, self._current = self._decode_accounts(document)
+        except AccountStorageError as exc:
+            self.storage_error = exc
+            return exc
 
-    def save_to_keyring(self):
-        """将账户信息保存到钥匙串中，根据是否加密，保存方式不同。"""
-        if self.encrypted and not self.key:
-            raise ValueError("无密钥，无法保存")
+        if stored.source == "protected" and not cfg.useKeyring.value:
+            # The file may have been committed just before the configuration was saved.
+            cfg.set(cfg.useKeyring, True, save=False)
+        if self.locked:
+            return None
+        warning = self._migrate(stored)
+        if warning is None:
+            self._cleanup_stale_windows_account_dirs()
+        return warning
 
-        if self.encrypted:
-            data = self.encrypt_save(self.key)
-        else:
-            data = self.save()
-        keyring.set_password(KEYRING_SERVICE_NAME, "accounts", data)
+    def _cleanup_stale_windows_account_dirs(self) -> None:
+        # Windows cannot always remove schedule.db while the account is in use.
+        if os.name != "nt" or not self.accounts:
+            return
+        active = {account.uuid for account in self.accounts}
+        data_dir = os.path.join(DATA_DIRECTORY, "data")
+        try:
+            for name in os.listdir(data_dir):
+                path = os.path.join(data_dir, name)
+                if name not in active and os.path.isdir(path):
+                    db = os.path.join(path, "schedule.db")
+                    if os.path.isfile(db):
+                        os.remove(db)
+                    try:
+                        os.rmdir(path)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
 
-    def encrypted_save_to(self, key: bytes = None, file=DEFAULT_ACCOUNT_PATH):
-        key = key or self.key
-        with open(file, "w", encoding="utf-8") as f:
-            f.write(self.encrypt_save(key))
+    def unlock(self, key: bytes) -> AccountStorageError | None:
+        self._check_readable()
+        if self._locked_document is None:
+            return None
+        stored = self._locked_document
+        self.accounts, self._current = self._decode_accounts(self._parse_document(stored.text), key)
+        self.key = key
+        self._locked_document = None
+        warning = self._migrate(stored)
+        self.currentAccountChanged.emit()
+        self.accountDecrypted.emit()
+        self.accountAdded.emit()
+        return warning
 
-    def clear(self):
-        """
-        删除当前存储的所有账户信息，并且使账户不再受密码保护
-        """
-        self.clear_all_session_state(include_persisted=True)
-        # 清除当前账号信息
-        self.accounts.clear()
-        # 清除当前账号
-        self.current = None
-        # 覆盖当前磁盘上的账号信息
-        self.setEncrypted(False, use_keyring=cfg.useKeyring.value)
-        self.accountCleared.emit()
-        # 清除所有缓存
-        from app.utils.cache import remove_all_cache
-        remove_all_cache()
+    def _migrate(self, stored: StoredAccounts) -> AccountStorageError | None:
+        use_keyring = cfg.useKeyring.value
+        if stored.source == "legacy":
+            self._legacy_to_remove = stored.text
+        elif stored.source == "protected" or not use_keyring:
+            return None
+        try:
+            self.storage.write(stored.text, use_keyring=use_keyring)
+        except AccountStorageError as exc:
+            logger.warning("账户存储迁移失败：%s", exc)
+            return exc
+        return self._finish_legacy_migration()
+
+    def _finish_legacy_migration(self, *, clear: bool = False) -> AccountStorageError | None:
+        if self._legacy_to_remove is None and not clear:
+            return None
+        try:
+            self.storage.remove_legacy(expected=None if clear else self._legacy_to_remove)
+        except AccountStorageError as exc:
+            logger.warning("%s", exc)
+            return exc
+        self._legacy_to_remove = None
+        return None
+
+    def _check_readable(self) -> None:
+        if self.storage_error is not None:
+            raise self.storage_error
+
+    def _check_unlocked(self) -> None:
+        self._check_readable()
+        if self.locked:
+            raise AccountStorageError("请先输入账户加密密码解锁。")
+
+    def _persist(self, accounts: list[Account], current: Account | None, key: bytes | None, *, use_keyring: bool,
+                 clear: bool = False) -> AccountStorageError | None:
+        self._check_readable()
+        data = [account.to_diction() for account in accounts]
+        document = {"data": data, "encrypted": key is not None,
+                    "current": accounts.index(current) if current is not None else -1}
+        if key is not None:
+            # Keep the existing user-password format inside the independently protected file.
+            aes_key = pad(key)
+            if len(aes_key) not in (16, 32):
+                raise ValueError("账户加密密码不能超过 32 个 UTF-8 字节。")
+            cipher = AES.new(aes_key, AES.MODE_ECB)
+            salt = secrets.token_hex(16)
+            digest = hashlib.md5(salt.encode() + aes_key, usedforsecurity=False).hexdigest()
+            document.update(data=cipher.encrypt(pad(json.dumps(data).encode())).hex(),
+                            salt=salt, md5=digest)
+        self.storage.write(json.dumps(document, ensure_ascii=False), use_keyring=use_keyring)
+        return self._finish_legacy_migration(clear=clear)
+
+    @staticmethod
+    def _parse_document(text: str) -> dict:
+        try:
+            document = json.loads(text)
+            if type(document["current"]) is not int or type(document["encrypted"]) is not bool:
+                raise ValueError
+            if document["encrypted"]:
+                if not all(isinstance(document[field], str) and document[field] for field in ("data", "salt", "md5")):
+                    raise ValueError
+            elif not isinstance(document["data"], list):
+                raise ValueError
+        except (ValueError, KeyError, TypeError) as exc:
+            raise AccountStorageError("保存的账户数据格式无效。") from exc
+        return document
+
+    @staticmethod
+    def _decode_accounts(document: dict, key: bytes | None = None) -> tuple[list[Account], Account | None]:
+        data = document["data"]
+        if document["encrypted"]:
+            aes_key = pad(key or b"")
+            if len(aes_key) not in (16, 32):
+                raise IncorrectAccountPassword
+            digest = hashlib.md5(document["salt"].encode() + aes_key, usedforsecurity=False).hexdigest()
+            if not secrets.compare_digest(digest.encode("ascii"), document["md5"].encode("utf-8")):
+                raise IncorrectAccountPassword
+            try:
+                cipher = AES.new(aes_key, AES.MODE_ECB)
+                data = json.loads(depad(cipher.decrypt(bytes.fromhex(data))).decode("utf-8"))
+            except ValueError as exc:
+                raise AccountStorageError("无法解密保存的账户数据。") from exc
+        try:
+            current = document["current"]
+            if not isinstance(data, list) or not -1 <= current < len(data):
+                raise ValueError
+            if any(not isinstance(item, dict)
+                   or not all(isinstance(item.get(field), str) for field in ("username", "password"))
+                   for item in data):
+                raise ValueError
+            records = [Account.from_diction(item) for item in data]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise AccountStorageError("保存的账户列表或当前账户无效。") from exc
+        return records, records[current] if current != -1 else None
+
+    def save_suitable(self, *, use_keyring: bool | None = None) -> None:
+        self._check_unlocked()
+        if use_keyring is None:
+            use_keyring = cfg.useKeyring.value
+        self._persist(self.accounts, self.current, self.key, use_keyring=use_keyring)
+
+    def append(self, account: Account) -> None:
+        self._check_unlocked()
+        try:
+            os.makedirs(os.path.join(DATA_DIRECTORY, "data", account.uuid), exist_ok=True)
+        except OSError as exc:
+            raise AccountStorageError("无法创建账户数据目录。") from exc
+        records = [*self.accounts, account]
+        current = account if not self.accounts else self.current
+        self._persist(records, current, self.key, use_keyring=cfg.useKeyring.value)
+        self.accounts.append(account)
+        if current is not self.current:
+            self.current = current
+        self.accountAdded.emit()
+
+    def remove(self, account: Account) -> None:
+        self._check_unlocked()
+        records = self.accounts.copy()
+        records.remove(account)
+        current = self.current
+        if current is account:
+            current = records[0] if records else None
+        key = self.key if records else None
+        self._persist(records, current, key, use_keyring=cfg.useKeyring.value)
+        self.accounts.remove(account)
+        if not records:
+            self._set_encryption_key(None)
+        if current is not self.current:
+            self.current = current
+        self.accountDeleted.emit()
+
+    def select(self, account: Account) -> None:
+        self._check_unlocked()
+        self._persist(self.accounts, account, self.key, use_keyring=cfg.useKeyring.value)
+        self.current = account
 
     def setEncrypted(self, status, key=None, use_keyring=False):
-        """设置账户是否需要加密。请注意这个操作本身不会加密或者解密账户。"""
-        if status:
-            self.key = key
-            self.encrypted = True
-            self.accountEncryptStateChanged.emit()
-            if use_keyring:
-                self.save_to_keyring()
-            else:
-                self.encrypted_save_to(key=key)
-        else:
-            self.encrypted = False
-            self.accountEncryptStateChanged.emit()
-            self.key = None
-            if use_keyring:
-                self.save_to_keyring()
-            else:
-                self.save_to()
+        """Persist the new user-password setting before changing the in-memory state."""
+        self._check_unlocked()
+        if status and not key:
+            raise ValueError("密码不能为空。")
+        new_key = key if status else None
+        self._persist(self.accounts, self.current, new_key, use_keyring=use_keyring)
+        self._set_encryption_key(new_key)
 
-    @classmethod
-    def exists(cls, path: str = DEFAULT_ACCOUNT_PATH):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                json.load(f)
-            return True
-        except (json.JSONDecodeError, FileNotFoundError):
-            try:
-                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
-            except keyring.errors.KeyringError:
-                return False
-            if data is not None:
-                return True
-            return False
+    def _set_encryption_key(self, key: bytes | None) -> None:
+        self.key = key
+        self.encrypted = key is not None
+        self.accountEncryptStateChanged.emit()
 
-    @classmethod
-    def empty(cls, path: str = DEFAULT_ACCOUNT_PATH):
-        if not cls.exists(path):
-            return True
-
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            try:
-                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
-            except keyring.errors.KeyringError:
-                return True
-            if data is None:
-                return True
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                return True
-            else:
-                return len(data["data"]) == 0
-        else:
-            return len(data["data"]) == 0
-
-    @classmethod
-    def is_encrypted(cls, path: str = DEFAULT_ACCOUNT_PATH):
-        # 没有账户文件的话，尝试从钥匙串查询
-        if not os.path.exists(path):
-            try:
-                data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
-            except keyring.errors.KeyringError:
-                return False
-            if data is None:
-                return False
-            else:
-                try:
-                    data = json.loads(data)
-                    return data.get("encrypted", False)
-                except (json.JSONDecodeError, KeyError):
-                    return False
-        else:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                return data.get("encrypted", False)
-            except (json.JSONDecodeError, KeyError):
-                return False
-
-    def encrypt_save(self, key: bytes) -> str:
-        key = pad(key)
-        list_ = [one.to_diction() for one in self]
-        data = json.dumps(list_)
-        cipher = AES.new(key, AES.MODE_ECB)
-        salt = secrets.token_hex(16)
-        md5 = hashlib.md5(salt.encode() + key)
-        return json.dumps({"data": cipher.encrypt(pad(data.encode())).hex(), "encrypted": True,
-                           "salt": salt, "md5": md5.hexdigest(), "current": self.accounts.index(self.current)}, indent=4)
-
-    @classmethod
-    def load(cls, data: str, key: bytes = None):
-        data = json.loads(data)
-        current = data["current"]
-        if data["encrypted"]:
-            if key is None:
-                raise ValueError("必须提供密钥以解密数据。")
-            key = pad(key)
-            cipher = AES.new(key, AES.MODE_ECB)
-            salt = data["salt"]
-            md5_verify = hashlib.md5(salt.encode() + key).hexdigest()
-            if md5_verify != data["md5"]:
-                raise ValueError("解密密钥错误。")
-            data = json.loads(depad(cipher.decrypt(bytes.fromhex(data["data"]))).decode())
-        else:
-            data = data["data"]
-        self = cls([Account.from_diction(one) for one in data])
-        if current == -1:
-            self.current = None
-        else:
-            self.current = self.accounts[current]
-        return self
-
-    def extend_from(self, file=DEFAULT_ACCOUNT_PATH, key: bytes = None):
-        new = self.load_from(file, key)
-        self.accounts.extend(new)
-        if self._current is None:
-            self._current = new._current
-            self.currentAccountChanged.emit()
-        if key is not None:
-            self.accountDecrypted.emit()
-        self.accountAdded.emit()
-
-    def remove_from_keyring(self):
-        keyring.delete_password(KEYRING_SERVICE_NAME, "accounts")
-
-    def extend_from_keyring(self, key: bytes = None):
-        new = self.load_from_keyring(key)
-        self.accounts.extend(new)
-        if self._current is None:
-            self._current = new._current
-            self.currentAccountChanged.emit()
-        if key is not None:
-            self.accountDecrypted.emit()
-        self.accountAdded.emit()
-
-    @classmethod
-    def load_from(cls, file=DEFAULT_ACCOUNT_PATH, key: bytes = None):
-        with open(file, "r", encoding="utf-8") as f:
-            return cls.load(f.read(), key)
-
-    @classmethod
-    def load_from_keyring(cls, key: bytes = None):
-        data = keyring.get_password(KEYRING_SERVICE_NAME, "accounts")
-        if data is None:
-            raise ValueError("钥匙串中不存在账户数据")
-        return cls.load(data, key)
+    def clear(self) -> AccountStorageError | None:
+        """Replace the account list before removing caches or legacy credentials."""
+        warning = self._persist([], None, None, use_keyring=cfg.useKeyring.value, clear=True)
+        self.clear_all_session_state(include_persisted=True)
+        self.accounts.clear()
+        self._locked_document = None
+        self.current = None
+        self._set_encryption_key(None)
+        self.accountCleared.emit()
+        from app.utils.cache import remove_all_cache
+        remove_all_cache()
+        return warning
 
     def restore_all_session_state(self) -> None:
         """恢复所有账号持久化保存的 Session 状态。"""
@@ -423,51 +443,3 @@ class AccountManager(QObject):
 
 
 accounts = AccountManager()
-if accounts.exists() and not accounts.is_encrypted():
-    in_original_file = True
-    try:
-        accounts = AccountManager.load_from()
-    except FileNotFoundError:
-        try:
-            accounts = AccountManager.load_from_keyring()
-            in_original_file = False
-        except ValueError:
-            accounts = AccountManager()
-        except keyring.errors.KeyringError:
-            accounts = AccountManager()
-
-    if in_original_file and cfg.useKeyring.value:
-        # 本该存储在钥匙串，但是没有
-        # 立刻存储到钥匙串，并删除原始的文件
-        accounts.save_to_keyring()
-        try:
-            os.remove(DEFAULT_ACCOUNT_PATH)
-        except OSError:
-            pass
-    
-    # Windows 下，删除账户的 schedule.db 会出现问题
-    # 因此，我们改为在启动时清理账户文件夹
-    if accounts.accounts and os.name == "nt":
-        for dir in os.listdir(os.path.join(DATA_DIRECTORY, "data")):
-            # 如果文件夹名称不存在于账户 uuid 中
-            if os.path.isdir(os.path.join(DATA_DIRECTORY, "data", dir)) and dir not in [one.uuid for one in accounts]:
-                # 如果存在一个 schedule.db 或者账户为空，则删掉。
-                if os.path.exists(os.path.join(DATA_DIRECTORY, "data", dir, "schedule.db")) or not os.listdir(os.path.join(DATA_DIRECTORY, "data", dir)):
-                    try:
-                       os.remove(os.path.join(DATA_DIRECTORY, "data", dir, "schedule.db"))
-                    except OSError:
-                       pass
-                    try:
-                        os.rmdir(os.path.join(DATA_DIRECTORY, "data", dir))
-                    except OSError:
-                        pass
-
-if __name__ == '__main__':
-    am = AccountManager()
-    am.append(Account("username", "password", "nickname"))
-    am.append(Account("username2", "password2", "nickname2"))
-    print(am.accounts)
-    print(am._current)
-    am.extend_from("../../config/accounts.json")
-    print(am.accounts)
-    print(am._current)

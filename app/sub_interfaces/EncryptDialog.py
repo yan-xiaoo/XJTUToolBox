@@ -1,10 +1,11 @@
-import keyring.errors
 from PyQt5.QtCore import pyqtSlot, Qt
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QFrame, QHBoxLayout
 
 from ..utils import accounts, cfg
-from qfluentwidgets import MessageBoxBase, TitleLabel, CaptionLabel, PasswordLineEdit, BodyLabel, PrimaryPushButton
+from ..utils.account import IncorrectAccountPassword
+from ..utils.account_storage import AccountStorageError
+from qfluentwidgets import MessageBoxBase, TitleLabel, CaptionLabel, PasswordLineEdit, BodyLabel, PrimaryPushButton, InfoBar
 
 
 class EncryptDialog(MessageBoxBase):
@@ -12,9 +13,8 @@ class EncryptDialog(MessageBoxBase):
         super().__init__(parent)
 
         self.title = TitleLabel(self.tr("加密账户"), self)
-        self.hint = CaptionLabel(self.tr("我们采用 AES-ECB 算法对账户加密，有效保证其安全性\n"
-                                         "请注意，如果你忘记了密码，将无法恢复账户信息\n"
-                                         "加密后，每次打开应用程序都需要输入密码。"), self)
+        self.hint = CaptionLabel(self.tr("设置后，每次启动应用都需要输入此密码。\n"
+                                         "请记住密码，忘记后将无法解锁账户信息。"), self)
         self.passwordEdit = PasswordLineEdit(self)
         self.passwordEdit.setPlaceholderText(self.tr("输入加密密码"))
 
@@ -39,10 +39,12 @@ class EncryptDialog(MessageBoxBase):
     def _onYesButtonClicked(self):
         if not self.passwordEdit.text():
             return
-        else:
+        try:
             accounts.setEncrypted(True, self.passwordEdit.text().encode(), use_keyring=cfg.useKeyring.value)
-            self.accept()
-            self.accepted.emit()
+        except (AccountStorageError, ValueError) as exc:
+            InfoBar.error(self.tr("账户加密失败"), str(exc), parent=self)
+            return
+        self.accept()
 
 
 class DecryptDialog(MessageBoxBase):
@@ -89,35 +91,23 @@ class DecryptDialog(MessageBoxBase):
             return
 
         try:
-            accounts.extend_from(key=self.passwordEdit.text().encode())
-        except ValueError:
+            warning = accounts.unlock(self.passwordEdit.text().encode())
+        except IncorrectAccountPassword:
             self.failCount += 1
             if self.failCount >= 3:
                 self.showError(self.tr("密码错误。如果你忘记了密码，可以通过设置-清除账户信息清空账户并撤销加密。"))
             else:
                 self.showError(self.tr("密码错误"))
-        except FileNotFoundError:
-            # 没有文件的话，尝试从钥匙串拉取
-            try:
-                accounts.extend_from_keyring(key=self.passwordEdit.text().encode())
-            except ValueError:
-                self.failCount += 1
-                if self.failCount >= 3:
-                    self.showError(self.tr("密码错误。如果你忘记了密码，可以通过设置-清除账户信息清空账户并撤销加密。"))
-                else:
-                    self.showError(self.tr("密码错误"))
-            except keyring.errors.KeyringError:
-                self.showError(self.tr("无法访问系统钥匙串，请给予授权。"))
-            else:
-                accounts.key = self.passwordEdit.text().encode()
-                self.failCount = 0
-                self.accept()
-                self.accepted.emit()
-        else:
-            accounts.key = self.passwordEdit.text().encode()
-            self.failCount = 0
-            self.accept()
-            self.accepted.emit()
+            return
+        except AccountStorageError as exc:
+            self.showError(str(exc))
+            return
+
+        if warning is not None:
+            InfoBar.warning(self.tr("账户已解锁"), str(warning), duration=-1, isClosable=True, parent=self.parentWidget())
+        self.failCount = 0
+        self.accept()
+
 
 
 class DecryptFrame(QFrame):

@@ -15,6 +15,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # 去除广告 (静默导入业务逻辑)
 with contextlib.redirect_stdout(None):
+    from qfluentwidgets import InfoBar
     from app.main_window import MainWindow, MacReopenFilter
     from app.ctrl_c import install_ctrl_c_handler
     from app.utils import accounts, cfg, logger
@@ -90,7 +91,10 @@ if __name__ == '__main__':
         from packaging.version import Version
         cfg.version = Version(str(NSBundle.mainBundle().objectForInfoDictionaryKey_('CFBundleShortVersionString')))
 
+    account_storage_warning = accounts.initialize_storage()
     window = MainWindow()
+    if account_storage_warning is not None:
+        InfoBar.warning("账户存储", str(account_storage_warning), duration=-1, isClosable=True, parent=window)
     ctrl_c_controller = install_ctrl_c_handler(app)
 
     # 将窗口的控制权交给单例管理器
