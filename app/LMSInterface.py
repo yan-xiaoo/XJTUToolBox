@@ -1091,13 +1091,16 @@ class LMSInterface(ScrollArea):
             download_uploads=dialog.download_uploads,
             download_submissions=dialog.download_submissions,
             download_marked=dialog.download_marked,
+            archive=dialog.archive,
+            course_name=self.selected_course_name,
             parent=self,
         )
 
         bar.connectToThread(thread)
-        thread.allCompleted.connect(
-            lambda success, fail: self._onBatchDownloadFinished(success, fail, bar)
-        )
+        if dialog.archive:
+            thread.archiveSaved.connect(self._onBatchArchiveSaved)
+        else:
+            thread.allCompleted.connect(self._onBatchDownloadFinished)
         thread.fileCompleted.connect(
             lambda label, ok, msg: (
                 InfoBar.error(
@@ -1117,7 +1120,38 @@ class LMSInterface(ScrollArea):
         bar.show()
         thread.start()
 
-    def _onBatchDownloadFinished(self, success: int, fail: int, bar: ProgressInfoBar):
+    @pyqtSlot(str, str)
+    def _onBatchArchiveSaved(self, path: str, status: str):
+        """显示归档结果和清单路径。"""
+        if status == "complete":
+            self.success(
+                self.tr("归档清单已保存"),
+                path,
+                duration=8000,
+                parent=self,
+            )
+            return
+
+        titles = {
+            "partial": self.tr("归档部分完成，请查看清单"),
+            "cancelled": self.tr("归档已取消，请查看清单"),
+            "failed": self.tr("归档失败，请查看清单"),
+        }
+        if self._onlyNotice is not None:
+            try:
+                self._onlyNotice.close()
+            except RuntimeError:
+                self._onlyNotice = None
+        self._onlyNotice = InfoBar.warning(
+            titles[status],
+            path,
+            duration=8000 if self.window().isActiveWindow() else -1,
+            position=InfoBarPosition.TOP_RIGHT,
+            parent=self,
+        )
+
+    @pyqtSlot(int, int)
+    def _onBatchDownloadFinished(self, success: int, fail: int):
         """批量下载全部完成回调。"""
         total = success + fail
         if fail > 0:

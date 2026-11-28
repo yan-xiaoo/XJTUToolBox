@@ -39,6 +39,7 @@ class LMSBatchDownloadDialog(MessageBoxBase):
         self.download_uploads = True
         self.download_submissions = True
         self.download_marked = False
+        self.archive = False
 
         self.setupUI(total_count)
         self._connectSignals()
@@ -103,6 +104,9 @@ class LMSBatchDownloadDialog(MessageBoxBase):
 
         self.content_layout.addSpacing(8)
         self.content_layout.addLayout(self.dirLayout)
+        self.archiveCheck = CheckBox(self.tr("归档到独立文件夹并生成清单（含校验值）"), self.contentWidget)
+        self.archiveCheck.setToolTip(self.tr("仅归档当前选中的活动；清单记录成功、失败和取消，不包含登录凭据或下载链接"))
+        self.content_layout.addWidget(self.archiveCheck)
 
         if is_homework:
             self.content_layout.addSpacing(12)
@@ -132,6 +136,7 @@ class LMSBatchDownloadDialog(MessageBoxBase):
         self.uploadCheck.stateChanged.connect(self._onCheckChanged)
         self.submissionCheck.stateChanged.connect(self._onCheckChanged)
         self.markedCheck.stateChanged.connect(self._onCheckChanged)
+        self.archiveCheck.stateChanged.connect(self._onCheckChanged)
 
     def validate(self) -> bool:
         """确认前校验：必须选择目标目录。"""
@@ -159,3 +164,4 @@ class LMSBatchDownloadDialog(MessageBoxBase):
         self.download_uploads = self.uploadCheck.isChecked()
         self.download_submissions = self.submissionCheck.isChecked()
         self.download_marked = self.markedCheck.isChecked()
+        self.archive = self.archiveCheck.isChecked()
