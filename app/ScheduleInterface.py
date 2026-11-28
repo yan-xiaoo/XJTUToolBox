@@ -930,6 +930,7 @@ class ScheduleInterface(ScrollArea):
             ignore_data = []
 
         self.export(path, ignore_data, set_alarm)
+        self.success(self.tr("成功"), self.tr("导出日历成功"), parent=self)
 
     @pyqtSlot(str, str)
     def onHolidayError(self, title, msg):
@@ -952,14 +953,21 @@ class ScheduleInterface(ScrollArea):
         for one_date in data:
             write_data.append(one_date.strftime("%Y-%m-%d"))
         cacheManager.write_expire_json("ignore_holiday.json", write_data, True)
+        failures = []
         for path, set_alarm, service, term in pending:
             if self.schedule_service is not service or service.getCurrentTerm() != term:
-                self.error(self.tr("课表已切换"), self.tr("账户或学期已切换，请重新导出课表"), parent=self)
+                failures.append(f"{path}：{self.tr('账户或学期已切换，请重新导出课表')}")
                 continue
             try:
                 self.export(path, data, set_alarm)
             except OSError as error:
-                self.error(self.tr("导出失败"), str(error), parent=self)
+                failures.append(f"{path}：{error.strerror or error}")
+
+        if failures:
+            summary = self.tr("成功 {} 个，失败 {} 个").format(len(pending) - len(failures), len(failures))
+            self.error(self.tr("导出失败"), "\n".join([summary, *failures]), parent=self)
+        elif pending:
+            self.success(self.tr("成功"), self.tr("导出日历成功"), parent=self)
 
     def export(self, path, ignore_holidays: list[datetime.date], set_alarm: bool = True):
         """
@@ -1056,8 +1064,6 @@ class ScheduleInterface(ScrollArea):
             cal.add_component(e)
         with open(path, "wb") as f:
             f.write(cal.to_ical())
-
-        self.success(self.tr("成功"), self.tr("导出日历成功"), parent=self)
 
     def checkCourse(self, course1, course2):
         return course1.day_of_week == course2.day_of_week and course1.start_time == course2.start_time and course1.end_time == course2.end_time\

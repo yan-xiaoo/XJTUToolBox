@@ -11,8 +11,10 @@ TEST_REGRESSION = True
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from icalendar import Calendar
+from PyQt5 import sip
 from PyQt5.QtCore import QCoreApplication, QEvent, Qt
 from PyQt5.QtWidgets import QApplication
+from qfluentwidgets import InfoBar
 
 if QApplication.instance() is None:
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
@@ -83,10 +85,26 @@ class ScheduleExportTest(unittest.TestCase):
         error.assert_called_once()
 
     def test_write_failure_does_not_skip_next_export(self):
+        self.page.resize(900, 660)
+        self.page.show()
+        APP.processEvents()
+        folder = self.root / "removed"
+        folder.mkdir()
+        missing = [folder / "first.ics", folder / "second.ics"]
         good = self.root / "course.ics"
-        self.page.exportICS(str(self.root / "missing-dir" / "course.ics"))
+        for path in missing:
+            self.page.exportICS(str(path))
         self.page.exportICS(str(good))
-        with patch.object(self.page, "error") as error:
-            self.page.holiday_thread.result.emit([])
+        folder.rmdir()
+        self.page.holiday_thread.result.emit([])
+        APP.processEvents()
+
         self.assertTrue(good.is_file())
-        error.assert_called_once()
+        visible = [bar for bar in self.page.findChildren(InfoBar)
+                   if not sip.isdeleted(bar) and bar.isVisible()]
+        self.assertEqual(len(visible), 1)
+        self.assertIn("失败", visible[0].title)
+        self.assertIn("成功 1 个，失败 2 个", visible[0].content)
+        for path in missing:
+            self.assertFalse(path.exists())
+            self.assertIn(str(path), visible[0].content)
