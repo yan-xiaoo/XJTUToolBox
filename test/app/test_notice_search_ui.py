@@ -8,7 +8,9 @@ import sys
 import tempfile
 import time
 import unittest
+from importlib import import_module
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -325,6 +327,95 @@ class NoticeListSearchUITest(unittest.TestCase):
         widget.searchEdit.clear()
         app.processEvents()
         self.assertTrue(all(not card.isHidden() for card in widget.noticeWidgets))
+
+    def test_site_search_ignores_results_after_keyword_changes(self):
+        manager = NotificationManager(["gs/pygz"])
+        notice = Notification("重修报名", "https://example.test/1", "gs/pygz")
+        for edits in (("",), ("复试",), ("", "重修")):
+            with self.subTest(edits=edits):
+                with patch.object(NoticeInterface, "load_or_create_manager", return_value=manager), \
+                     patch.object(cacheManager, "read_json", return_value=[]):
+                    widget = NoticeInterface(DummyMainWindow())
+                self.addCleanup(widget.close)
+                with patch.object(widget.siteSearchThread, "start") as start:
+                    widget.searchEdit.setText("重修")
+                    widget.onSiteSearchClicked()
+                    start.assert_called_once()
+                    for text in edits:
+                        widget.searchEdit.setText(text)
+                    widget.siteSearchThread.results.emit("重修", [notice])
+                    self.assertTrue(widget.siteResultFrame.isHidden())
+                    self.assertEqual(widget.siteResultWidgets, [])
+
+                    widget.searchEdit.setText("重修")
+                    widget.onSiteSearchClicked()
+                    start.assert_called_once()
+                    widget.siteSearchThread.hasFinished.emit()
+                    widget.siteSearchThread.finished.emit()
+                    widget.onSiteSearchClicked()
+                    self.assertEqual(start.call_count, 2)
+                    widget.siteSearchThread.results.emit("重修", [notice])
+                    widget.siteSearchThread.hasFinished.emit()
+                    widget.siteSearchThread.finished.emit()
+                    self.assertFalse(widget.siteResultFrame.isHidden())
+                    self.assertEqual([card.notice for card in widget.siteResultWidgets], [notice])
+
+    def test_late_cancel_discards_queued_results_and_allows_cancel_on_next_search(self):
+        from notification.site_search import SiteSearchResult
+
+        entered = [Event(), Event()]
+        release = [Event(), Event()]
+        attempts = iter(zip(entered, release))
+        notice = Notification("重修报名", "https://example.test/1", "gs/pygz")
+        thread_module = import_module("app.threads.SiteSearchThread")
+
+        def search(*args, **kwargs):
+            started, finish = next(attempts)
+            started.set()
+            if not finish.wait(5):
+                raise TimeoutError("test did not release the worker")
+            return SiteSearchResult([notice])
+
+        with (patch.object(NoticeInterface, "load_or_create_manager",
+                           return_value=NotificationManager(["gs/pygz"])),
+              patch.object(cacheManager, "read_json", return_value=[]),
+              patch.object(thread_module, "search", side_effect=search)):
+            widget = NoticeInterface(DummyMainWindow())
+            self.addCleanup(widget.close)
+            widget.show()
+            widget.searchEdit.setText("重修")
+            cancel = widget.siteSearchProcess.stopButton
+            widget.onSiteSearchClicked()
+            try:
+                self.assertTrue(entered[0].wait(3))
+                app.processEvents()
+                release[0].set()
+                self.assertTrue(widget.siteSearchThread.wait(3000))
+                self.assertTrue(widget.siteResultFrame.isHidden())
+                self.assertTrue(cancel.isEnabled())
+                cancel.click()
+                self.assertTrue(widget.siteSearchProcess.stopped)
+                app.processEvents()
+                self.assertTrue(widget.siteResultFrame.isHidden(), widget.siteResultLabel.text())
+                self.assertEqual(widget.siteResultWidgets, [])
+                self.assertTrue(widget.siteSearchAction.isEnabled())
+
+                widget.onSiteSearchClicked()
+                self.assertTrue(entered[1].wait(3))
+                app.processEvents()
+                self.assertTrue(widget.siteSearchThread.isRunning())
+                self.assertTrue(cancel.isEnabled(), "The next running search must be cancellable")
+                cancel.click()
+                release[1].set()
+                self.assertTrue(widget.siteSearchThread.wait(3000))
+                app.processEvents()
+                self.assertTrue(widget.siteResultFrame.isHidden(), widget.siteResultLabel.text())
+                self.assertTrue(widget.siteSearchAction.isEnabled())
+            finally:
+                for finish in release:
+                    finish.set()
+                widget.siteSearchThread.wait(5000)
+                app.processEvents()
 
 
 class NoticeResponsiveGeometryTest(unittest.TestCase):

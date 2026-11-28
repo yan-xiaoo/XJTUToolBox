@@ -123,6 +123,7 @@ class ProcessWidget(QFrame):
     def onThreadStart(self):
         self.stopped = False
         self._saw_end = False # 每次启动重置
+        self.stopButton.setEnabled(self.stoppable)
         self.timer.start()
 
     @pyqtSlot()
